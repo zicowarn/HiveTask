@@ -1,12 +1,18 @@
 <script setup lang="ts">
 import { storeToRefs } from "pinia";
 import PanelShell from "../workbench/PanelShell.vue";
+import MarkdownView from "../components/MarkdownView.vue";
+import { stripHtmlComments } from "../components/markdown";
 import { useIssuesStore } from "../stores/issues";
 import { useRepoStore } from "../stores/repo";
 
 const issues = useIssuesStore();
 const repo = useRepoStore();
 const { selected } = storeToRefs(issues);
+
+function hasVisibleBody(body?: string | null): boolean {
+  return !!body && stripHtmlComments(body).trim().length > 0;
+}
 
 function openUrl(url?: string | null) {
   if (!url) return;
@@ -35,7 +41,7 @@ function openUrl(url?: string | null) {
       </header>
 
       <div class="detail-body">
-        <pre v-if="selected.body" class="detail-markdown">{{ selected.body }}</pre>
+        <MarkdownView v-if="hasVisibleBody(selected.body)" :source="selected.body" />
         <p v-else class="detail-nobody">（无描述内容）</p>
       </div>
 
@@ -112,15 +118,6 @@ function openUrl(url?: string | null) {
   flex: 1;
   overflow-y: auto;
   padding: 16px 20px;
-}
-.detail-markdown {
-  font-family: inherit;
-  font-size: 13px;
-  line-height: 1.65;
-  color: var(--text);
-  white-space: pre-wrap;
-  word-break: break-word;
-  margin: 0;
 }
 .detail-nobody {
   color: var(--text-dim);
