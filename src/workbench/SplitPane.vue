@@ -5,18 +5,30 @@
  *
  * `direction="horizontal"` = side by side (vertical divider bar).
  */
-import { ref } from "vue";
+import { computed, ref } from "vue";
 
 const props = withDefaults(
   defineProps<{
     direction?: "horizontal" | "vertical";
     initialRatio?: number;
     min?: number;
+    // When provided, ratio is controlled by the parent layout tree and
+    // changes are emitted back; otherwise an internal ref is used.
+    ratio?: number;
   }>(),
-  { direction: "horizontal", initialRatio: 0.42, min: 0.15 }
+  { direction: "horizontal", initialRatio: 0.42, min: 0.15, ratio: undefined }
 );
 
-const ratio = ref(props.initialRatio);
+const emit = defineEmits<{ "update:ratio": [ratio: number] }>();
+
+const internalRatio = ref(props.initialRatio);
+const ratio = computed({
+  get: () => props.ratio ?? internalRatio.value,
+  set: (value) => {
+    internalRatio.value = value;
+    if (props.ratio !== undefined) emit("update:ratio", value);
+  },
+});
 const containerEl = ref<HTMLElement | null>(null);
 const dragging = ref(false);
 

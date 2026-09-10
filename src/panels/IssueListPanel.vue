@@ -1,31 +1,46 @@
 <script setup lang="ts">
 /**
  * Issue list panel — registered as "issue.list" (see workbench/registry.ts).
- * The open/closed/all tabs are an in-panel view mode, not a workbench mode.
+ * Hosts the panel chrome and the mode switch (flat list / milestone groups);
+ * the open/closed/all tabs are a store-level filter shared by both modes.
  */
+import { computed, ref, watch } from "vue";
 import { storeToRefs } from "pinia";
 import PanelShell from "../workbench/PanelShell.vue";
+import ModeTabs from "../components/ModeTabs.vue";
+import { resolvePanel } from "../workbench/registry";
 import { useIssuesStore } from "../stores/issues";
 import type { IssueState } from "../types";
 
+defineProps<{ leafId?: string }>();
+
+const PANEL_TYPE = "issue.list";
+const MODE_STORAGE_KEY = "hivetask.panel-mode.issue.list";
+
+const def = resolvePanel(PANEL_TYPE);
+const modes = def.modes ?? [];
+
 const store = useIssuesStore();
-const { issues, state, loading, error, selectedNumber } = storeToRefs(store);
+const { state, loading, error } = storeToRefs(store);
+
+const storedMode =
+  modes.find((m) => m.key === localStorage.getItem(MODE_STORAGE_KEY))?.key ?? modes[0]?.key;
+const modeKey = ref(storedMode);
+watch(modeKey, (key) => localStorage.setItem(MODE_STORAGE_KEY, key));
+
+const activeMode = computed(() => modes.find((m) => m.key === modeKey.value) ?? modes[0]);
 
 const states: { value: IssueState; label: string }[] = [
   { value: "open", label: "Open" },
   { value: "closed", label: "Closed" },
   { value: "all", label: "All" },
 ];
-
-function timeLabel(iso?: string | null): string {
-  // gh ISO timestamps are UTC; display the date portion only.
-  return iso ? iso.slice(0, 10) : "";
-}
 </script>
 
 <template>
-  <PanelShell title="Issues">
+  <PanelShell title="Issues" :leaf-id="leafId">
     <template #actions>
+      <ModeTabs v-if="modes.length > 1" v-model="modeKey" :modes="modes" />
       <div class="state-tabs">
         <button
           v-for="s in states"
@@ -44,34 +59,7 @@ function timeLabel(iso?: string | null): string {
 
     <p v-if="error" class="error-banner">{{ error }}</p>
 
-    <ul class="item-list">
-      <li
-        v-for="issue in issues"
-        :key="issue.number"
-        class="item-row"
-        :class="{ active: issue.number === selectedNumber }"
-        @click="store.select(issue)"
-      >
-        <div class="item-main">
-          <span class="item-title">{{ issue.title }}</span>
-          <span class="item-meta">
-            #{{ issue.number }}
-            <template v-if="issue.author"> · {{ issue.author }}</template>
-            <template v-if="timeLabel(issue.updatedAt)"> · {{ timeLabel(issue.updatedAt) }}</template>
-          </span>
-        </div>
-        <div class="item-tags">
-          <span
-            v-for="label in issue.labels.slice(0, 3)"
-            :key="label"
-            class="chip"
-          >{{ label }}</span>
-        </div>
-      </li>
-      <li v-if="!loading && issues.length === 0" class="empty-row">
-        暂无数据，点击「刷新」从 GitHub 拉取
-      </li>
-    </ul>
+    <component :is="activeMode.component" />
   </PanelShell>
 </template>
 
@@ -105,6 +93,7 @@ function timeLabel(iso?: string | null): string {
   padding: 3px 12px;
   border-radius: 5px;
   cursor: pointer;
+  white-space: nowrap;
 }
 .refresh-btn:hover {
   border-color: var(--accent);
@@ -122,61 +111,5 @@ function timeLabel(iso?: string | null): string {
   background: rgba(248, 113, 113, 0.08);
   border: 1px solid rgba(248, 113, 113, 0.3);
   border-radius: 6px;
-}
-.item-list {
-  list-style: none;
-  margin: 0;
-  padding: 4px 6px;
-  overflow-y: auto;
-  flex: 1;
-}
-.item-row {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  padding: 8px 10px;
-  border-radius: 6px;
-  cursor: pointer;
-}
-.item-row:hover {
-  background: var(--bg-hover);
-}
-.item-row.active {
-  background: var(--bg-selected);
-}
-.item-main {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-}
-.item-title {
-  font-size: 13px;
-  color: var(--text);
-  line-height: 1.4;
-}
-.item-meta {
-  font-size: 11px;
-  color: var(--text-dim);
-}
-.item-tags {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-}
-.chip {
-  font-size: 10px;
-  padding: 1px 7px;
-  border-radius: 10px;
-  background: var(--bg-chip);
-  color: var(--text-dim);
-  border: 1px solid var(--border);
-}
-.empty-row {
-  padding: 24px 12px;
-  text-align: center;
-  color: var(--text-dim);
-  font-size: 12px;
-  list-style: none;
 }
 </style>

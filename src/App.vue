@@ -1,12 +1,13 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from "vue";
 import { storeToRefs } from "pinia";
-import SplitPane from "./workbench/SplitPane.vue";
-import { resolvePanel, workspaces } from "./workbench/registry";
+import WorkbenchNode from "./workbench/WorkbenchNode.vue";
+import { workspaces } from "./workbench/registry";
 import { api, isTauri } from "./api";
 import { useRepoStore } from "./stores/repo";
 import { useIssuesStore } from "./stores/issues";
 import { usePullsStore } from "./stores/pulls";
+import { useWorkbenchStore } from "./stores/workbench";
 import type { HealthInfo } from "./types";
 
 const WORKSPACE_KEY = "hivetask.workspace";
@@ -14,6 +15,7 @@ const WORKSPACE_KEY = "hivetask.workspace";
 const repo = useRepoStore();
 const issues = useIssuesStore();
 const pulls = usePullsStore();
+const workbench = useWorkbenchStore();
 const { current, origin } = storeToRefs(repo);
 
 const health = ref<HealthInfo | null>(null);
@@ -22,8 +24,7 @@ const activeKey = ref(localStorage.getItem(WORKSPACE_KEY) ?? "issues");
 const active = computed(
   () => workspaces.find((w) => w.key === activeKey.value) ?? workspaces[0],
 );
-const listComponent = computed(() => resolvePanel(active.value.listPanel).component);
-const detailComponent = computed(() => resolvePanel(active.value.detailPanel).component);
+const activeLayout = computed(() => workbench.layouts[active.value.key]);
 
 function switchWorkspace(key: string) {
   activeKey.value = key;
@@ -105,14 +106,7 @@ onMounted(async () => {
     </div>
 
     <main class="workbench">
-      <SplitPane direction="horizontal" :initial-ratio="0.38" :min="0.22">
-        <template #first>
-          <component :is="listComponent" />
-        </template>
-        <template #second>
-          <component :is="detailComponent" :key="active.key" />
-        </template>
-      </SplitPane>
+      <WorkbenchNode :key="active.key" :node="activeLayout" />
     </main>
   </div>
 </template>

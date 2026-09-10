@@ -8,6 +8,8 @@ import PanelShell from "../workbench/PanelShell.vue";
 import { usePullsStore } from "../stores/pulls";
 import type { PullState } from "../types";
 
+defineProps<{ leafId?: string }>();
+
 const store = usePullsStore();
 const { pulls, state, loading, error, selectedNumber } = storeToRefs(store);
 
@@ -30,7 +32,7 @@ const decisionLabel: Record<string, string> = {
 </script>
 
 <template>
-  <PanelShell title="Pull Requests">
+  <PanelShell title="Pull Requests" :leaf-id="leafId">
     <template #actions>
       <div class="state-tabs">
         <button
@@ -122,6 +124,7 @@ const decisionLabel: Record<string, string> = {
   padding: 3px 12px;
   border-radius: 5px;
   cursor: pointer;
+  white-space: nowrap;
 }
 .refresh-btn:hover {
   border-color: var(--accent);

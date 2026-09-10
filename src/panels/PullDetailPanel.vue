@@ -6,6 +6,8 @@ import { stripHtmlComments } from "../components/markdown";
 import { usePullsStore } from "../stores/pulls";
 import { useRepoStore } from "../stores/repo";
 
+defineProps<{ leafId?: string }>();
+
 const pulls = usePullsStore();
 const repo = useRepoStore();
 const { selected, detailLoading } = storeToRefs(pulls);
@@ -31,7 +33,7 @@ const decisionLabel: Record<string, string> = {
 </script>
 
 <template>
-  <PanelShell>
+  <PanelShell :leaf-id="leafId">
     <template v-if="selected">
       <header class="detail-header">
         <div class="detail-title-row">
