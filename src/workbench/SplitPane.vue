@@ -103,11 +103,14 @@ function onPointerUp() {
   z-index: 2;
   transition: background 0.12s ease;
 }
-.split-pane.horizontal .divider {
+/* Child combinator is required: a split can nest inside an opposite-
+   direction split, and a descendant selector would leak the outer
+   direction's size onto the inner divider (it would collapse to 5x5). */
+.split-pane.horizontal > .divider {
   width: 5px;
   cursor: col-resize;
 }
-.split-pane.vertical .divider {
+.split-pane.vertical > .divider {
   height: 5px;
   cursor: row-resize;
 }
@@ -131,7 +134,7 @@ function onPointerUp() {
 .divider.active .divider-handle {
   opacity: 0.7;
 }
-.split-pane.vertical .divider-handle {
+.split-pane.vertical > .divider .divider-handle {
   width: 28px;
   height: 2px;
 }
