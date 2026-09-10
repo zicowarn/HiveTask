@@ -35,13 +35,13 @@ function close() {
     <header v-if="title || $slots.actions || leafId" class="panel-header">
       <div v-if="title" class="panel-title">{{ title }}</div>
       <div class="panel-header-right">
+        <div v-if="$slots.actions" class="panel-actions">
+          <slot name="actions" />
+        </div>
         <div v-if="leafId" class="layout-actions">
           <button class="icon-btn" title="左右分屏" @click="split('h')">▥</button>
           <button class="icon-btn" title="上下分屏" @click="split('v')">▤</button>
           <button class="icon-btn close-btn" title="关闭面板" :disabled="!canClose" @click="close">✕</button>
-        </div>
-        <div v-if="$slots.actions" class="panel-actions">
-          <slot name="actions" />
         </div>
       </div>
     </header>
