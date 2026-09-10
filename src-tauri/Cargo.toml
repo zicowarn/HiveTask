@@ -1,0 +1,24 @@
+[package]
+name = "hivetask"
+version = "0.1.0"
+description = "HiveTask — cross-platform desktop project management tool"
+authors = ["zicowarn"]
+edition = "2021"
+rust-version = "1.77"
+
+[lib]
+name = "hivetask_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
+tauri-plugin-opener = "2"
+tauri-plugin-store = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+rusqlite = { version = "0.32", features = ["bundled"] }
+anyhow = "1"

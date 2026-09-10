@@ -1,0 +1,6 @@
+# pnpm >= 11 reads build approval / run settings here
+# (auto-generated placeholder replaced with explicit approvals)
+allowBuilds:
+  esbuild: true
+  vue-demi: true
+verifyDepsBeforeRun: false
