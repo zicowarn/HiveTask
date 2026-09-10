@@ -29,6 +29,48 @@ pub struct Issue {
     pub url: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Pull {
+    pub number: i64,
+    pub title: String,
+    /// GitHub state as returned by `gh`: "OPEN" | "CLOSED" | "MERGED".
+    pub state: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub body: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub author: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub head_ref: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub base_ref: Option<String>,
+    #[serde(default)]
+    pub labels: Vec<String>,
+    #[serde(default)]
+    pub assignees: Vec<String>,
+    #[serde(default)]
+    pub reviewers: Vec<String>,
+    /// gh `reviewDecision`: "APPROVED" | "REVIEW_REQUIRED" | "CHANGES_REQUESTED", …
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub review_decision: Option<String>,
+    #[serde(default)]
+    pub additions: i64,
+    #[serde(default)]
+    pub deletions: i64,
+    #[serde(default)]
+    pub commits: i64,
+    #[serde(default)]
+    pub comments: i64,
+    #[serde(default)]
+    pub is_draft: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub created_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub updated_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct HealthInfo {

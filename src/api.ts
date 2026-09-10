@@ -5,7 +5,14 @@
  * iteration — commands are unavailable there and guarded at call sites.
  */
 import { invoke } from "@tauri-apps/api/core";
-import type { HealthInfo, Issue, IssueState, RepoInfo } from "./types";
+import type {
+  HealthInfo,
+  Issue,
+  IssueState,
+  Pull,
+  PullState,
+  RepoInfo,
+} from "./types";
 
 export const isTauri = (): boolean => "__TAURI_INTERNALS__" in window;
 
@@ -20,4 +27,12 @@ export const api = {
     invoke<Issue[]>("list_cached_issues", { repoPath, state }),
   cachedIssueCount: (repoPath: string, state: IssueState) =>
     invoke<number>("cached_issue_count", { repoPath, state }),
+  refreshPulls: (repoPath: string, state: PullState, limit = 50) =>
+    invoke<Pull[]>("refresh_pulls", { repoPath, state, limit }),
+  refreshPullDetail: (repoPath: string, number: number) =>
+    invoke<Pull>("refresh_pull_detail", { repoPath, number }),
+  listCachedPulls: (repoPath: string, state: PullState) =>
+    invoke<Pull[]>("list_cached_pulls", { repoPath, state }),
+  cachedPullCount: (repoPath: string, state: PullState) =>
+    invoke<number>("cached_pull_count", { repoPath, state }),
 };

@@ -25,3 +25,27 @@ export interface RepoInfo {
 }
 
 export type IssueState = "open" | "closed" | "all";
+
+export interface Pull {
+  number: number;
+  title: string;
+  state: "OPEN" | "CLOSED" | "MERGED" | string;
+  body?: string | null;
+  author?: string | null;
+  headRef?: string | null;
+  baseRef?: string | null;
+  labels: string[];
+  assignees: string[];
+  reviewers: string[];
+  reviewDecision?: string | null;
+  additions: number;
+  deletions: number;
+  commits: number;
+  comments: number;
+  isDraft: boolean;
+  createdAt?: string | null;
+  updatedAt?: string | null;
+  url?: string | null;
+}
+
+export type PullState = "open" | "closed" | "merged" | "all";

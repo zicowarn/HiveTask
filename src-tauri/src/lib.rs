@@ -10,7 +10,7 @@ use std::path::PathBuf;
 
 use tauri_plugin_dialog::DialogExt;
 
-use models::{HealthInfo, Issue, RepoInfo};
+use models::{HealthInfo, Issue, Pull, RepoInfo};
 
 /// gh CLI availability, for the onboarding banner.
 #[tauri::command]
@@ -82,6 +82,43 @@ fn cached_issue_count(repo_path: String, state: String) -> Result<i64, String> {
     storage::cached_issue_count(&conn, &state).map_err(|e| e.to_string())
 }
 
+/// Fetch pull requests via gh, replace the local cache, return fresh data.
+/// `state` is "open" | "closed" | "merged" | "all".
+#[tauri::command]
+fn refresh_pulls(repo_path: String, state: String, limit: u32) -> Result<Vec<Pull>, String> {
+    let repo = PathBuf::from(&repo_path);
+    let pulls = gh::fetch_pulls(&repo, &state, limit).map_err(|e| e.to_string())?;
+    let mut conn = storage::open(&repo).map_err(|e| e.to_string())?;
+    storage::replace_pulls(&mut conn, &state, &pulls).map_err(|e| e.to_string())?;
+    Ok(pulls)
+}
+
+/// Fetch one PR's full record via `gh pr view` (heavy nested fields are not
+/// part of the list query), upsert it into the cache, and return it.
+#[tauri::command]
+fn refresh_pull_detail(repo_path: String, number: i64) -> Result<Pull, String> {
+    let repo = PathBuf::from(&repo_path);
+    let pull = gh::fetch_pull_detail(&repo, number).map_err(|e| e.to_string())?;
+    let conn = storage::open(&repo).map_err(|e| e.to_string())?;
+    storage::upsert_pull(&conn, &pull).map_err(|e| e.to_string())?;
+    Ok(pull)
+}
+
+/// Read PRs from the offline cache without touching the network.
+#[tauri::command]
+fn list_cached_pulls(repo_path: String, state: String) -> Result<Vec<Pull>, String> {
+    let repo = PathBuf::from(&repo_path);
+    let conn = storage::open(&repo).map_err(|e| e.to_string())?;
+    storage::list_pulls(&conn, &state).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn cached_pull_count(repo_path: String, state: String) -> Result<i64, String> {
+    let repo = PathBuf::from(&repo_path);
+    let conn = storage::open(&repo).map_err(|e| e.to_string())?;
+    storage::cached_pull_count(&conn, &state).map_err(|e| e.to_string())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -94,7 +131,11 @@ pub fn run() {
             repo_info,
             refresh_issues,
             list_cached_issues,
-            cached_issue_count
+            cached_issue_count,
+            refresh_pulls,
+            refresh_pull_detail,
+            list_cached_pulls,
+            cached_pull_count
         ])
         .run(tauri::generate_context!())
         .expect("error while running HiveTask");

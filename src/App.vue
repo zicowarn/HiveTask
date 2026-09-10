@@ -1,33 +1,63 @@
 <script setup lang="ts">
-import { onMounted, ref } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 import { storeToRefs } from "pinia";
 import SplitPane from "./workbench/SplitPane.vue";
-import IssueListPanel from "./panels/IssueListPanel.vue";
-import IssueDetailPanel from "./panels/IssueDetailPanel.vue";
+import { resolvePanel, workspaces } from "./workbench/registry";
 import { api, isTauri } from "./api";
 import { useRepoStore } from "./stores/repo";
 import { useIssuesStore } from "./stores/issues";
+import { usePullsStore } from "./stores/pulls";
 import type { HealthInfo } from "./types";
+
+const WORKSPACE_KEY = "hivetask.workspace";
 
 const repo = useRepoStore();
 const issues = useIssuesStore();
+const pulls = usePullsStore();
 const { current, origin } = storeToRefs(repo);
 
 const health = ref<HealthInfo | null>(null);
+
+const activeKey = ref(localStorage.getItem(WORKSPACE_KEY) ?? "issues");
+const active = computed(
+  () => workspaces.find((w) => w.key === activeKey.value) ?? workspaces[0],
+);
+const listComponent = computed(() => resolvePanel(active.value.listPanel).component);
+const detailComponent = computed(() => resolvePanel(active.value.detailPanel).component);
+
+function switchWorkspace(key: string) {
+  activeKey.value = key;
+  localStorage.setItem(WORKSPACE_KEY, key);
+}
+
+// Repo context changes (startup restore, folder picker, VITE_AUTO_REPO) pull
+// both caches; each workspace keeps its own selection and state filter.
+watch(
+  () => repo.current,
+  async (path) => {
+    if (!path || !isTauri()) return;
+    await Promise.all([issues.loadCache(), pulls.loadCache()]);
+  },
+  { immediate: true },
+);
 
 onMounted(async () => {
   if (!isTauri()) return;
   health.value = await api.healthCheck();
   await repo.refreshInfo();
-  await issues.loadCache();
 
   // Dev affordance: VITE_AUTO_REPO=/path/to/repo loads and syncs a repo at
   // startup; it is only read from the Vite dev environment, never packaged.
   const autoRepo = import.meta.env.VITE_AUTO_REPO as string | undefined;
   if (autoRepo && !repo.current) {
     repo.setCurrent(autoRepo);
-    await issues.refresh();
-    if (issues.issues.length > 0) issues.select(issues.issues[0]);
+    if (activeKey.value === "pulls") {
+      await pulls.refresh();
+      if (pulls.pulls.length > 0) pulls.select(pulls.pulls[0]);
+    } else {
+      await issues.refresh();
+      if (issues.issues.length > 0) issues.select(issues.issues[0]);
+    }
   }
 });
 </script>
@@ -39,6 +69,20 @@ onMounted(async () => {
         <span class="brand-mark">⬡</span>
         <span class="brand-name">HiveTask</span>
       </div>
+
+      <nav class="workspace-tabs">
+        <button
+          v-for="w in workspaces"
+          :key="w.key"
+          class="workspace-tab"
+          :class="{ active: activeKey === w.key }"
+          @click="switchWorkspace(w.key)"
+        >
+          {{ w.label }}
+        </button>
+      </nav>
+
+      <div class="header-spacer"></div>
 
       <div class="repo-box">
         <template v-if="current">
@@ -63,10 +107,10 @@ onMounted(async () => {
     <main class="workbench">
       <SplitPane direction="horizontal" :initial-ratio="0.38" :min="0.22">
         <template #first>
-          <IssueListPanel />
+          <component :is="listComponent" />
         </template>
         <template #second>
-          <IssueDetailPanel />
+          <component :is="detailComponent" :key="active.key" />
         </template>
       </SplitPane>
     </main>
@@ -83,7 +127,7 @@ onMounted(async () => {
 .app-header {
   display: flex;
   align-items: center;
-  gap: 16px;
+  gap: 14px;
   height: 44px;
   padding: 0 14px;
   background: var(--bg-panel);
@@ -103,13 +147,40 @@ onMounted(async () => {
   font-weight: 700;
   font-size: 14px;
 }
+.workspace-tabs {
+  display: flex;
+  gap: 2px;
+  margin-left: 10px;
+  background: var(--bg-app);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  padding: 2px;
+}
+.workspace-tab {
+  border: none;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 12px;
+  padding: 3px 12px;
+  border-radius: 5px;
+  cursor: pointer;
+}
+.workspace-tab:hover {
+  color: var(--text);
+}
+.workspace-tab.active {
+  background: var(--bg-selected);
+  color: var(--accent);
+  font-weight: 600;
+}
+.header-spacer {
+  flex: 1;
+}
 .repo-box {
   display: flex;
   align-items: center;
   gap: 10px;
   min-width: 0;
-  flex: 1;
-  justify-content: center;
 }
 .repo-path {
   font-size: 12px;
@@ -118,7 +189,7 @@ onMounted(async () => {
   border: 1px solid var(--border);
   border-radius: 5px;
   padding: 3px 10px;
-  max-width: 46%;
+  max-width: 280px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -126,7 +197,7 @@ onMounted(async () => {
 .repo-origin {
   font-size: 11px;
   color: var(--text-dim);
-  max-width: 30%;
+  max-width: 200px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
