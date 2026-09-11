@@ -200,6 +200,11 @@ onBeforeUnmount(() => {
         <button class="header-btn theme-btn" :title="t('theme.switch')" @click="toggleTheme()">
           {{ resolvedTheme === "dark" ? "☀" : "☾" }}
         </button>
+        <button
+          class="header-btn gear-btn"
+          :title="t('menu.preferences')"
+          @click="openPreferences()"
+        >⚙</button>
       </div>
     </header>
 
@@ -321,7 +326,8 @@ onBeforeUnmount(() => {
   border-radius: 6px;
   cursor: pointer;
 }
-.theme-btn {
+.theme-btn,
+.gear-btn {
   padding: 4px 10px;
 }
 .header-btn:hover {
