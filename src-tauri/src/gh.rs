@@ -257,6 +257,21 @@ pub fn add_comment(repo: &Path, kind: &str, number: i64, body: &str) -> Result<V
     fetch_comments(repo, kind, number)
 }
 
+/// Cheap connectivity probe: `gh api user` is one free authenticated call
+/// (does not count against the rate limit... actually it does count; but a
+/// probe is user-initiated and rare). Ok => reachable; Err carries the raw
+/// gh output for the frontend to classify (auth failure still means online).
+pub fn probe_network() -> Result<()> {
+    let output = Command::new(find_gh().ok_or_else(|| anyhow!("找不到 gh CLI"))?)
+        .args(["api", "user", "--jq", ".login"])
+        .output()
+        .context("启动 gh 失败")?;
+    if output.status.success() {
+        return Ok(());
+    }
+    Err(anyhow!("{}", String::from_utf8_lossy(&output.stderr).trim()))
+}
+
 /// Close or reopen an issue; returns the fresh entity for store patching.
 pub fn set_issue_state(repo: &Path, number: i64, closed: bool) -> Result<Issue> {
     let number_str = number.to_string();

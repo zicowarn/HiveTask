@@ -2,17 +2,18 @@ import { defineStore } from "pinia";
 import { computed, ref } from "vue";
 import { api, isTauri } from "../api";
 import { t } from "../i18n";
-import { reportError, translateError } from "../gh-errors";
+import { isNetworkError, reportError, translateError } from "../gh-errors";
 import { pushToast } from "../toast";
+import { setOnline } from "../net";
 import type { Comment, Issue, IssueState } from "../types";
 import { useRepoStore } from "./repo";
+import { useSyncMetaStore } from "./sync-meta";
 
 export const useIssuesStore = defineStore("issues", () => {
   const issues = ref<Issue[]>([]);
   const state = ref<IssueState>("open");
   const loading = ref(false);
   const error = ref<string | null>(null);
-  const lastSyncedAt = ref<string | null>(null);
   const cachedCount = ref<number | null>(null);
   const selectedNumber = ref<number | null>(null);
   // Conversation of the selected issue; pending rows are optimistic adds.
@@ -54,9 +55,11 @@ export const useIssuesStore = defineStore("issues", () => {
     try {
       issues.value = await api.refreshIssues(repo.current, state.value);
       cachedCount.value = issues.value.length;
-      lastSyncedAt.value = new Date().toLocaleTimeString();
+      useSyncMetaStore().stamp(`issues:${state.value}`);
+      setOnline(true);
     } catch (e) {
       error.value = translateError(String(e));
+      setOnline(!isNetworkError(String(e)));
     } finally {
       loading.value = false;
     }
@@ -145,7 +148,6 @@ export const useIssuesStore = defineStore("issues", () => {
     state,
     loading,
     error,
-    lastSyncedAt,
     cachedCount,
     selectedNumber,
     selected,

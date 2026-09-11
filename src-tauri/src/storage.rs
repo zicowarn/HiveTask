@@ -19,9 +19,10 @@ const MIGRATION_001: &str = include_str!("migrations/001_initial.sql");
 const MIGRATION_002: &str = include_str!("migrations/002_projects.sql");
 const MIGRATION_003: &str = include_str!("migrations/003_pr_draft.sql");
 const MIGRATION_004: &str = include_str!("migrations/004_comments.sql");
+const MIGRATION_005: &str = include_str!("migrations/005_meta.sql");
 
 /// Latest schema revision tracked through PRAGMA user_version.
-const CURRENT_SCHEMA_VERSION: i64 = 4;
+const CURRENT_SCHEMA_VERSION: i64 = 5;
 
 pub fn db_path(repo: &Path) -> PathBuf {
     repo.join(".hivetask").join("hivetask.db")
@@ -59,6 +60,9 @@ fn migrate(conn: &mut Connection) -> Result<()> {
     }
     if version < 4 {
         conn.execute_batch(MIGRATION_004).context("迁移 004 失败")?;
+    }
+    if version < 5 {
+        conn.execute_batch(MIGRATION_005).context("迁移 005 失败")?;
     }
     conn.pragma_update(None, "user_version", CURRENT_SCHEMA_VERSION)?;
     Ok(())
@@ -218,6 +222,26 @@ pub fn update_issue_state(conn: &Connection, number: i64, state: &str) -> Result
         (state, number),
     )?;
     Ok(())
+}
+
+/// Stamp a sync key ("synced:<kind>:<state>") with the current UTC time.
+pub fn stamp_synced(conn: &Connection, key: &str) -> Result<()> {
+    conn.execute(
+        "INSERT INTO meta (key, value, synced_at)
+         VALUES (?1, strftime('%Y-%m-%dT%H:%M:%SZ','now'), datetime('now'))
+         ON CONFLICT(key) DO UPDATE SET
+            value=excluded.value,
+            synced_at=excluded.synced_at",
+        (key,),
+    )?;
+    Ok(())
+}
+
+/// All recorded sync keys and their RFC3339 timestamps.
+pub fn list_synced(conn: &Connection) -> Result<Vec<(String, String)>> {
+    let mut stmt = conn.prepare("SELECT key, value FROM meta ORDER BY key")?;
+    let rows = stmt.query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)))?;
+    rows.collect::<std::result::Result<Vec<_>, _>>().map_err(Into::into)
 }
 
 /// Full refresh of the cached PR set, same state-scoped semantics as
@@ -561,6 +585,44 @@ mod comment_tests {
         let closed_bucket = list_issues(&conn, "closed").unwrap();
         assert_eq!(closed_bucket.len(), 1);
         assert_eq!(closed_bucket[0].state, "CLOSED");
+
+        std::fs::remove_dir_all(&repo).ok();
+    }
+}
+
+#[cfg(test)]
+mod meta_tests {
+    use super::*;
+
+    fn temp_repo() -> PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "hivetask-meta-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn synced_stamps_upsert_and_roundtrip() {
+        let repo = temp_repo();
+        let conn = open(&repo).unwrap();
+
+        stamp_synced(&conn, "synced:issues:open").unwrap();
+        stamp_synced(&conn, "synced:pulls:open").unwrap();
+        // Re-stamping the same key overwrites, not duplicates.
+        stamp_synced(&conn, "synced:issues:open").unwrap();
+
+        let map = list_synced(&conn).unwrap();
+        assert_eq!(map.len(), 2);
+        let (key, value) = map.iter().find(|(k, _)| k == "synced:issues:open").unwrap();
+        assert_eq!(key, "synced:issues:open");
+        // RFC3339 shape from strftime.
+        assert!(value.ends_with('Z') && value.contains('T'), "got {value}");
 
         std::fs::remove_dir_all(&repo).ok();
     }

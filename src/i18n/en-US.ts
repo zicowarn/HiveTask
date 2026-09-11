@@ -40,9 +40,13 @@ export const enUS: Record<MessageKey, string> = {
 
   // Status bar
   "statusbar.noRepo": "No repository",
-  "statusbar.syncedAt": "Synced at {time}",
+  "statusbar.syncedAt": "Synced {time}",
   "statusbar.ghOk": "gh CLI available",
   "statusbar.ghMissing": "gh CLI not found",
+  "statusbar.online": "Online",
+  "statusbar.offline": "Offline",
+  "statusbar.onlineTitle": "GitHub reachable — click to re-check",
+  "statusbar.offlineTitle": "Cannot reach GitHub — showing local cache; click to retry",
 
   // Panel chrome
   "panel.switchType": "Switch panel type",

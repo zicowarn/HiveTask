@@ -1,18 +1,24 @@
 <script setup lang="ts">
 /**
  * Application status bar (VS Code style): quiet 24px strip pinned to the
- * window bottom. Left = repository context, right = sync/health/version —
- * the same three-segment split as QHiveFrame's QHFAppStatusBar (prompts /
- * stats / version), with segments as hover-highlighted "cells".
+ * window bottom. Left = repository context, right = sync freshness /
+ * reachability / gh / language / version — the same three-segment split as
+ * QHiveFrame's QHFAppStatusBar (prompts / stats / version), with segments
+ * as hover-highlighted "cells".
  *
- * Visibility is owned by the settings store (View menu / settings panel);
- * the host renders this component conditionally.
+ * The sync cell reads the per-repo SQLite meta table (migration 005) via
+ * the sync-meta store: "last updated" belongs to the data, not the
+ * session, so it survives restarts and is tracked per filter bucket.
+ * Reachability is tracked passively (gh roundtrip outcomes); clicking the
+ * cell runs one user-initiated probe.
  */
 import { computed } from "vue";
 import { storeToRefs } from "pinia";
 import { useRepoStore } from "../stores/repo";
 import { useIssuesStore } from "../stores/issues";
 import { usePullsStore } from "../stores/pulls";
+import { useSyncMetaStore } from "../stores/sync-meta";
+import { netOnline, probeNow } from "../net";
 import { useI18n } from "../i18n";
 import { APP_VERSION } from "../app-info";
 
@@ -21,6 +27,7 @@ const props = defineProps<{ workspace: string }>();
 const repo = useRepoStore();
 const issues = useIssuesStore();
 const pulls = usePullsStore();
+const syncMeta = useSyncMetaStore();
 const { t, locale, locales, cycleLocale } = useI18n();
 const { current, origin, ghAvailable } = storeToRefs(repo);
 
@@ -35,12 +42,48 @@ const repoName = computed(() => {
   return parts[parts.length - 1] ?? current.value;
 });
 
-// Sync time of the active workspace; the settings workspace has none.
+// Freshness is per filter bucket: the Open tab being five minutes old says
+// nothing about Closed. The settings workspace has no sync of its own.
 const syncedAt = computed(() => {
-  if (props.workspace === "issues") return issues.lastSyncedAt;
-  if (props.workspace === "pulls") return pulls.lastSyncedAt;
-  return null;
+  const key =
+    props.workspace === "issues"
+      ? `issues:${issues.state}`
+      : props.workspace === "pulls"
+        ? `pulls:${pulls.state}`
+        : null;
+  return key ? syncMeta.map[key] ?? null : null;
 });
+
+/** "2026-09-11T02:00:00Z" → "5 分钟前" / "2 hours ago", locale-following. */
+const syncedLabel = computed(() => {
+  if (!syncedAt.value) return "";
+  const then = new Date(syncedAt.value).getTime();
+  if (Number.isNaN(then)) return syncedAt.value;
+  const diffSeconds = Math.round((then - Date.now()) / 1000);
+  const units: [Intl.RelativeTimeFormatUnit, number][] = [
+    ["second", 60],
+    ["minute", 60],
+    ["hour", 24],
+    ["day", 30],
+    ["month", 12],
+    ["year", Infinity],
+  ];
+  let value = diffSeconds;
+  for (const [unit, span] of units) {
+    if (Math.abs(value) < span) {
+      return new Intl.RelativeTimeFormat(locale.value, { numeric: "auto" }).format(
+        value,
+        unit,
+      );
+    }
+    value = Math.round(value / span);
+  }
+  return syncedAt.value;
+});
+
+async function probe() {
+  await probeNow();
+}
 </script>
 
 <template>
@@ -60,14 +103,20 @@ const syncedAt = computed(() => {
 
     <div class="status-right">
       <button
-        class="status-cell lang-cell"
-        :title="t('lang.switch')"
-        @click="cycleLocale()"
+        v-if="netOnline !== null"
+        class="status-cell net-cell"
+        :class="{ online: netOnline, offline: !netOnline }"
+        :title="netOnline ? t('statusbar.onlineTitle') : t('statusbar.offlineTitle')"
+        @click="probe"
       >
-        {{ localeLabel }}
+        ● {{ netOnline ? t("statusbar.online") : t("statusbar.offline") }}
       </button>
-      <span v-if="syncedAt" class="status-cell" :title="t('statusbar.syncedAt', { time: syncedAt })">
-        ⟳ {{ syncedAt }}
+      <span
+        v-if="syncedAt"
+        class="status-cell"
+        :title="t('statusbar.syncedAt', { time: new Date(syncedAt).toLocaleString() })"
+      >
+        ⟳ {{ syncedLabel }}
       </span>
       <span
         v-if="ghAvailable !== null"
@@ -77,6 +126,13 @@ const syncedAt = computed(() => {
       >
         ● gh
       </span>
+      <button
+        class="status-cell lang-cell"
+        :title="t('lang.switch')"
+        @click="cycleLocale()"
+      >
+        {{ localeLabel }}
+      </button>
       <span class="status-cell version-cell">HiveTask v{{ APP_VERSION }}</span>
     </div>
   </footer>
@@ -138,6 +194,12 @@ button.status-cell {
 }
 .source-cell {
   color: var(--accent);
+}
+.net-cell.online {
+  color: var(--success);
+}
+.net-cell.offline {
+  color: var(--warning);
 }
 .gh-cell.ok {
   color: var(--success);

@@ -64,6 +64,7 @@ fn refresh_issues(repo_path: String, state: String, limit: u32) -> Result<Vec<Is
     let issues = gh::fetch_issues(&repo, &state, limit).map_err(|e| e.to_string())?;
     let mut conn = storage::open(&repo).map_err(|e| e.to_string())?;
     storage::replace_issues(&mut conn, &state, &issues).map_err(|e| e.to_string())?;
+    storage::stamp_synced(&conn, &format!("synced:issues:{state}")).map_err(|e| e.to_string())?;
     Ok(issues)
 }
 
@@ -90,6 +91,7 @@ fn refresh_pulls(repo_path: String, state: String, limit: u32) -> Result<Vec<Pul
     let pulls = gh::fetch_pulls(&repo, &state, limit).map_err(|e| e.to_string())?;
     let mut conn = storage::open(&repo).map_err(|e| e.to_string())?;
     storage::replace_pulls(&mut conn, &state, &pulls).map_err(|e| e.to_string())?;
+    storage::stamp_synced(&conn, &format!("synced:pulls:{state}")).map_err(|e| e.to_string())?;
     Ok(pulls)
 }
 
@@ -117,6 +119,21 @@ fn cached_pull_count(repo_path: String, state: String) -> Result<i64, String> {
     let repo = PathBuf::from(&repo_path);
     let conn = storage::open(&repo).map_err(|e| e.to_string())?;
     storage::cached_pull_count(&conn, &state).map_err(|e| e.to_string())
+}
+
+/// All recorded sync timestamps for the status bar's "last updated" cell.
+#[tauri::command]
+fn list_synced_at(repo_path: String) -> Result<Vec<(String, String)>, String> {
+    let repo = PathBuf::from(&repo_path);
+    let conn = storage::open(&repo).map_err(|e| e.to_string())?;
+    storage::list_synced(&conn).map_err(|e| e.to_string())
+}
+
+/// User-initiated connectivity probe. Ok => online; the raw error string
+/// lets the frontend classify network failures (offline) from auth ones.
+#[tauri::command]
+fn probe_network() -> Result<(), String> {
+    gh::probe_network().map_err(|e| e.to_string())
 }
 
 /// Validate the entity kind shared by the comment commands ("issue" | "pull"
@@ -210,7 +227,9 @@ pub fn run() {
             fetch_comments,
             add_comment,
             set_issue_state,
-            set_pull_state
+            set_pull_state,
+            list_synced_at,
+            probe_network
         ])
         .run(tauri::generate_context!())
         .expect("error while running HiveTask");

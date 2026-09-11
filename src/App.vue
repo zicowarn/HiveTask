@@ -18,6 +18,7 @@ import { useSettingsStore } from "./stores/settings";
 import { useWorkbenchStore } from "./stores/workbench";
 import { useI18n } from "./i18n";
 import { useTheme } from "./theme";
+import { probeNow } from "./net";
 
 const WORKSPACE_KEY = "hivetask.workspace";
 
@@ -141,6 +142,7 @@ onMounted(async () => {
   if (!inTauri) window.addEventListener("keydown", onKeydown);
   if (!isTauri()) return;
   await repo.checkHealth();
+  void probeNow(); // seed the status bar's online/offline cell
   await repo.refreshInfo();
 
   // Dev affordance: VITE_AUTO_REPO=/path/to/repo loads and syncs a repo at

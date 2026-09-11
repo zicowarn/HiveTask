@@ -47,4 +47,7 @@ export const api = {
     invoke<Issue>("set_issue_state", { repoPath, number, closed }),
   setPullState: (repoPath: string, number: number, closed: boolean) =>
     invoke<Pull>("set_pull_state", { repoPath, number, closed }),
+  listSyncedAt: (repoPath: string) =>
+    invoke<[string, string][]>("list_synced_at", { repoPath }),
+  probeNetwork: () => invoke<void>("probe_network"),
 };

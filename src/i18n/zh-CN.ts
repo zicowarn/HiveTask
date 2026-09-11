@@ -41,9 +41,13 @@ export const zhCN = {
 
   // Status bar
   "statusbar.noRepo": "未选择仓库",
-  "statusbar.syncedAt": "同步于 {time}",
+  "statusbar.syncedAt": "{time} 同步",
   "statusbar.ghOk": "gh CLI 可用",
   "statusbar.ghMissing": "未检测到 gh CLI",
+  "statusbar.online": "在线",
+  "statusbar.offline": "离线",
+  "statusbar.onlineTitle": "GitHub 连接正常，点击重新检测",
+  "statusbar.offlineTitle": "无法连接 GitHub，正在显示本地缓存；点击重试",
 
   // Panel chrome
   "panel.switchType": "切换面板类型",

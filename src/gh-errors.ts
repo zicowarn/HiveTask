@@ -45,6 +45,15 @@ export function translateError(raw: string): string {
   return raw;
 }
 
+/** The network rule, exported for reachability tracking: a failure that
+ * matches it means GitHub is unreachable; anything else (auth, permission,
+ * …) proves the connection itself works. */
+const NETWORK_RULE = RULES.find((r) => r.key === "error.network")!;
+
+export function isNetworkError(raw: string): boolean {
+  return NETWORK_RULE.pattern.test(raw);
+}
+
 /** Translate + toast in one call — the standard mutation error path.
  * `detail` (the raw string) is attached only when translation happened. */
 export function reportError(raw: string): void {

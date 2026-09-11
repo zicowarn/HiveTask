@@ -2,17 +2,18 @@ import { defineStore } from "pinia";
 import { computed, ref } from "vue";
 import { api, isTauri } from "../api";
 import { t } from "../i18n";
-import { reportError, translateError } from "../gh-errors";
+import { isNetworkError, reportError, translateError } from "../gh-errors";
 import { pushToast } from "../toast";
+import { setOnline } from "../net";
 import type { Comment, Pull, PullState } from "../types";
 import { useRepoStore } from "./repo";
+import { useSyncMetaStore } from "./sync-meta";
 
 export const usePullsStore = defineStore("pulls", () => {
   const pulls = ref<Pull[]>([]);
   const state = ref<PullState>("open");
   const loading = ref(false);
   const error = ref<string | null>(null);
-  const lastSyncedAt = ref<string | null>(null);
   const cachedCount = ref<number | null>(null);
   const selectedNumber = ref<number | null>(null);
   // PR numbers whose full record (gh pr view) has been merged into the list.
@@ -85,9 +86,11 @@ export const usePullsStore = defineStore("pulls", () => {
       cachedCount.value = pulls.value.length;
       // New list rows are minimal records; detail loads must be redone.
       detailedNumbers.value = new Set();
-      lastSyncedAt.value = new Date().toLocaleTimeString();
+      useSyncMetaStore().stamp(`pulls:${state.value}`);
+      setOnline(true);
     } catch (e) {
       error.value = translateError(String(e));
+      setOnline(!isNetworkError(String(e)));
     } finally {
       loading.value = false;
     }
@@ -178,7 +181,6 @@ export const usePullsStore = defineStore("pulls", () => {
     state,
     loading,
     error,
-    lastSyncedAt,
     cachedCount,
     selectedNumber,
     detailLoading,
