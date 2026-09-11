@@ -12,6 +12,7 @@ export const zhCN = {
   "app.repoSwitch": "切换仓库",
   "app.ghMissing": "未检测到 gh CLI。请先安装并完成登录：",
   "lang.switch": "切换语言",
+  "theme.switch": "切换明亮 / 暗色主题",
 
   // Panel chrome
   "panel.switchType": "切换面板类型",

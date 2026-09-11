@@ -123,16 +123,16 @@ function openUrl(url?: string | null) {
   border-radius: 10px;
 }
 .detail-state.open {
-  color: #3fb950;
-  background: rgba(63, 185, 80, 0.12);
+  color: var(--success);
+  background: var(--success-soft);
 }
 .detail-state.closed {
-  color: #f87171;
-  background: rgba(248, 113, 113, 0.12);
+  color: var(--danger);
+  background: var(--danger-soft);
 }
 .detail-state.merged {
-  color: #a371f7;
-  background: rgba(163, 113, 247, 0.12);
+  color: var(--merged);
+  background: var(--merged-soft);
 }
 .detail-state.draft {
   color: var(--text-dim);
@@ -145,16 +145,16 @@ function openUrl(url?: string | null) {
   border-radius: 10px;
 }
 .detail-decision.approved {
-  color: #3fb950;
-  background: rgba(63, 185, 80, 0.12);
+  color: var(--success);
+  background: var(--success-soft);
 }
 .detail-decision.review_required {
-  color: #d29922;
-  background: rgba(210, 153, 34, 0.12);
+  color: var(--warning);
+  background: var(--warning-soft);
 }
 .detail-decision.changes_requested {
-  color: #f87171;
-  background: rgba(248, 113, 113, 0.12);
+  color: var(--danger);
+  background: var(--danger-soft);
 }
 .detail-title {
   margin: 8px 0;
@@ -199,10 +199,10 @@ function openUrl(url?: string | null) {
   font-size: 12px;
 }
 .stat.additions {
-  color: #3fb950;
+  color: var(--success);
 }
 .stat.deletions {
-  color: #f87171;
+  color: var(--danger);
 }
 .detail-body {
   flex: 1;

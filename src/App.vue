@@ -9,6 +9,7 @@ import { useIssuesStore } from "./stores/issues";
 import { usePullsStore } from "./stores/pulls";
 import { useWorkbenchStore } from "./stores/workbench";
 import { useI18n } from "./i18n";
+import { useTheme } from "./theme";
 import type { HealthInfo } from "./types";
 
 const WORKSPACE_KEY = "hivetask.workspace";
@@ -19,6 +20,7 @@ const pulls = usePullsStore();
 const workbench = useWorkbenchStore();
 const { current, origin } = storeToRefs(repo);
 const { t, locale, toggleLocale } = useI18n();
+const { theme, toggleTheme } = useTheme();
 
 const health = ref<HealthInfo | null>(null);
 
@@ -98,6 +100,9 @@ onMounted(async () => {
       <div class="header-actions">
         <button class="header-btn" @click="repo.pick()">
           {{ current ? t("app.repoSwitch") : t("app.repoPick") }}
+        </button>
+        <button class="header-btn theme-btn" :title="t('theme.switch')" @click="toggleTheme()">
+          {{ theme === "dark" ? "☀" : "☾" }}
         </button>
         <button class="header-btn lang-btn" :title="t('lang.switch')" @click="toggleLocale()">
           {{ locale === "zh-CN" ? "EN" : "中文" }}
@@ -219,7 +224,8 @@ onMounted(async () => {
   border-radius: 6px;
   cursor: pointer;
 }
-.lang-btn {
+.lang-btn,
+.theme-btn {
   padding: 4px 10px;
 }
 .header-btn:hover {
@@ -231,11 +237,11 @@ onMounted(async () => {
   padding: 7px 14px;
   font-size: 12px;
   color: var(--danger);
-  background: rgba(248, 113, 113, 0.08);
-  border-bottom: 1px solid rgba(248, 113, 113, 0.25);
+  background: var(--danger-banner);
+  border-bottom: 1px solid var(--danger-banner-border);
 }
 .gh-warning code {
-  background: rgba(248, 113, 113, 0.12);
+  background: var(--danger-soft);
   padding: 1px 6px;
   border-radius: 4px;
 }

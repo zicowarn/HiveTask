@@ -11,6 +11,7 @@ export const enUS: Record<MessageKey, string> = {
   "app.repoSwitch": "Switch repository",
   "app.ghMissing": "gh CLI not found. Install and sign in first:",
   "lang.switch": "Switch language",
+  "theme.switch": "Toggle light / dark theme",
 
   // Panel chrome
   "panel.switchType": "Switch panel type",

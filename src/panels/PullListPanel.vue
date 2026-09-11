@@ -135,9 +135,9 @@ function timeLabel(iso?: string | null): string {
   margin: 8px 14px 0;
   padding: 8px 10px;
   font-size: 12px;
-  color: #f87171;
-  background: rgba(248, 113, 113, 0.08);
-  border: 1px solid rgba(248, 113, 113, 0.3);
+  color: var(--danger);
+  background: var(--danger-banner);
+  border: 1px solid var(--danger-banner-border);
   border-radius: 6px;
 }
 .item-list {
@@ -216,16 +216,16 @@ function timeLabel(iso?: string | null): string {
   border-radius: 8px;
 }
 .decision.approved {
-  color: #3fb950;
-  background: rgba(63, 185, 80, 0.12);
+  color: var(--success);
+  background: var(--success-soft);
 }
 .decision.review_required {
-  color: #d29922;
-  background: rgba(210, 153, 34, 0.12);
+  color: var(--warning);
+  background: var(--warning-soft);
 }
 .decision.changes_requested {
-  color: #f87171;
-  background: rgba(248, 113, 113, 0.12);
+  color: var(--danger);
+  background: var(--danger-soft);
 }
 .item-tags {
   display: flex;

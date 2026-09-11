@@ -111,9 +111,9 @@ const states: { value: IssueState; label: string }[] = [
   margin: 8px 14px 0;
   padding: 8px 10px;
   font-size: 12px;
-  color: #f87171;
-  background: rgba(248, 113, 113, 0.08);
-  border: 1px solid rgba(248, 113, 113, 0.3);
+  color: var(--danger);
+  background: var(--danger-banner);
+  border: 1px solid var(--danger-banner-border);
   border-radius: 6px;
 }
 </style>

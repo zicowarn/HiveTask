@@ -91,12 +91,12 @@ function openUrl(url?: string | null) {
   border-radius: 10px;
 }
 .detail-state.open {
-  color: #3fb950;
-  background: rgba(63, 185, 80, 0.12);
+  color: var(--success);
+  background: var(--success-soft);
 }
 .detail-state.closed {
-  color: #a371f7;
-  background: rgba(163, 113, 247, 0.12);
+  color: var(--merged);
+  background: var(--merged-soft);
 }
 .detail-title {
   margin: 8px 0 8px;

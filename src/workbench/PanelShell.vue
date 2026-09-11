@@ -130,6 +130,11 @@ function onTypeChange(event: Event) {
   color: var(--text);
   border-color: var(--accent);
 }
+/* The chevron is an SVG data URI, which can't read CSS vars — swap in the
+   light theme's --text-dim (#656d76) under [data-theme="light"]. */
+[data-theme="light"] .panel-type-select {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 10 10'%3E%3Cpath d='M2 3.5L5 6.5L8 3.5' fill='none' stroke='%23656d76' stroke-width='1.4' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+}
 .panel-header-right {
   margin-left: auto;
   display: flex;
@@ -163,7 +168,7 @@ function onTypeChange(event: Event) {
   cursor: default;
 }
 .close-btn:hover:not(:disabled) {
-  color: #f87171;
+  color: var(--danger);
 }
 .panel-actions {
   display: flex;
