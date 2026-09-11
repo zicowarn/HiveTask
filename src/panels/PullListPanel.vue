@@ -101,7 +101,8 @@ function timeLabel(iso?: string | null): string {
   background: transparent;
   color: var(--text-dim);
   font-size: 12px;
-  padding: 3px 9px;
+  height: 22px;
+  padding: 0 9px;
   border-radius: 5px;
   cursor: pointer;
 }
@@ -118,7 +119,8 @@ function timeLabel(iso?: string | null): string {
   background: var(--bg-panel);
   color: var(--text);
   font-size: 12px;
-  padding: 3px 12px;
+  height: 22px;
+  padding: 0 12px;
   border-radius: 5px;
   cursor: pointer;
   white-space: nowrap;

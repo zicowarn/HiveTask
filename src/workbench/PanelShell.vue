@@ -84,11 +84,14 @@ function onTypeChange(event: Event) {
   min-width: 0;
   background: var(--bg-panel);
 }
+/* Fixed height so every panel chrome is identical regardless of which
+   controls it hosts; controls are all normalized to a 22px height. */
 .panel-header {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 10px 14px;
+  height: 44px;
+  padding: 0 14px;
   border-bottom: 1px solid var(--border);
   flex: none;
 }

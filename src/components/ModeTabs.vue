@@ -37,12 +37,16 @@ const { t } = useI18n();
   border-radius: 6px;
   padding: 1px;
 }
+/* 18px buttons + 1px padding + 1px border = 22px, matching the other
+   PanelShell header controls. */
 .mode-tab {
   border: none;
   background: transparent;
   color: var(--text-dim);
   font-size: 12px;
-  padding: 2px 10px;
+  height: 18px;
+  line-height: 18px;
+  padding: 0 10px;
   border-radius: 5px;
   cursor: pointer;
   white-space: nowrap;
