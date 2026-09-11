@@ -157,6 +157,20 @@ function timeLabel(iso?: string | null): string {
   border-radius: 6px;
   cursor: pointer;
 }
+/* Row separator: a centered 80%-width hairline, inset from both edges.
+   Spacing is symmetric — 8px above (previous row's padding-bottom) vs
+   8px below (flex gap 4px + ::before margin 4px). */
+.item-row + .item-row {
+  padding-top: 0;
+}
+.item-row + .item-row::before {
+  content: "";
+  display: block;
+  width: 80%;
+  height: 1px;
+  background: var(--border);
+  margin: 0 auto 4px;
+}
 .item-row:hover {
   background: var(--bg-hover);
 }
