@@ -116,7 +116,7 @@ async function probe() {
         class="status-cell"
         :title="t('statusbar.syncedAt', { time: new Date(syncedAt).toLocaleString() })"
       >
-        ⟳ {{ syncedLabel }}
+        <span class="sync-mark">⟳</span> {{ syncedLabel }}
       </span>
       <span
         v-if="ghAvailable !== null"
@@ -200,6 +200,12 @@ button.status-cell {
 }
 .net-cell.offline {
   color: var(--warning);
+}
+/* The ⟳ glyph reads smaller than the filled ● dots at the same font
+   size — bump it so the status marks align visually. */
+.sync-mark {
+  font-size: 13px;
+  line-height: 1;
 }
 .gh-cell.ok {
   color: var(--success);

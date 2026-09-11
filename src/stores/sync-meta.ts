@@ -17,7 +17,11 @@ export const useSyncMetaStore = defineStore("sync-meta", () => {
     const repo = useRepoStore();
     if (!repo.current || !isTauri()) return;
     try {
-      map.value = Object.fromEntries(await api.listSyncedAt(repo.current));
+      // Rust stamps keys with a "synced:" namespace prefix (shared meta
+      // table); normalize it away here — the single ingestion point — so
+      // the map, stamp() and the status bar all speak "pulls:open".
+      const rows = await api.listSyncedAt(repo.current);
+      map.value = Object.fromEntries(rows.map(([k, v]) => [k.replace(/^synced:/, ""), v]));
     } catch {
       // Status-bar-only data; a failed read degrades to hidden cells.
       map.value = {};
