@@ -26,7 +26,7 @@ const pulls = usePullsStore();
 const settings = useSettingsStore();
 const workbench = useWorkbenchStore();
 const { current, origin } = storeToRefs(repo);
-const { t, locale, toggleLocale } = useI18n();
+const { t } = useI18n();
 const { resolvedTheme, toggleTheme } = useTheme();
 
 // Browser preview has no system menubar — there the in-header AppMenu and
@@ -200,9 +200,6 @@ onBeforeUnmount(() => {
         <button class="header-btn theme-btn" :title="t('theme.switch')" @click="toggleTheme()">
           {{ resolvedTheme === "dark" ? "☀" : "☾" }}
         </button>
-        <button class="header-btn lang-btn" :title="t('lang.switch')" @click="toggleLocale()">
-          {{ locale === "zh-CN" ? "EN" : "中文" }}
-        </button>
       </div>
     </header>
 
@@ -324,7 +321,6 @@ onBeforeUnmount(() => {
   border-radius: 6px;
   cursor: pointer;
 }
-.lang-btn,
 .theme-btn {
   padding: 4px 10px;
 }

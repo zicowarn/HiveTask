@@ -56,6 +56,12 @@ export function toggleLocale(): void {
   setLocale(locale.value === "zh-CN" ? "en-US" : "zh-CN");
 }
 
+/** Cycle through `locales` in order, wrapping around (statusbar cell). */
+export function cycleLocale(): void {
+  const index = locales.findIndex((l) => l.value === locale.value);
+  setLocale(locales[(index + 1) % locales.length].value);
+}
+
 export type TranslateParams = Record<string, string | number>;
 
 /** Translate a key, substituting `{name}` placeholders. */
@@ -71,5 +77,5 @@ export function t(key: MessageKey, params?: TranslateParams): string {
 }
 
 export function useI18n() {
-  return { t, locale, setLocale, toggleLocale, locales };
+  return { t, locale, setLocale, toggleLocale, cycleLocale, locales };
 }

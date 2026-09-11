@@ -21,8 +21,13 @@ const props = defineProps<{ workspace: string }>();
 const repo = useRepoStore();
 const issues = useIssuesStore();
 const pulls = usePullsStore();
-const { t } = useI18n();
+const { t, locale, locales, cycleLocale } = useI18n();
 const { current, origin, ghAvailable } = storeToRefs(repo);
+
+/** Self-name of the active locale (中文 / English / …) — scales to any N. */
+const localeLabel = computed(
+  () => locales.find((l) => l.value === locale.value)?.label ?? locale.value,
+);
 
 const repoName = computed(() => {
   if (!current.value) return null;
@@ -54,6 +59,13 @@ const syncedAt = computed(() => {
     </div>
 
     <div class="status-right">
+      <button
+        class="status-cell lang-cell"
+        :title="t('lang.switch')"
+        @click="cycleLocale()"
+      >
+        {{ localeLabel }}
+      </button>
       <span v-if="syncedAt" class="status-cell" :title="t('statusbar.syncedAt', { time: syncedAt })">
         ⟳ {{ syncedAt }}
       </span>
