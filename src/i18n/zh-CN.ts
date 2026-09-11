@@ -116,6 +116,20 @@ export const zhCN = {
   "comments.send": "评论",
   "comments.sending": "发送中…",
 
+  // Merge (irreversible — dialog confirm)
+  "merge.button": "合并",
+  "merge.working": "合并中…",
+  "merge.title": "合并 Pull Request",
+  "merge.hint": "合并后 PR 将关闭，此操作不可撤销。",
+  "merge.confirm": "确认合并",
+  "merge.cancel": "取消",
+  "merge.merge": "创建合并提交",
+  "merge.mergeDesc": "保留分支上的全部提交，并附加一个合并提交",
+  "merge.squash": "压缩为单个提交",
+  "merge.squashDesc": "全部改动压缩为一个提交进入主分支",
+  "merge.rebase": "变基合并",
+  "merge.rebaseDesc": "逐个变基到主分支，不产生合并提交",
+
   // Detail state actions
   "detail.close": "关闭",
   "detail.reopen": "重新打开",

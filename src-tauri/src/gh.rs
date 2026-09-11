@@ -270,6 +270,27 @@ pub fn add_comment(repo: &Path, kind: &str, number: i64, body: &str) -> Result<V
     fetch_comments(repo, kind, number)
 }
 
+/// Whitelist + translate the merge method into gh's flag. gh prompts
+/// interactively without one of these, which would hang the shell call.
+fn merge_method_flag(method: &str) -> Result<&'static str> {
+    Ok(match method {
+        "merge" => "--merge",
+        "squash" => "--squash",
+        "rebase" => "--rebase",
+        other => return Err(anyhow!("未知的合并方式: {other}")),
+    })
+}
+
+/// Merge a pull request, then re-read the full record (write-through: the
+/// fresh MERGED state becomes the single source for store patching).
+pub fn merge_pull(repo: &Path, number: i64, method: &str) -> Result<Pull> {
+    let flag = merge_method_flag(method)?;
+    let number_str = number.to_string();
+    let args = ["pr", "merge", &number_str, flag];
+    run_gh(repo, &args)?;
+    fetch_pull_detail(repo, number)
+}
+
 /// Cheap connectivity probe: `gh api user` is one free authenticated call
 /// (does not count against the rate limit... actually it does count; but a
 /// probe is user-initiated and rare). Ok => reachable; Err carries the raw
@@ -568,6 +589,16 @@ mod tests {
         assert!(!comments[0].pending);
         assert!(comments[1].body.is_none());
         assert!(comments[1].created_at.is_none());
+    }
+
+    #[test]
+    fn merge_method_whitelist() {
+        assert_eq!(merge_method_flag("merge").unwrap(), "--merge");
+        assert_eq!(merge_method_flag("squash").unwrap(), "--squash");
+        assert_eq!(merge_method_flag("rebase").unwrap(), "--rebase");
+        // The method string becomes a gh flag — anything else is refused.
+        assert!(merge_method_flag("--admin").is_err());
+        assert!(merge_method_flag("").is_err());
     }
 
     #[test]

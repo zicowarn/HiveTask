@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { watch } from "vue";
+import { ref, watch } from "vue";
 import { storeToRefs } from "pinia";
 import PanelShell from "../workbench/PanelShell.vue";
 import MarkdownView from "../components/MarkdownView.vue";
@@ -12,6 +12,7 @@ import { openExternalUrl } from "../open-url";
 import { reviewLabel } from "./review-label";
 import { stateLabel } from "./state-label";
 import { useCloseReopen } from "./close-reopen";
+import MergeDialog from "./MergeDialog.vue";
 
 defineProps<{ leafId?: string; panelType?: string }>();
 
@@ -38,6 +39,13 @@ watch(
   },
   { immediate: true },
 );
+
+const mergeDialogOpen = ref(false);
+
+function onConfirmMerge(method: "merge" | "squash" | "rebase") {
+  if (pulls.selected) void pulls.merge(pulls.selected, method);
+  mergeDialogOpen.value = false;
+}
 
 function onSubmitComment(body: string) {
   if (pulls.selected) void pulls.addComment(pulls.selected.number, body);
@@ -69,6 +77,14 @@ function hasVisibleBody(body?: string | null): boolean {
           >
             {{ reviewLabel(selected.reviewDecision) }}
           </span>
+          <button
+            v-if="selected.state === 'OPEN' && !selected.isDraft"
+            class="state-action merge-btn"
+            :disabled="pulls.mergeWorking"
+            @click="mergeDialogOpen = true"
+          >
+            {{ pulls.mergeWorking ? t("merge.working") : t("merge.button") }}
+          </button>
           <button
             v-if="selected.state !== 'MERGED'"
             class="state-action"
@@ -141,6 +157,13 @@ function hasVisibleBody(body?: string | null): boolean {
       <p v-else>{{ t("pull.emptyRepo") }}</p>
     </div>
   </PanelShell>
+
+  <MergeDialog
+    :open="mergeDialogOpen"
+    :working="pulls.mergeWorking"
+    @confirm="onConfirmMerge"
+    @cancel="mergeDialogOpen = false"
+  />
 </template>
 
 <style scoped>
@@ -170,6 +193,11 @@ function hasVisibleBody(body?: string | null): boolean {
   border-radius: 6px;
   cursor: pointer;
   white-space: nowrap;
+}
+.merge-btn:hover:not(:disabled),
+.merge-btn:disabled {
+  border-color: var(--merged);
+  color: var(--merged);
 }
 .state-action:hover:not(:disabled) {
   border-color: var(--danger);

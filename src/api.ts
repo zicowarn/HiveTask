@@ -47,6 +47,8 @@ export const api = {
     invoke<Issue>("set_issue_state", { repoPath, number, closed }),
   setPullState: (repoPath: string, number: number, closed: boolean) =>
     invoke<Pull>("set_pull_state", { repoPath, number, closed }),
+  mergePull: (repoPath: string, number: number, method: "merge" | "squash" | "rebase") =>
+    invoke<Pull>("merge_pull", { repoPath, number, method }),
   listSyncedAt: (repoPath: string) =>
     invoke<[string, string][]>("list_synced_at", { repoPath }),
   probeNetwork: () => invoke<void>("probe_network"),

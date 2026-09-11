@@ -115,6 +115,20 @@ export const enUS: Record<MessageKey, string> = {
   "comments.send": "Comment",
   "comments.sending": "Sending…",
 
+  // Merge (irreversible — dialog confirm)
+  "merge.button": "Merge",
+  "merge.working": "Merging…",
+  "merge.title": "Merge pull request",
+  "merge.hint": "The pull request closes once merged. This cannot be undone.",
+  "merge.confirm": "Merge",
+  "merge.cancel": "Cancel",
+  "merge.merge": "Create a merge commit",
+  "merge.mergeDesc": "Keep all branch commits, plus one merge commit",
+  "merge.squash": "Squash and merge",
+  "merge.squashDesc": "All changes become a single commit on the base branch",
+  "merge.rebase": "Rebase and merge",
+  "merge.rebaseDesc": "Rebase commits onto the base branch, no merge commit",
+
   // Detail state actions
   "detail.close": "Close",
   "detail.reopen": "Reopen",

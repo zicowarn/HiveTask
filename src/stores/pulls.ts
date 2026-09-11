@@ -24,6 +24,7 @@ export const usePullsStore = defineStore("pulls", () => {
   const commentsLoading = ref(false);
   const commentSubmitting = ref(false);
   const stateWorking = ref(false);
+  const mergeWorking = ref(false);
 
   function select(pull: Pull | null) {
     selectedNumber.value = pull ? pull.number : null;
@@ -171,6 +172,29 @@ export const usePullsStore = defineStore("pulls", () => {
     }
   }
 
+  /** Merge is irreversible and slow: NO optimistic flip — the working
+   * flag spans the roundtrip; success patches from the fresh full record
+   * (state MERGED), failure toasts via reportError. */
+  async function merge(pull: Pull, method: "merge" | "squash" | "rebase") {
+    const repo = useRepoStore();
+    if (!repo.current) return;
+    if (!isTauri()) {
+      pushToast({ kind: "info", message: t("error.browserPreview") });
+      return;
+    }
+    mergeWorking.value = true;
+    try {
+      const fresh = await api.mergePull(repo.current, pull.number, method);
+      const index = pulls.value.findIndex((p) => p.number === fresh.number);
+      if (index >= 0) pulls.value[index] = fresh;
+      detailedNumbers.value.add(fresh.number);
+    } catch (e) {
+      reportError(String(e));
+    } finally {
+      mergeWorking.value = false;
+    }
+  }
+
   function patchState(number: number, stateValue: string) {
     const target = pulls.value.find((p) => p.number === number);
     if (target) target.state = stateValue;
@@ -190,6 +214,8 @@ export const usePullsStore = defineStore("pulls", () => {
     commentsLoading,
     commentSubmitting,
     stateWorking,
+    mergeWorking,
+    merge,
     loadCache,
     refresh,
     setState,

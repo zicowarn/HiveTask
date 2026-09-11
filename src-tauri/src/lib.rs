@@ -121,6 +121,16 @@ fn cached_pull_count(repo_path: String, state: String) -> Result<i64, String> {
     storage::cached_pull_count(&conn, &state).map_err(|e| e.to_string())
 }
 
+/// Merge a pull request; upserts the fresh full record and returns it.
+#[tauri::command]
+fn merge_pull(repo_path: String, number: i64, method: String) -> Result<Pull, String> {
+    let repo = PathBuf::from(&repo_path);
+    let pull = gh::merge_pull(&repo, number, &method).map_err(|e| e.to_string())?;
+    let conn = storage::open(&repo).map_err(|e| e.to_string())?;
+    storage::upsert_pull(&conn, &pull).map_err(|e| e.to_string())?;
+    Ok(pull)
+}
+
 /// All recorded sync timestamps for the status bar's "last updated" cell.
 #[tauri::command]
 fn list_synced_at(repo_path: String) -> Result<Vec<(String, String)>, String> {
@@ -229,7 +239,8 @@ pub fn run() {
             set_issue_state,
             set_pull_state,
             list_synced_at,
-            probe_network
+            probe_network,
+            merge_pull
         ])
         .run(tauri::generate_context!())
         .expect("error while running HiveTask");
