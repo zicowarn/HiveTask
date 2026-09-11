@@ -4,9 +4,11 @@
  * `isTauri()` lets the same app run in a plain browser during quick UI
  * iteration — commands are unavailable there and guarded at call sites.
  */
-import { invoke } from "@tauri-apps/api/core";
+import { invoke, type Channel } from "@tauri-apps/api/core";
 import type {
   Comment,
+  GitBranchRow,
+  GitHistoryPage,
   HealthInfo,
   Issue,
   IssueState,
@@ -49,6 +51,21 @@ export const api = {
     invoke<Pull>("set_pull_state", { repoPath, number, closed }),
   mergePull: (repoPath: string, number: number, method: "merge" | "squash" | "rebase") =>
     invoke<Pull>("merge_pull", { repoPath, number, method }),
+  gitHistory: (repoPath: string, limit?: number) =>
+    invoke<GitHistoryPage>("git_history", { repoPath, limit: limit ?? 500 }),
+  gitBranches: (repoPath: string) => invoke<GitBranchRow[]>("git_branches", { repoPath }),
+  gitFetch: (repoPath: string) => invoke<void>("git_fetch", { repoPath }),
+  ptySpawn: (args: {
+    id: string;
+    cwd?: string;
+    shell?: string;
+    rows: number;
+    cols: number;
+    onOutput: Channel<string>;
+  }) => invoke<void>("pty_spawn", args),
+  ptyWrite: (id: string, data: string) => invoke<void>("pty_write", { id, data }),
+  ptyResize: (id: string, rows: number, cols: number) => invoke<void>("pty_resize", { id, rows, cols }),
+  ptyKill: (id: string) => invoke<void>("pty_kill", { id }),
   listSyncedAt: (repoPath: string) =>
     invoke<[string, string][]>("list_synced_at", { repoPath }),
   probeNetwork: () => invoke<void>("probe_network"),

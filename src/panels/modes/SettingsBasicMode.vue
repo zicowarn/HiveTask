@@ -19,6 +19,21 @@ const themeChoices: { value: ThemeChoice; labelKey: "settings.themeDark" | "sett
   { value: "system", labelKey: "settings.themeSystem" },
 ];
 
+/** Terminal shell options per OS; "" = auto ($SHELL / COMSPEC). */
+const isWindows = navigator.userAgent.includes("Windows");
+const shellChoices: { value: string; label: string }[] = isWindows
+  ? [
+      { value: "", label: t("settings.shellAuto") },
+      { value: "cmd.exe", label: "cmd" },
+      { value: "powershell.exe", label: "PowerShell" },
+      { value: "pwsh.exe", label: "pwsh" },
+    ]
+  : [
+      { value: "", label: t("settings.shellAuto") },
+      { value: "/bin/zsh", label: "zsh" },
+      { value: "/bin/bash", label: "bash" },
+    ];
+
 function onLocaleChange(event: Event) {
   setLocale((event.target as HTMLSelectElement).value as Locale);
 }
@@ -48,6 +63,16 @@ function onThemeChange(event: Event) {
         <option v-for="c in themeChoices" :key="c.value" :value="c.value">
           {{ t(c.labelKey) }}
         </option>
+      </select>
+    </div>
+
+    <div class="setting-row">
+      <div class="setting-text">
+        <span class="setting-name">{{ t("settings.terminalShell") }}</span>
+        <span class="setting-desc">{{ t("settings.terminalShellDesc") }}</span>
+      </div>
+      <select class="setting-select" v-model="settings.terminalShell">
+        <option v-for="c in shellChoices" :key="c.value" :value="c.value">{{ c.label }}</option>
       </select>
     </div>
 

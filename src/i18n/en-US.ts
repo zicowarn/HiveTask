@@ -68,9 +68,15 @@ export const enUS: Record<MessageKey, string> = {
   "panelTitle.git.history": "Git history",
   "panelTitle.terminal": "Terminal",
 
-  // Tools workspace placeholders
-  "gitHistory.placeholder": "Commit graph with local + remote branches and ahead/behind status — git2-backed data pipeline with lane rendering, planned.",
-  "terminal.placeholder": "Integrated terminal (macOS zsh/bash, Windows cmd/PowerShell — selectable in settings), planned.",
+  // Git history panel
+  "gitHistory.fetch": "Fetch",
+  "gitHistory.noCommits": "No commits yet",
+  "gitHistory.aheadBehind": "ahead {ahead} · behind {behind}",
+  "gitHistory.clickToFilter": "Click to show only this branch's history",
+
+  // Terminal panel
+  "terminal.exited": "—— shell exited ——",
+  "terminal.restart": "Restart",
 
   // Panel modes
   "mode.list": "List",
@@ -91,6 +97,9 @@ export const enUS: Record<MessageKey, string> = {
   "settings.themeDark": "Dark",
   "settings.themeLight": "Light",
   "settings.themeSystem": "System",
+  "settings.terminalShell": "Terminal shell",
+  "settings.terminalShellDesc": "Shell used by the integrated terminal; applies to newly opened terminals",
+  "settings.shellAuto": "System default",
   "settings.statusbar": "Show status bar",
   "settings.statusbarDesc": "Show repository and sync status at the bottom of the window",
 

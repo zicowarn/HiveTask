@@ -20,6 +20,18 @@ importers:
       '@tauri-apps/plugin-store':
         specifier: ^2.2.0
         version: 2.4.4
+      '@web-git-graph/protocol':
+        specifier: ^1.0.7
+        version: 1.0.7
+      '@web-git-graph/web':
+        specifier: ^1.0.7
+        version: 1.0.7
+      '@xterm/addon-fit':
+        specifier: ^0.11.0
+        version: 0.11.0
+      '@xterm/xterm':
+        specifier: ^6.0.0
+        version: 6.0.0
       markdown-it:
         specifier: ^15.0.1
         version: 15.0.1
@@ -533,6 +545,18 @@ packages:
 
   '@vue/shared@3.5.42':
     resolution: {integrity: sha512-2rPxex1jQf4jvl9MOHl6YaXCPcrNqz/FstMOEh3QWY+/OME9nQTvl9WYeCwhW7AFjaR0SnngZGlp/wkR6rkI6g==}
+
+  '@web-git-graph/protocol@1.0.7':
+    resolution: {integrity: sha512-S5BDIFdvXCkScasz+P+7SAUNqas+RC96oEiuv+X49KQAaYpVBvXrBjLlxUSGMPDIgFm1jkPXOkmbIBErGv/lwA==}
+
+  '@web-git-graph/web@1.0.7':
+    resolution: {integrity: sha512-U2dqw4HsHNZAIVyMzB+E0PPinvyg/Q4GoSUk5uNnmD4fSlxn/2Gaqp816Bbddsm4wHHBsefXp7phOYjyJ3MioA==}
+
+  '@xterm/addon-fit@0.11.0':
+    resolution: {integrity: sha512-jYcgT6xtVYhnhgxh3QgYDnnNMYTcf8ElbxxFzX0IZo+vabQqSPAjC3c1wJrKB5E19VwQei89QCiZZP86DCPF7g==}
+
+  '@xterm/xterm@6.0.0':
+    resolution: {integrity: sha512-TQwDdQGtwwDt+2cgKDLn0IRaSxYu1tSUjgKarSDkUM0ZNiSRXFpjxEsvc/Zgc5kq5omJ+V0a8/kIM2WD3sMOYg==}
 
   alien-signals@1.0.13:
     resolution: {integrity: sha512-OGj9yyTnJEttvzhTUWuscOvtqxq5vrhF7vL9oS0xJ2mK0ItPYP1/y+vCFebfxoEyAz0++1AIwJ5CMr+Fk3nDmg==}
@@ -1064,6 +1088,16 @@ snapshots:
       '@vue/shared': 3.5.42
 
   '@vue/shared@3.5.42': {}
+
+  '@web-git-graph/protocol@1.0.7': {}
+
+  '@web-git-graph/web@1.0.7':
+    dependencies:
+      '@web-git-graph/protocol': 1.0.7
+
+  '@xterm/addon-fit@0.11.0': {}
+
+  '@xterm/xterm@6.0.0': {}
 
   alien-signals@1.0.13: {}
 

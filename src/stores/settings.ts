@@ -9,6 +9,7 @@ import { defineStore } from "pinia";
 import { ref, watch } from "vue";
 
 const STATUSBAR_KEY = "hivetask.statusbar";
+const TERMINAL_SHELL_KEY = "hivetask.terminalShell";
 
 function loadStatusbarVisible(): boolean {
   try {
@@ -18,8 +19,18 @@ function loadStatusbarVisible(): boolean {
   }
 }
 
+function loadTerminalShell(): string {
+  try {
+    return localStorage.getItem(TERMINAL_SHELL_KEY) ?? "";
+  } catch {
+    return "";
+  }
+}
+
 export const useSettingsStore = defineStore("settings", () => {
   const statusbarVisible = ref(loadStatusbarVisible());
+  /** "" = auto ($SHELL / COMSPEC); else an explicit shell path/name. */
+  const terminalShell = ref(loadTerminalShell());
 
   watch(statusbarVisible, (visible) => {
     try {
@@ -29,9 +40,17 @@ export const useSettingsStore = defineStore("settings", () => {
     }
   });
 
+  watch(terminalShell, (shell) => {
+    try {
+      localStorage.setItem(TERMINAL_SHELL_KEY, shell);
+    } catch {
+      // Storage unavailable — the choice still applies for this session.
+    }
+  });
+
   function toggleStatusbar(): void {
     statusbarVisible.value = !statusbarVisible.value;
   }
 
-  return { statusbarVisible, toggleStatusbar };
+  return { statusbarVisible, terminalShell, toggleStatusbar };
 });

@@ -69,9 +69,15 @@ export const zhCN = {
   "panelTitle.git.history": "Git 历史",
   "panelTitle.terminal": "终端",
 
-  // Tools workspace placeholders
-  "gitHistory.placeholder": "提交历史与分支图（本地 + 远端分支、领先/落后状态）——基于 git2 的数据管线与泳道图渲染，规划中。",
-  "terminal.placeholder": "集成终端（macOS zsh/bash、Windows cmd/PowerShell，可在设置中选择）——规划中。",
+  // Git history panel
+  "gitHistory.fetch": "抓取远端",
+  "gitHistory.noCommits": "仓库还没有提交",
+  "gitHistory.aheadBehind": "领先 {ahead} · 落后 {behind}",
+  "gitHistory.clickToFilter": "点击只看该分支的历史",
+
+  // Terminal panel
+  "terminal.exited": "—— shell 已退出 ——",
+  "terminal.restart": "重新启动",
 
   // Panel modes
   "mode.list": "列表",
@@ -92,6 +98,9 @@ export const zhCN = {
   "settings.themeDark": "暗色",
   "settings.themeLight": "明亮",
   "settings.themeSystem": "跟随系统",
+  "settings.terminalShell": "终端 Shell",
+  "settings.terminalShellDesc": "集成终端使用的 Shell，立即对新开的终端生效",
+  "settings.shellAuto": "跟随系统默认",
   "settings.statusbar": "显示状态栏",
   "settings.statusbarDesc": "在窗口底部显示仓库与同步状态",
 

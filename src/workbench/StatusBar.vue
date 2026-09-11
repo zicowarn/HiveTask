@@ -42,16 +42,23 @@ const repoName = computed(() => {
   return parts[parts.length - 1] ?? current.value;
 });
 
-// Freshness is per filter bucket: the Open tab being five minutes old says
-// nothing about Closed. The settings workspace has no sync of its own.
+// Freshness is per filter bucket on the data workspaces; on other tabs
+// (and when the active bucket was never synced) the cell falls back to the
+// latest sync across all buckets — a cell that flickers out on tab
+// switches reads as "lost" rather than "not applicable".
 const syncedAt = computed(() => {
-  const key =
+  const bucketKey =
     props.workspace === "issues"
       ? `issues:${issues.state}`
       : props.workspace === "pulls"
         ? `pulls:${pulls.state}`
         : null;
-  return key ? syncMeta.map[key] ?? null : null;
+  const times = Object.values(syncMeta.map);
+  if (bucketKey) {
+    const bucket = syncMeta.map[bucketKey];
+    if (bucket) return bucket;
+  }
+  return times.length ? times.reduce((a, b) => (a > b ? a : b)) : null;
 });
 
 /** "2026-09-11T02:00:00Z" → "5 分钟前" / "2 hours ago", locale-following. */

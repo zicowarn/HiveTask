@@ -1,4 +1,33 @@
 /** Mirrors src-tauri/src/models.rs */
+export interface GitCommitRow {
+  oid: string;
+  parents: string[];
+  message: string;
+  author?: string | null;
+  committedAtUnix: number;
+}
+
+export interface GitRefRow {
+  name: string;
+  target: string;
+  kind: "head" | "remote" | "current" | string;
+}
+
+export interface GitHistoryPage {
+  commits: GitCommitRow[];
+  refs: GitRefRow[];
+  head: string | null;
+  hasMore: boolean;
+}
+
+export interface GitBranchRow {
+  name: string;
+  isRemote: boolean;
+  isCurrent: boolean;
+  shortId?: string | null;
+  ahead: number;
+  behind: number;
+}
 export interface Issue {
   number: number;
   title: string;

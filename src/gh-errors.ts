@@ -29,7 +29,7 @@ const RULES: ErrorRule[] = [
   { pattern: /rate limit/i, key: "error.rateLimit" },
   { pattern: /is locked/i, key: "error.locked" },
   {
-    pattern: /不是 git 仓库|not a git repository|no git remotes|failed to run git|does not appear to be a git repository/i,
+    pattern: /不是 git 仓库|not a git repository|could not find repository|no git remotes|failed to run git|does not appear to be a git repository/i,
     key: "error.repo",
   },
   {

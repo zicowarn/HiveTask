@@ -79,6 +79,49 @@ pub struct HealthInfo {
     pub gh_version: Option<String>,
 }
 
+// ---- Tools workspace: git history & branches ----
+
+/// One commit for the history graph (mirrors @web-git-graph's DTO shape;
+/// the frontend converts committedAtUnix to ISO before rendering).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CommitRow {
+    pub oid: String,
+    pub parents: Vec<String>,
+    pub message: String,
+    pub author: Option<String>,
+    pub committed_at_unix: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitRefRow {
+    pub name: String,
+    pub target: String,
+    /// "head" | "remote" | "current" (GitGraphRefKind subset)
+    pub kind: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitHistoryPage {
+    pub commits: Vec<CommitRow>,
+    pub refs: Vec<GitRefRow>,
+    pub head: Option<String>,
+    pub has_more: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BranchRow {
+    pub name: String,
+    pub is_remote: bool,
+    pub is_current: bool,
+    pub short_id: Option<String>,
+    pub ahead: i64,
+    pub behind: i64,
+}
+
 /// One conversation comment on an issue or PR.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

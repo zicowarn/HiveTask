@@ -3,7 +3,9 @@
 //! headless MCP server from Phase 4.
 
 mod gh;
+mod git;
 mod models;
+mod pty;
 mod storage;
 
 use std::path::PathBuf;
@@ -131,6 +133,24 @@ fn merge_pull(repo_path: String, number: i64, method: String) -> Result<Pull, St
     Ok(pull)
 }
 
+/// Commit history across all local + remote tips, for the graph renderer.
+#[tauri::command]
+fn git_history(repo_path: String, limit: Option<u32>) -> Result<models::GitHistoryPage, String> {
+    git::history(&repo_path, limit).map_err(|e| e.to_string())
+}
+
+/// Branch list with local/remote kind and ahead/behind vs upstream.
+#[tauri::command]
+fn git_branches(repo_path: String) -> Result<Vec<models::BranchRow>, String> {
+    git::branches(&repo_path).map_err(|e| e.to_string())
+}
+
+/// `git fetch --all` through the git CLI (reuses credential helpers).
+#[tauri::command]
+fn git_fetch(repo_path: String) -> Result<(), String> {
+    git::fetch(&repo_path).map_err(|e| e.to_string())
+}
+
 /// All recorded sync timestamps for the status bar's "last updated" cell.
 #[tauri::command]
 fn list_synced_at(repo_path: String) -> Result<Vec<(String, String)>, String> {
@@ -240,8 +260,16 @@ pub fn run() {
             set_pull_state,
             list_synced_at,
             probe_network,
-            merge_pull
+            merge_pull,
+            git_history,
+            git_branches,
+            git_fetch,
+            pty::pty_spawn,
+            pty::pty_write,
+            pty::pty_resize,
+            pty::pty_kill
         ])
+        .manage(pty::PtyMap(std::sync::Mutex::new(std::collections::HashMap::new())))
         .run(tauri::generate_context!())
         .expect("error while running HiveTask");
 }
