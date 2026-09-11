@@ -5,7 +5,7 @@ import pkg from "./package.json";
 
 // Tauri expects a fixed dev port and ignores the src-tauri folder.
 export default defineConfig({
-  plugins: [vue()],
+  plugins: [vue({ template: { compilerOptions: { isCustomElement: (tag: string) => tag === "web-git-graph" } } })],
   // App version (from package.json) for the status bar and About dialog.
   define: {
     __APP_VERSION__: JSON.stringify(pkg.version),
