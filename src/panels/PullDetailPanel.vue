@@ -10,6 +10,7 @@ import { useRepoStore } from "../stores/repo";
 import { useI18n } from "../i18n";
 import { openExternalUrl } from "../open-url";
 import { reviewLabel } from "./review-label";
+import { stateLabel } from "./state-label";
 import { useCloseReopen } from "./close-reopen";
 
 defineProps<{ leafId?: string; panelType?: string }>();
@@ -60,7 +61,7 @@ function hasVisibleBody(body?: string | null): boolean {
           <span
             class="detail-state"
             :class="selected.state.toLowerCase()"
-          >{{ selected.state === "MERGED" ? t("common.merged") : selected.state }}</span>
+          >{{ stateLabel(selected.state) }}</span>
           <span
             v-if="selected.reviewDecision"
             class="detail-decision"

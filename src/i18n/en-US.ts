@@ -62,6 +62,12 @@ export const enUS: Record<MessageKey, string> = {
   "mode.milestone": "Milestones",
   "mode.settings.basic": "Basic settings",
 
+  // Issue/PR state (filter tabs + detail badges)
+  "state.open": "Open",
+  "state.closed": "Closed",
+  "state.merged": "Merged",
+  "state.all": "All",
+
   // Settings — basic mode
   "settings.language": "Language",
   "settings.languageDesc": "Interface display language",
@@ -91,7 +97,6 @@ export const enUS: Record<MessageKey, string> = {
   "common.openInGithub": "Open on GitHub",
   "common.loadingFull": "Loading full details from GitHub…",
   "common.draft": "Draft",
-  "common.merged": "Merged",
   "common.unassignedMilestone": "No milestone",
   "common.author": "Author: {name}",
   "common.assignees": "Assignees: {name}",

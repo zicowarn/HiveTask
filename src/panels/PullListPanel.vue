@@ -8,6 +8,7 @@ import PanelShell from "../workbench/PanelShell.vue";
 import { usePullsStore } from "../stores/pulls";
 import { useI18n } from "../i18n";
 import { reviewLabel } from "./review-label";
+import { stateLabel } from "./state-label";
 import type { PullState } from "../types";
 
 defineProps<{ leafId?: string; panelType?: string }>();
@@ -16,11 +17,11 @@ const store = usePullsStore();
 const { pulls, state, loading, error, selectedNumber } = storeToRefs(store);
 const { t } = useI18n();
 
-const states: { value: PullState; label: string }[] = [
-  { value: "open", label: "Open" },
-  { value: "merged", label: "Merged" },
-  { value: "closed", label: "Closed" },
-  { value: "all", label: "All" },
+const states: { value: PullState }[] = [
+  { value: "open" },
+  { value: "merged" },
+  { value: "closed" },
+  { value: "all" },
 ];
 
 function timeLabel(iso?: string | null): string {
@@ -39,7 +40,7 @@ function timeLabel(iso?: string | null): string {
           :class="{ active: state === s.value }"
           @click="store.setState(s.value)"
         >
-          {{ s.label }}
+          {{ stateLabel(s.value) }}
         </button>
       </div>
       <button class="refresh-btn" :disabled="loading" @click="store.refresh()">

@@ -9,6 +9,7 @@ import { useIssuesStore } from "../stores/issues";
 import { useRepoStore } from "../stores/repo";
 import { useI18n } from "../i18n";
 import { useCloseReopen } from "./close-reopen";
+import { stateLabel } from "./state-label";
 
 defineProps<{ leafId?: string; panelType?: string }>();
 
@@ -62,7 +63,7 @@ function openUrl(url?: string | null) {
       <header class="detail-header">
         <div class="detail-title-row">
           <span class="detail-number">#{{ selected.number }}</span>
-          <span class="detail-state" :class="selected.state.toLowerCase()">{{ selected.state }}</span>
+          <span class="detail-state" :class="selected.state.toLowerCase()">{{ stateLabel(selected.state) }}</span>
           <button
             class="state-action"
             :class="{ armed: closeArmed }"

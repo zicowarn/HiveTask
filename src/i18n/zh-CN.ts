@@ -63,6 +63,12 @@ export const zhCN = {
   "mode.milestone": "里程碑",
   "mode.settings.basic": "基础设置",
 
+  // Issue/PR state (filter tabs + detail badges)
+  "state.open": "开启中",
+  "state.closed": "已关闭",
+  "state.merged": "已合并",
+  "state.all": "全部",
+
   // Settings — basic mode
   "settings.language": "语言",
   "settings.languageDesc": "界面显示语言",
@@ -92,7 +98,6 @@ export const zhCN = {
   "common.openInGithub": "在 GitHub 打开",
   "common.loadingFull": "正在从 GitHub 加载完整信息…",
   "common.draft": "草稿",
-  "common.merged": "已合并",
   "common.unassignedMilestone": "未设置里程碑",
   "common.author": "作者：{name}",
   "common.assignees": "负责人：{name}",

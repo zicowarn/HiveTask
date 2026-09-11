@@ -11,6 +11,7 @@ import ModeTabs from "../components/ModeTabs.vue";
 import { resolvePanel } from "../workbench/registry";
 import { useIssuesStore } from "../stores/issues";
 import { useI18n } from "../i18n";
+import { stateLabel } from "./state-label";
 import type { IssueState } from "../types";
 
 defineProps<{ leafId?: string; panelType?: string }>();
@@ -32,10 +33,10 @@ watch(modeKey, (key) => localStorage.setItem(MODE_STORAGE_KEY, key));
 
 const activeMode = computed(() => modes.find((m) => m.key === modeKey.value) ?? modes[0]);
 
-const states: { value: IssueState; label: string }[] = [
-  { value: "open", label: "Open" },
-  { value: "closed", label: "Closed" },
-  { value: "all", label: "All" },
+const states: { value: IssueState }[] = [
+  { value: "open" },
+  { value: "closed" },
+  { value: "all" },
 ];
 </script>
 
@@ -53,7 +54,7 @@ const states: { value: IssueState; label: string }[] = [
           :class="{ active: state === s.value }"
           @click="store.setState(s.value)"
         >
-          {{ s.label }}
+          {{ stateLabel(s.value) }}
         </button>
       </div>
       <button class="refresh-btn" :disabled="loading" @click="store.refresh()">
