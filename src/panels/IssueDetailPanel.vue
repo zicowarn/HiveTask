@@ -6,7 +6,7 @@ import { stripHtmlComments } from "../components/markdown";
 import { useIssuesStore } from "../stores/issues";
 import { useRepoStore } from "../stores/repo";
 
-defineProps<{ leafId?: string }>();
+defineProps<{ leafId?: string; panelType?: string }>();
 
 const issues = useIssuesStore();
 const repo = useRepoStore();
@@ -29,7 +29,7 @@ function openUrl(url?: string | null) {
 </script>
 
 <template>
-  <PanelShell :leaf-id="leafId">
+  <PanelShell :leaf-id="leafId" :panel-type="panelType">
     <template v-if="selected">
       <header class="detail-header">
         <div class="detail-title-row">

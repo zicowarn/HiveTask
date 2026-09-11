@@ -14,6 +14,7 @@
 import { defineStore } from "pinia";
 import { ref, watch } from "vue";
 import { workspaces } from "../workbench/workspaces";
+import { panelTypes } from "../workbench/panel-types";
 
 export interface LeafNode {
   id: string;
@@ -34,11 +35,10 @@ export type LayoutNode = LeafNode | SplitNode;
 
 const STORAGE_KEY = "hivetask.workbench-layout-v1";
 
-// Panels reachable from the persisted default workspaces; used to reject
-// stale or hand-edited layout blobs that reference a removed panel type.
-const allowedPanels = new Set(
-  workspaces.flatMap((w) => [w.listPanel, w.detailPanel]),
-);
+// Every registered panel type is reachable via the Editor type switcher and
+// may appear in a persisted layout; used to reject stale or hand-edited blobs
+// referencing a removed panel type.
+const allowedPanels = new Set(panelTypes.map((p) => p.type));
 
 let idCounter = 0;
 function uid(): string {
@@ -211,6 +211,24 @@ export const useWorkbenchStore = defineStore("workbench", () => {
     return findParent(node.first, splitId) ?? findParent(node.second, splitId);
   }
 
+  /** Replace a leaf's panel type in place (Editor type switcher). */
+  function setLeafPanel(leafId: string, panel: string): void {
+    if (!allowedPanels.has(panel)) return;
+    for (const root of Object.values(layouts.value)) {
+      const walk = (node: LayoutNode): boolean => {
+        if (node.type === "leaf") {
+          if (node.id === leafId) {
+            node.panel = panel;
+            return true;
+          }
+          return false;
+        }
+        return walk(node.first) || walk(node.second);
+      };
+      if (walk(root)) return;
+    }
+  }
+
   function resetWorkspace(wsKey: string): void {
     const ws = workspaces.find((w) => w.key === wsKey);
     if (ws) layouts.value[wsKey] = defaultLayout(ws);
@@ -221,6 +239,7 @@ export const useWorkbenchStore = defineStore("workbench", () => {
     canCloseLeaf,
     splitLeaf,
     closeLeaf,
+    setLeafPanel,
     countLeaves,
     resetWorkspace,
   };

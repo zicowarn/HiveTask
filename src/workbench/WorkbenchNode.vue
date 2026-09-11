@@ -21,6 +21,7 @@ function resolve(type: string) {
     v-if="node.type === 'leaf'"
     :is="resolve(node.panel)"
     :leaf-id="node.id"
+    :panel-type="node.panel"
   />
   <SplitPane
     v-else

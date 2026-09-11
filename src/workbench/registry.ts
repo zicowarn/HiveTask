@@ -16,6 +16,7 @@ import PullDetailPanel from "../panels/PullDetailPanel.vue";
 import IssueListMode from "../panels/modes/IssueListMode.vue";
 import IssueMilestoneMode from "../panels/modes/IssueMilestoneMode.vue";
 import { workspaces } from "./workspaces";
+import { panelTitle } from "./panel-types";
 
 export type { WorkspaceDefinition } from "./workspaces";
 export { workspaces };
@@ -28,6 +29,8 @@ export interface ModeDefinition {
 
 export interface PanelDefinition {
   type: string;
+  /** Human label sourced from the plain-data panel-types catalog. */
+  title: string;
   component: Component;
   modes?: ModeDefinition[];
 }
@@ -35,7 +38,7 @@ export interface PanelDefinition {
 const panels = new Map<string, PanelDefinition>();
 
 function registerPanel(type: string, component: Component, modes?: ModeDefinition[]): void {
-  panels.set(type, { type, component, modes });
+  panels.set(type, { type, title: panelTitle(type), component, modes });
 }
 
 export function resolvePanel(type: string): PanelDefinition {

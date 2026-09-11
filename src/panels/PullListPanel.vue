@@ -8,7 +8,7 @@ import PanelShell from "../workbench/PanelShell.vue";
 import { usePullsStore } from "../stores/pulls";
 import type { PullState } from "../types";
 
-defineProps<{ leafId?: string }>();
+defineProps<{ leafId?: string; panelType?: string }>();
 
 const store = usePullsStore();
 const { pulls, state, loading, error, selectedNumber } = storeToRefs(store);
@@ -32,7 +32,7 @@ const decisionLabel: Record<string, string> = {
 </script>
 
 <template>
-  <PanelShell title="Pull Requests" :leaf-id="leafId">
+  <PanelShell :leaf-id="leafId" :panel-type="panelType">
     <template #actions>
       <div class="state-tabs">
         <button

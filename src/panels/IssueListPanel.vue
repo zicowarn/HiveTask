@@ -12,7 +12,7 @@ import { resolvePanel } from "../workbench/registry";
 import { useIssuesStore } from "../stores/issues";
 import type { IssueState } from "../types";
 
-defineProps<{ leafId?: string }>();
+defineProps<{ leafId?: string; panelType?: string }>();
 
 const PANEL_TYPE = "issue.list";
 const MODE_STORAGE_KEY = "hivetask.panel-mode.issue.list";
@@ -38,7 +38,7 @@ const states: { value: IssueState; label: string }[] = [
 </script>
 
 <template>
-  <PanelShell title="Issues" :leaf-id="leafId">
+  <PanelShell :leaf-id="leafId" :panel-type="panelType">
     <template #actions>
       <ModeTabs v-if="modes.length > 1" v-model="modeKey" :modes="modes" />
       <div class="state-tabs">
