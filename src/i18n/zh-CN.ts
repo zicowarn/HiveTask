@@ -128,6 +128,15 @@ export const zhCN = {
 
   // Errors surfaced in the panel banner
   "error.browserPreview": "浏览器预览模式无法调用本地 gh，请在 Tauri 窗口中操作",
+
+  // gh error translations (raw output kept as toast detail)
+  "error.permission": "当前账号没有执行此操作的权限",
+  "error.notFound": "目标不存在或编号有误（可能已被删除）",
+  "error.auth": "gh 认证失效，请在终端执行 gh auth login",
+  "error.rateLimit": "GitHub API 限流，请稍后再试",
+  "error.locked": "该会话已锁定，无法评论",
+  "error.repo": "未找到 Git 仓库或 remote，请确认已选择正确目录",
+  "error.network": "网络错误，无法连接 GitHub",
 } as const;
 
 export type MessageKey = keyof typeof zhCN;

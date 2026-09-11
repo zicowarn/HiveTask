@@ -127,4 +127,13 @@ export const enUS: Record<MessageKey, string> = {
 
   // Errors surfaced in the panel banner
   "error.browserPreview": "gh cannot be called in browser preview — run inside the Tauri window",
+
+  // gh error translations (raw output kept as toast detail)
+  "error.permission": "This account doesn't have permission to do that",
+  "error.notFound": "Not found — it may have been deleted or the number is wrong",
+  "error.auth": "gh authentication failed — run `gh auth login` in a terminal",
+  "error.rateLimit": "GitHub API rate limited — try again later",
+  "error.locked": "This conversation is locked — commenting is disabled",
+  "error.repo": "Git repository or remote not found — make sure the right folder is selected",
+  "error.network": "Network error — cannot reach GitHub",
 };

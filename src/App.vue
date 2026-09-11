@@ -5,6 +5,7 @@ import WorkbenchNode from "./workbench/WorkbenchNode.vue";
 import StatusBar from "./workbench/StatusBar.vue";
 import AppMenu from "./components/AppMenu.vue";
 import AboutDialog from "./components/AboutDialog.vue";
+import ToastHost from "./components/ToastHost.vue";
 import { workspaces } from "./workbench/registry";
 import { buildMenuDefs } from "./menu-defs";
 import { syncApplicationMenu } from "./native-menu";
@@ -223,6 +224,8 @@ onBeforeUnmount(() => {
     </main>
 
     <StatusBar v-if="settings.statusbarVisible" :workspace="activeKey" />
+
+    <ToastHost />
 
     <AboutDialog :open="aboutOpen" @close="aboutOpen = false" />
   </div>

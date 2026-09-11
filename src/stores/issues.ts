@@ -2,6 +2,8 @@ import { defineStore } from "pinia";
 import { computed, ref } from "vue";
 import { api, isTauri } from "../api";
 import { t } from "../i18n";
+import { reportError, translateError } from "../gh-errors";
+import { pushToast } from "../toast";
 import type { Comment, Issue, IssueState } from "../types";
 import { useRepoStore } from "./repo";
 
@@ -36,7 +38,7 @@ export const useIssuesStore = defineStore("issues", () => {
       issues.value = await api.listCachedIssues(repo.current, state.value);
       cachedCount.value = await api.cachedIssueCount(repo.current, state.value);
     } catch (e) {
-      error.value = String(e);
+      error.value = translateError(String(e));
     }
   }
 
@@ -54,7 +56,7 @@ export const useIssuesStore = defineStore("issues", () => {
       cachedCount.value = issues.value.length;
       lastSyncedAt.value = new Date().toLocaleTimeString();
     } catch (e) {
-      error.value = String(e);
+      error.value = translateError(String(e));
     } finally {
       loading.value = false;
     }
@@ -83,7 +85,7 @@ export const useIssuesStore = defineStore("issues", () => {
       const fresh = await api.fetchComments(repo.current, "issue", number);
       if (selectedNumber.value === number) comments.value = fresh;
     } catch (e) {
-      error.value = String(e);
+      error.value = translateError(String(e));
     } finally {
       commentsLoading.value = false;
     }
@@ -95,7 +97,7 @@ export const useIssuesStore = defineStore("issues", () => {
     const repo = useRepoStore();
     if (!repo.current) return;
     if (!isTauri()) {
-      error.value = t("error.browserPreview");
+      pushToast({ kind: "info", message: t("error.browserPreview") });
       return;
     }
     commentSubmitting.value = true;
@@ -105,7 +107,7 @@ export const useIssuesStore = defineStore("issues", () => {
       if (selectedNumber.value === number) comments.value = fresh;
     } catch (e) {
       comments.value = comments.value.filter((c) => !c.pending);
-      error.value = String(e);
+      reportError(String(e));
     } finally {
       commentSubmitting.value = false;
     }
@@ -121,7 +123,7 @@ export const useIssuesStore = defineStore("issues", () => {
     const repo = useRepoStore();
     if (!repo.current) return;
     if (!isTauri()) {
-      error.value = t("error.browserPreview");
+      pushToast({ kind: "info", message: t("error.browserPreview") });
       return;
     }
     stateWorking.value = true;
@@ -132,7 +134,7 @@ export const useIssuesStore = defineStore("issues", () => {
       patchState(fresh.number, fresh.state);
     } catch (e) {
       patchState(issue.number, previous);
-      error.value = String(e);
+      reportError(String(e));
     } finally {
       stateWorking.value = false;
     }
