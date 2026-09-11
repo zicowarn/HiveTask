@@ -1,9 +1,13 @@
 <script setup lang="ts">
 /**
- * In-window menubar, the successor of QHiveFrame's self-drawn QMenuBar
- * (which lived in the app header via QMainWindow::setMenuWidget — no
- * native menubar there either). Pure presentation: menus arrive fully
- * resolved from the host, items are plain callbacks.
+ * In-header menubar — BROWSER-PREVIEW FALLBACK ONLY. Inside Tauri the
+ * native application menu (src/native-menu.ts) takes over and this
+ * component is not rendered, since a plain web page has no system
+ * menubar to attach to.
+ *
+ * The original self-drawn menubar, successor of QHiveFrame's QMenuBar
+ * in QHFAppHeader. Pure presentation: menus arrive fully resolved from
+ * the host, items are plain callbacks.
  *
  * Interaction: click opens, moving across top-level labels switches while
  * a menu is open, click-outside / Esc / item activation closes. Each
@@ -12,20 +16,7 @@
  * bubble back into toggle(), instantly reopening the menu.
  */
 import { onBeforeUnmount, onMounted, ref } from "vue";
-
-export interface MenuItemDef {
-  label?: string;
-  shortcut?: string;
-  action?: () => void;
-  checked?: boolean;
-  disabled?: boolean;
-  separator?: boolean;
-}
-
-export interface MenuDef {
-  label: string;
-  items: MenuItemDef[];
-}
+import type { MenuDef, MenuItemDef } from "../menu-defs";
 
 defineProps<{ menus: MenuDef[] }>();
 

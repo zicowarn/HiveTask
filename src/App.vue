@@ -3,9 +3,11 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { storeToRefs } from "pinia";
 import WorkbenchNode from "./workbench/WorkbenchNode.vue";
 import StatusBar from "./workbench/StatusBar.vue";
-import AppMenu, { type MenuDef } from "./components/AppMenu.vue";
+import AppMenu from "./components/AppMenu.vue";
 import AboutDialog from "./components/AboutDialog.vue";
 import { workspaces } from "./workbench/registry";
+import { buildMenuDefs } from "./menu-defs";
+import { syncApplicationMenu } from "./native-menu";
 import { openExternalUrl } from "./open-url";
 import { isTauri } from "./api";
 import { useRepoStore } from "./stores/repo";
@@ -26,6 +28,10 @@ const workbench = useWorkbenchStore();
 const { current, origin } = storeToRefs(repo);
 const { t, locale, toggleLocale } = useI18n();
 const { resolvedTheme, toggleTheme } = useTheme();
+
+// Browser preview has no system menubar — there the in-header AppMenu and
+// a webview keydown handler stand in; in Tauri the native menu owns both.
+const inTauri = isTauri();
 
 const activeKey = ref(localStorage.getItem(WORKSPACE_KEY) ?? "issues");
 const active = computed(
@@ -74,61 +80,29 @@ async function copyGithubUrl() {
 
 const aboutOpen = ref(false);
 
-// Computed (not constant) so menu labels follow the locale.
-const menus = computed<MenuDef[]>(() => [
-  {
-    label: t("menu.file"),
-    items: [
-      { label: t("menu.openRepo"), shortcut: "⌘O", action: () => void repo.pick() },
-      {
-        label: t("common.refresh"),
-        shortcut: "⌘R",
-        action: refreshActive,
-        disabled: activeKey.value === "settings",
-      },
-      { separator: true },
-      {
-        label: t("menu.preferences"),
-        shortcut: "⌘,",
-        action: openPreferences,
-      },
-    ],
-  },
-  {
-    label: t("menu.view"),
-    items: [
-      { label: t("menu.issues"), shortcut: "⌘1", action: () => switchWorkspace("issues") },
-      { label: t("menu.pulls"), shortcut: "⌘2", action: () => switchWorkspace("pulls") },
-      { separator: true },
-      {
-        label: t("menu.toggleStatusbar"),
-        checked: settings.statusbarVisible,
-        action: () => settings.toggleStatusbar(),
-      },
-    ],
-  },
-  {
-    label: t("menu.tools"),
-    items: [
-      {
-        label: t("common.openInGithub"),
-        shortcut: "⌘⇧O",
-        action: openInGithub,
-        disabled: !currentGitHubUrl(),
-      },
-      {
-        label: t("menu.copyUrl"),
-        shortcut: "⌘⇧C",
-        action: () => void copyGithubUrl(),
-        disabled: !currentGitHubUrl(),
-      },
-    ],
-  },
-  {
-    label: t("menu.help"),
-    items: [{ label: t("menu.about"), action: () => (aboutOpen.value = true) }],
-  },
-]);
+// Computed (not constant) so label language, checkmarks and disabled
+// states stay live; every re-run is synced into the native menu inside
+// Tauri (and re-rendered by AppMenu in the browser fallback).
+const menus = computed(() =>
+  buildMenuDefs({
+    pickRepo: () => void repo.pick(),
+    refresh: refreshActive,
+    refreshDisabled: () => activeKey.value === "settings",
+    openPreferences,
+    gotoIssues: () => switchWorkspace("issues"),
+    gotoPulls: () => switchWorkspace("pulls"),
+    statusbarVisible: () => settings.statusbarVisible,
+    toggleStatusbar: () => settings.toggleStatusbar(),
+    githubUrlMissing: () => currentGitHubUrl() === null,
+    openInGithub,
+    copyUrl: () => void copyGithubUrl(),
+    openAbout: () => (aboutOpen.value = true),
+  }),
+);
+
+watch(menus, (defs) => {
+  if (inTauri) void syncApplicationMenu(defs, () => (aboutOpen.value = true));
+}, { immediate: true });
 
 // ---- Keyboard shortcuts (the menu accelerators, AppMenu is click-only) ----
 
@@ -163,7 +137,7 @@ watch(
 );
 
 onMounted(async () => {
-  window.addEventListener("keydown", onKeydown);
+  if (!inTauri) window.addEventListener("keydown", onKeydown);
   if (!isTauri()) return;
   await repo.checkHealth();
   await repo.refreshInfo();
@@ -182,7 +156,9 @@ onMounted(async () => {
     }
   }
 });
-onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
+onBeforeUnmount(() => {
+  if (!inTauri) window.removeEventListener("keydown", onKeydown);
+});
 </script>
 
 <template>
@@ -193,7 +169,7 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
         <span class="brand-name">HiveTask</span>
       </div>
 
-      <AppMenu :menus="menus" />
+      <AppMenu v-if="!inTauri" :menus="menus" />
 
       <nav class="workspace-tabs">
         <button
