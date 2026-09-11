@@ -30,10 +30,13 @@ export const useSyncMetaStore = defineStore("sync-meta", () => {
     map.value = { ...map.value, [key]: new Date().toISOString() };
   }
 
-  // Repo switches reload the whole map; selection lives elsewhere.
+  // Repo switches reload the whole map; selection lives elsewhere. The
+  // immediate fire covers the startup path: the repo is usually restored
+  // from localStorage and never changes afterwards.
   watch(
     () => useRepoStore().current,
     () => void load(),
+    { immediate: true },
   );
 
   return { map, load, stamp };
