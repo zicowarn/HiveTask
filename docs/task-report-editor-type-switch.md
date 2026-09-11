@@ -47,13 +47,18 @@ Issue 详情 / PR 列表 / PR 详情），切换就地生效、随布局树持�
 ### 2.3 头部与透传
 
 - `PanelShell.vue`：移除 `title` prop；当存在 `leafId` 且传入 `panelType`
-  时，头部最左侧渲染原生 `<select>`（当前类型受控、`change` 调
-  `setLeafPanel`）。头部顺序变为
-  `[面板类型选择器] ｜ ModeTabs ｜ 状态筛选 ｜ 刷新 ｜ ▥ ▤ ✕`。
+  时渲染原生 `<select>`（当前类型受控、`change` 调 `setLeafPanel`）。头部按
+  职责左右分组——**左侧**成组放视图切换类控件：面板类型下拉 + 新增的
+  `switcher` 插槽（Mode 分段按钮挂在这里）；**右侧**只放数据/布局操作：
+  `actions` 插槽（状态筛选/刷新）与 ▥ ▤ ✕。下拉刻意套用与 ModeTabs 相同的
+  几何与配色（22px 高、6px 圆角、`--bg-app`/`--border`/`--text-dim`、无加粗），
+  两个切换器视觉基线对齐、保持轻量。
 - `WorkbenchNode.vue`：叶子渲染时除 `leaf-id` 外再透传 `:panel-type="node.panel"`。
 - 四个面板（Issue/PR 的 List/Detail）`defineProps` 统一增加
   `panelType?: string` 并传给 PanelShell；两个列表面板原先硬编码的
   `title="Issues"/"Pull Requests"` 删除，标题由类型目录接管。
+- `IssueListPanel.vue`：ModeTabs 由 `actions` 插槽改挂 `switcher` 插槽，
+  使 Editor 下拉与 Mode 按钮在头部左侧相邻成组。
 
 ## 3. 文件变更
 

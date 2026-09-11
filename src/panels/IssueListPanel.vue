@@ -39,8 +39,10 @@ const states: { value: IssueState; label: string }[] = [
 
 <template>
   <PanelShell :leaf-id="leafId" :panel-type="panelType">
+    <template v-if="modes.length > 1" #switcher>
+      <ModeTabs v-model="modeKey" :modes="modes" />
+    </template>
     <template #actions>
-      <ModeTabs v-if="modes.length > 1" v-model="modeKey" :modes="modes" />
       <div class="state-tabs">
         <button
           v-for="s in states"

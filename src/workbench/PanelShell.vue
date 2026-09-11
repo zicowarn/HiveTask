@@ -1,13 +1,16 @@
 <script setup lang="ts">
 /**
- * PanelShell — common panel chrome: a pane header (Editor type switcher +
- * actions slot) and a content slot. A panel's internal view modes (e.g. the
- * open/closed tabs) stay local to the panel.
+ * PanelShell — common panel chrome: a pane header and a content slot.
+ *
+ * Header layout groups controls by role:
+ *  - left: view switchers — the Editor panel-type dropdown and the
+ *    `switcher` slot (a panel's Mode tabs);
+ *  - right: data/layout actions — the `actions` slot and split/close.
  *
  * When rendered inside the workbench layout tree, the host passes its
- * `leafId` and `panelType`; the header then shows a panel-type dropdown
- * (Editor switcher) plus split-h / split-v / close controls that reshape the
- * layout through the workbench store.
+ * `leafId` and `panelType`; the header then shows the panel-type dropdown
+ * plus split-h / split-v / close controls that reshape the layout through
+ * the workbench store.
  */
 import { computed } from "vue";
 import { useWorkbenchStore } from "../stores/workbench";
@@ -37,9 +40,10 @@ function onTypeChange(event: Event) {
 
 <template>
   <section class="panel-shell">
-    <header v-if="$slots.actions || leafId" class="panel-header">
-      <div v-if="leafId && panelType" class="panel-type">
+    <header v-if="$slots.switcher || $slots.actions || leafId" class="panel-header">
+      <div class="panel-header-left">
         <select
+          v-if="leafId && panelType"
           class="panel-type-select"
           :value="panelType"
           title="切换面板类型"
@@ -49,7 +53,11 @@ function onTypeChange(event: Event) {
             {{ p.title }}
           </option>
         </select>
+        <div v-if="$slots.switcher" class="panel-switcher">
+          <slot name="switcher" />
+        </div>
       </div>
+
       <div class="panel-header-right">
         <div v-if="$slots.actions" class="panel-actions">
           <slot name="actions" />
@@ -83,25 +91,33 @@ function onTypeChange(event: Event) {
   border-bottom: 1px solid var(--border);
   flex: none;
 }
-.panel-type {
-  flex: none;
+/* Left cluster: Editor type + Mode switchers, visually aligned. */
+.panel-header-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   min-width: 0;
 }
+.panel-switcher {
+  display: flex;
+  align-items: center;
+}
+/* Same chrome metrics as ModeTabs: 22px tall, 6px radius, quiet colors. */
 .panel-type-select {
-  max-width: 150px;
+  height: 22px;
   border: 1px solid var(--border);
   background: var(--bg-app);
-  color: var(--text);
+  color: var(--text-dim);
   font-size: 12px;
-  font-weight: 600;
-  padding: 3px 6px;
-  border-radius: 5px;
+  font-weight: 400;
+  line-height: 1;
+  padding: 0 4px;
+  border-radius: 6px;
   cursor: pointer;
-  white-space: nowrap;
 }
 .panel-type-select:hover {
+  color: var(--text);
   border-color: var(--accent);
-  color: var(--accent);
 }
 .panel-header-right {
   margin-left: auto;
