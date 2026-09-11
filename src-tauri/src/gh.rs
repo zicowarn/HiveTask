@@ -220,11 +220,23 @@ pub fn fetch_pull_detail(repo: &Path, number: i64) -> Result<Pull> {
 
 // ---- Mutations & conversations (the P1 write-through surface) ----
 
+/// Map the entity kind (what the storage layer and frontend call it:
+/// "issue" | "pull") to gh's subcommand — which is `pr`, NOT `pull`.
+/// Passing the kind through verbatim sent `gh pull view` to gh and failed
+/// with `unknown command "pull"`.
+fn gh_subcommand(kind: &str) -> &str {
+    match kind {
+        "pull" => "pr",
+        other => other,
+    }
+}
+
 /// Fetch an entity's conversation comments via `gh issue|pr view --json
-/// comments`. `kind` is "issue" | "pull" (the gh subcommand).
+/// comments`. `kind` is the entity kind "issue" | "pull".
 pub fn fetch_comments(repo: &Path, kind: &str, number: i64) -> Result<Vec<Comment>> {
+    let sub = gh_subcommand(kind);
     let number_str = number.to_string();
-    let args = [kind, "view", &number_str, "--json", "comments"];
+    let args = [sub, "view", &number_str, "--json", "comments"];
     let stdout = run_gh(repo, &args)?;
     let value: Value = serde_json::from_str(&stdout).context("解析 gh 的评论 JSON 失败")?;
     Ok(value
@@ -251,8 +263,9 @@ fn parse_comment_value(v: &Value) -> Comment {
 /// Returning the fresh list IS the write-through: one roundtrip leaves the
 /// cache and the UI consistent without a separate refresh call.
 pub fn add_comment(repo: &Path, kind: &str, number: i64, body: &str) -> Result<Vec<Comment>> {
+    let sub = gh_subcommand(kind);
     let number_str = number.to_string();
-    let args = [kind, "comment", &number_str, "--body", body];
+    let args = [sub, "comment", &number_str, "--body", body];
     run_gh(repo, &args)?;
     fetch_comments(repo, kind, number)
 }
@@ -555,6 +568,14 @@ mod tests {
         assert!(!comments[0].pending);
         assert!(comments[1].body.is_none());
         assert!(comments[1].created_at.is_none());
+    }
+
+    #[test]
+    fn entity_kind_maps_to_gh_subcommand() {
+        // The storage/frontend kind "pull" must translate to gh's `pr`;
+        // passing it through verbatim produced `unknown command "pull"`.
+        assert_eq!(gh_subcommand("pull"), "pr");
+        assert_eq!(gh_subcommand("issue"), "issue");
     }
 
     #[test]
