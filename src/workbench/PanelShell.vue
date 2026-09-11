@@ -102,20 +102,30 @@ function onTypeChange(event: Event) {
   display: flex;
   align-items: center;
 }
-/* Same chrome metrics as ModeTabs: 22px tall, 6px radius, quiet colors. */
+/* Same chrome metrics as ModeTabs: 22px tall, 6px radius, quiet colors.
+   appearance:none removes the native macOS aqua bezel/gradient; a flat
+   background plus a small chevron keeps the affordance. */
 .panel-type-select {
+  appearance: none;
+  -webkit-appearance: none;
   height: 22px;
   border: 1px solid var(--border);
-  background: var(--bg-app);
+  border-radius: 6px;
+  background-color: var(--bg-app);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 10 10'%3E%3Cpath d='M2 3.5L5 6.5L8 3.5' fill='none' stroke='%239aa0a8' stroke-width='1.4' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 5px center;
+  background-size: 8px;
   color: var(--text-dim);
   font-size: 12px;
   font-weight: 400;
   line-height: 1;
-  padding: 0 4px;
-  border-radius: 6px;
+  padding: 0 18px 0 7px;
   cursor: pointer;
+  outline: none;
 }
-.panel-type-select:hover {
+.panel-type-select:hover,
+.panel-type-select:focus-visible {
   color: var(--text);
   border-color: var(--accent);
 }
