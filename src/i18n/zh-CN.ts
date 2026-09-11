@@ -20,6 +20,11 @@ export const zhCN = {
   "menu.view": "视图",
   "menu.tools": "工具",
   "menu.help": "帮助",
+  // Workspaces (header tabs)
+  "workspace.issues": "Issues",
+  "workspace.pulls": "Pull Requests",
+  "workspace.tools": "工具",
+
   "menu.issues": "Issues",
   "menu.pulls": "Pull Requests",
   "menu.undo": "撤销",
@@ -61,6 +66,12 @@ export const zhCN = {
   "panelTitle.pull.list": "PR 列表",
   "panelTitle.pull.detail": "PR 详情",
   "panelTitle.settings": "设置",
+  "panelTitle.git.history": "Git 历史",
+  "panelTitle.terminal": "终端",
+
+  // Tools workspace placeholders
+  "gitHistory.placeholder": "提交历史与分支图（本地 + 远端分支、领先/落后状态）——基于 git2 的数据管线与泳道图渲染，规划中。",
+  "terminal.placeholder": "集成终端（macOS zsh/bash、Windows cmd/PowerShell，可在设置中选择）——规划中。",
 
   // Panel modes
   "mode.list": "列表",

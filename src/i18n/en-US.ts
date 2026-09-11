@@ -19,6 +19,11 @@ export const enUS: Record<MessageKey, string> = {
   "menu.view": "View",
   "menu.tools": "Tools",
   "menu.help": "Help",
+  // Workspaces (header tabs)
+  "workspace.issues": "Issues",
+  "workspace.pulls": "Pull Requests",
+  "workspace.tools": "Tools",
+
   "menu.issues": "Issues",
   "menu.pulls": "Pull Requests",
   "menu.undo": "Undo",
@@ -60,6 +65,12 @@ export const enUS: Record<MessageKey, string> = {
   "panelTitle.pull.list": "Pull requests",
   "panelTitle.pull.detail": "Pull request detail",
   "panelTitle.settings": "Settings",
+  "panelTitle.git.history": "Git history",
+  "panelTitle.terminal": "Terminal",
+
+  // Tools workspace placeholders
+  "gitHistory.placeholder": "Commit graph with local + remote branches and ahead/behind status — git2-backed data pipeline with lane rendering, planned.",
+  "terminal.placeholder": "Integrated terminal (macOS zsh/bash, Windows cmd/PowerShell — selectable in settings), planned.",
 
   // Panel modes
   "mode.list": "List",

@@ -89,10 +89,11 @@ const menus = computed(() =>
   buildMenuDefs({
     pickRepo: () => void repo.pick(),
     refresh: refreshActive,
-    refreshDisabled: () => activeKey.value === "settings",
+    refreshDisabled: () => activeKey.value !== "issues" && activeKey.value !== "pulls",
     openPreferences,
     gotoIssues: () => switchWorkspace("issues"),
     gotoPulls: () => switchWorkspace("pulls"),
+    gotoTools: () => switchWorkspace("tools"),
     statusbarVisible: () => settings.statusbarVisible,
     toggleStatusbar: () => settings.toggleStatusbar(),
     githubUrlMissing: () => currentGitHubUrl() === null,
@@ -116,6 +117,7 @@ function onKeydown(event: KeyboardEvent) {
     r: refreshActive,
     "1": () => switchWorkspace("issues"),
     "2": () => switchWorkspace("pulls"),
+    "3": () => switchWorkspace("tools"),
     ",": openPreferences,
   };
   // Shifted layer only, so ⌘C/⌘O stay the webview's native copy/open.
@@ -182,7 +184,7 @@ onBeforeUnmount(() => {
           :class="{ active: activeKey === w.key }"
           @click="switchWorkspace(w.key)"
         >
-          {{ w.label }}
+          {{ t(w.labelKey) }}
         </button>
       </nav>
 

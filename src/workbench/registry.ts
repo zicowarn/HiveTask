@@ -14,6 +14,8 @@ import IssueDetailPanel from "../panels/IssueDetailPanel.vue";
 import PullListPanel from "../panels/PullListPanel.vue";
 import PullDetailPanel from "../panels/PullDetailPanel.vue";
 import SettingsPanel from "../panels/SettingsPanel.vue";
+import GitHistoryPanel from "../panels/GitHistoryPanel.vue";
+import TerminalPanel from "../panels/TerminalPanel.vue";
 import IssueListMode from "../panels/modes/IssueListMode.vue";
 import IssueMilestoneMode from "../panels/modes/IssueMilestoneMode.vue";
 import SettingsBasicMode from "../panels/modes/SettingsBasicMode.vue";
@@ -55,6 +57,8 @@ registerPanel("issue.list", IssueListPanel, [
 registerPanel("issue.detail", IssueDetailPanel);
 registerPanel("pull.list", PullListPanel);
 registerPanel("pull.detail", PullDetailPanel);
+registerPanel("git.history", GitHistoryPanel);
+registerPanel("terminal", TerminalPanel);
 registerPanel("settings", SettingsPanel, [
   { key: "basic", labelKey: "mode.settings.basic", component: SettingsBasicMode },
 ]);

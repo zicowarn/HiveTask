@@ -23,4 +23,6 @@ export const panelTypes: PanelTypeInfo[] = [
   { type: "pull.list", titleKey: "panelTitle.pull.list" },
   { type: "pull.detail", titleKey: "panelTitle.pull.detail" },
   { type: "settings", titleKey: "panelTitle.settings" },
+  { type: "git.history", titleKey: "panelTitle.git.history" },
+  { type: "terminal", titleKey: "panelTitle.terminal" },
 ];
