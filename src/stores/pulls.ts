@@ -2,7 +2,7 @@ import { defineStore } from "pinia";
 import { computed, ref } from "vue";
 import { api, isTauri } from "../api";
 import { t } from "../i18n";
-import type { Pull, PullState } from "../types";
+import type { Comment, Pull, PullState } from "../types";
 import { useRepoStore } from "./repo";
 
 export const usePullsStore = defineStore("pulls", () => {
@@ -16,6 +16,11 @@ export const usePullsStore = defineStore("pulls", () => {
   // PR numbers whose full record (gh pr view) has been merged into the list.
   const detailedNumbers = ref<Set<number>>(new Set());
   const detailLoading = ref(false);
+  // Conversation of the selected PR; pending rows are optimistic adds.
+  const comments = ref<Comment[]>([]);
+  const commentsLoading = ref(false);
+  const commentSubmitting = ref(false);
+  const stateWorking = ref(false);
 
   function select(pull: Pull | null) {
     selectedNumber.value = pull ? pull.number : null;
@@ -91,6 +96,81 @@ export const usePullsStore = defineStore("pulls", () => {
     await loadCache();
   }
 
+  // ---- Conversation (write-through) ----
+
+  function clearComments() {
+    comments.value = [];
+  }
+
+  /** Cache-first paint, then reconcile with GitHub; only the currently
+   * selected PR may land in `comments`. */
+  async function loadComments(number: number) {
+    const repo = useRepoStore();
+    if (!repo.current || !isTauri()) return;
+    commentsLoading.value = true;
+    try {
+      const cached = await api.listCachedComments(repo.current, "pull", number);
+      if (selectedNumber.value === number) comments.value = cached;
+      const fresh = await api.fetchComments(repo.current, "pull", number);
+      if (selectedNumber.value === number) comments.value = fresh;
+    } catch (e) {
+      error.value = String(e);
+    } finally {
+      commentsLoading.value = false;
+    }
+  }
+
+  /** Optimistic pending row → gh post → replace with the fresh conversation. */
+  async function addComment(number: number, body: string) {
+    const repo = useRepoStore();
+    if (!repo.current) return;
+    if (!isTauri()) {
+      error.value = t("error.browserPreview");
+      return;
+    }
+    commentSubmitting.value = true;
+    comments.value.push({ body, pending: true });
+    try {
+      const fresh = await api.addComment(repo.current, "pull", number, body);
+      if (selectedNumber.value === number) comments.value = fresh;
+    } catch (e) {
+      comments.value = comments.value.filter((c) => !c.pending);
+      error.value = String(e);
+    } finally {
+      commentSubmitting.value = false;
+    }
+  }
+
+  /** Optimistic state flip → gh → patch the store from the fresh full
+   * record (a close that raced a merge lands as MERGED). */
+  async function setClosed(pull: Pull, closed: boolean) {
+    const repo = useRepoStore();
+    if (!repo.current) return;
+    if (!isTauri()) {
+      error.value = t("error.browserPreview");
+      return;
+    }
+    stateWorking.value = true;
+    const previous = pull.state;
+    patchState(pull.number, closed ? "CLOSED" : "OPEN");
+    try {
+      const fresh = await api.setPullState(repo.current, pull.number, closed);
+      const index = pulls.value.findIndex((p) => p.number === fresh.number);
+      if (index >= 0) pulls.value[index] = fresh;
+      detailedNumbers.value.add(fresh.number);
+    } catch (e) {
+      patchState(pull.number, previous);
+      error.value = String(e);
+    } finally {
+      stateWorking.value = false;
+    }
+  }
+
+  function patchState(number: number, stateValue: string) {
+    const target = pulls.value.find((p) => p.number === number);
+    if (target) target.state = stateValue;
+  }
+
   return {
     pulls,
     state,
@@ -102,10 +182,18 @@ export const usePullsStore = defineStore("pulls", () => {
     detailLoading,
     selected,
     count,
+    comments,
+    commentsLoading,
+    commentSubmitting,
+    stateWorking,
     loadCache,
     refresh,
     setState,
     select,
     ensureDetail,
+    clearComments,
+    loadComments,
+    addComment,
+    setClosed,
   };
 });

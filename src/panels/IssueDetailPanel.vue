@@ -1,11 +1,14 @@
 <script setup lang="ts">
+import { watch } from "vue";
 import { storeToRefs } from "pinia";
 import PanelShell from "../workbench/PanelShell.vue";
 import MarkdownView from "../components/MarkdownView.vue";
+import CommentsSection from "../components/CommentsSection.vue";
 import { stripHtmlComments } from "../components/markdown";
 import { useIssuesStore } from "../stores/issues";
 import { useRepoStore } from "../stores/repo";
 import { useI18n } from "../i18n";
+import { useCloseReopen } from "./close-reopen";
 
 defineProps<{ leafId?: string; panelType?: string }>();
 
@@ -13,6 +16,29 @@ const issues = useIssuesStore();
 const repo = useRepoStore();
 const { selected } = storeToRefs(issues);
 const { t } = useI18n();
+
+const {
+  armed: closeArmed,
+  working: closeWorking,
+  close: closeClick,
+  reopen: reopenClick,
+} = useCloseReopen(async (closed) => {
+  if (issues.selected) await issues.setClosed(issues.selected, closed);
+});
+
+// Load the conversation whenever the selection changes.
+watch(
+  () => issues.selected?.number,
+  (number) => {
+    if (number) void issues.loadComments(number);
+    else issues.clearComments();
+  },
+  { immediate: true },
+);
+
+function onSubmitComment(body: string) {
+  if (issues.selected) void issues.addComment(issues.selected.number, body);
+}
 
 function hasVisibleBody(body?: string | null): boolean {
   return !!body && stripHtmlComments(body).trim().length > 0;
@@ -37,6 +63,22 @@ function openUrl(url?: string | null) {
         <div class="detail-title-row">
           <span class="detail-number">#{{ selected.number }}</span>
           <span class="detail-state" :class="selected.state.toLowerCase()">{{ selected.state }}</span>
+          <button
+            class="state-action"
+            :class="{ armed: closeArmed }"
+            :disabled="closeWorking"
+            @click="selected.state === 'OPEN' ? closeClick() : reopenClick()"
+          >
+            {{
+              closeWorking
+                ? t("detail.working")
+                : selected.state === "OPEN"
+                  ? closeArmed
+                    ? t("detail.closeConfirm")
+                    : t("detail.close")
+                  : t("detail.reopen")
+            }}
+          </button>
         </div>
         <h2 class="detail-title">{{ selected.title }}</h2>
         <div class="detail-tags">
@@ -47,6 +89,13 @@ function openUrl(url?: string | null) {
       <div class="detail-body">
         <MarkdownView v-if="hasVisibleBody(selected.body)" :source="selected.body" />
         <p v-else class="detail-nobody">{{ t("common.noBody") }}</p>
+
+        <CommentsSection
+          :comments="issues.comments"
+          :loading="issues.commentsLoading"
+          :submitting="issues.commentSubmitting"
+          @submit="onSubmitComment"
+        />
       </div>
 
       <footer class="detail-footer">
@@ -83,6 +132,31 @@ function openUrl(url?: string | null) {
 .detail-number {
   font-size: 13px;
   color: var(--text-dim);
+}
+.state-action {
+  margin-left: auto;
+  border: 1px solid var(--border);
+  background: var(--bg-panel);
+  color: var(--text);
+  font-size: 11px;
+  height: 22px;
+  padding: 0 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.state-action:hover:not(:disabled) {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+.state-action.armed:not(:disabled) {
+  border-color: var(--danger);
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+.state-action:disabled {
+  opacity: 0.5;
+  cursor: default;
 }
 .detail-state {
   font-size: 11px;

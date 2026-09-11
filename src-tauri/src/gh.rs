@@ -8,7 +8,7 @@ use std::process::Command;
 use anyhow::{anyhow, Context, Result};
 use serde_json::Value;
 
-use crate::models::{Issue, Pull};
+use crate::models::{Comment, Issue, Pull};
 
 /// Fields requested from `gh issue list --json`.
 const ISSUE_LIST_FIELDS: &str = "number,title,state,body,author,labels,\
@@ -102,56 +102,55 @@ pub fn fetch_issues(repo: &Path, state: &str, limit: u32) -> Result<Vec<Issue>> 
 fn parse_issues(stdout: &str) -> Result<Vec<Issue>> {
     let values: Vec<Value> =
         serde_json::from_str(stdout).context("解析 gh 的 JSON 输出失败")?;
+    Ok(values.iter().map(parse_issue_value).collect())
+}
 
-    let mut issues = Vec::with_capacity(values.len());
-    for v in values {
-        let labels = v
-            .get("labels")
-            .and_then(Value::as_array)
-            .map(|arr| {
-                arr.iter()
-                    .filter_map(|l| l.get("name").and_then(Value::as_str).map(str::to_string))
-                    .collect::<Vec<_>>()
-            })
-            .unwrap_or_default();
+fn parse_issue_value(v: &Value) -> Issue {
+    let labels = v
+        .get("labels")
+        .and_then(Value::as_array)
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|l| l.get("name").and_then(Value::as_str).map(str::to_string))
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
 
-        let assignees = v
-            .get("assignees")
-            .and_then(Value::as_array)
-            .map(|arr| {
-                arr.iter()
-                    .filter_map(|u| u.get("login").and_then(Value::as_str).map(str::to_string))
-                    .collect::<Vec<_>>()
-            })
-            .unwrap_or_default();
+    let assignees = v
+        .get("assignees")
+        .and_then(Value::as_array)
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|u| u.get("login").and_then(Value::as_str).map(str::to_string))
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
 
-        issues.push(Issue {
-            number: v.get("number").and_then(Value::as_i64).unwrap_or_default(),
-            title: v
-                .get("title")
-                .and_then(Value::as_str)
-                .unwrap_or_default()
-                .to_string(),
-            state: v
-                .get("state")
-                .and_then(Value::as_str)
-                .unwrap_or("OPEN")
-                .to_string(),
-            body: string_field(&v, "body"),
-            author: v.get("author").and_then(|a| a.get("login")).and_then(Value::as_str).map(str::to_string),
-            milestone: v
-                .get("milestone")
-                .and_then(|m| m.get("title"))
-                .and_then(Value::as_str)
-                .map(str::to_string),
-            labels,
-            assignees,
-            created_at: string_field(&v, "createdAt"),
-            updated_at: string_field(&v, "updatedAt"),
-            url: string_field(&v, "url"),
-        });
+    Issue {
+        number: v.get("number").and_then(Value::as_i64).unwrap_or_default(),
+        title: v
+            .get("title")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string(),
+        state: v
+            .get("state")
+            .and_then(Value::as_str)
+            .unwrap_or("OPEN")
+            .to_string(),
+        body: string_field(&v, "body"),
+        author: v.get("author").and_then(|a| a.get("login")).and_then(Value::as_str).map(str::to_string),
+        milestone: v
+            .get("milestone")
+            .and_then(|m| m.get("title"))
+            .and_then(Value::as_str)
+            .map(str::to_string),
+        labels,
+        assignees,
+        created_at: string_field(&v, "createdAt"),
+        updated_at: string_field(&v, "updatedAt"),
+        url: string_field(&v, "url"),
     }
-    Ok(issues)
 }
 
 /// Minimal fields for `gh pr list --json`. Nested connections (reviews,
@@ -217,6 +216,68 @@ pub fn fetch_pull_detail(repo: &Path, number: i64) -> Result<Pull> {
     let value: Value =
         serde_json::from_str(&stdout).context("解析 gh pr view 的 JSON 输出失败")?;
     Ok(parse_pull_value(&value))
+}
+
+// ---- Mutations & conversations (the P1 write-through surface) ----
+
+/// Fetch an entity's conversation comments via `gh issue|pr view --json
+/// comments`. `kind` is "issue" | "pull" (the gh subcommand).
+pub fn fetch_comments(repo: &Path, kind: &str, number: i64) -> Result<Vec<Comment>> {
+    let number_str = number.to_string();
+    let args = [kind, "view", &number_str, "--json", "comments"];
+    let stdout = run_gh(repo, &args)?;
+    let value: Value = serde_json::from_str(&stdout).context("解析 gh 的评论 JSON 失败")?;
+    Ok(value
+        .get("comments")
+        .and_then(Value::as_array)
+        .map(|arr| arr.iter().map(parse_comment_value).collect())
+        .unwrap_or_default())
+}
+
+fn parse_comment_value(v: &Value) -> Comment {
+    Comment {
+        author: v
+            .get("author")
+            .and_then(|a| a.get("login"))
+            .and_then(Value::as_str)
+            .map(str::to_string),
+        body: string_field(v, "body"),
+        created_at: string_field(v, "createdAt"),
+        pending: false,
+    }
+}
+
+/// Post a comment via `gh issue|pr comment`, then re-read the conversation.
+/// Returning the fresh list IS the write-through: one roundtrip leaves the
+/// cache and the UI consistent without a separate refresh call.
+pub fn add_comment(repo: &Path, kind: &str, number: i64, body: &str) -> Result<Vec<Comment>> {
+    let number_str = number.to_string();
+    let args = [kind, "comment", &number_str, "--body", body];
+    run_gh(repo, &args)?;
+    fetch_comments(repo, kind, number)
+}
+
+/// Close or reopen an issue; returns the fresh entity for store patching.
+pub fn set_issue_state(repo: &Path, number: i64, closed: bool) -> Result<Issue> {
+    let number_str = number.to_string();
+    let verb = if closed { "close" } else { "reopen" };
+    let args = ["issue", verb, &number_str];
+    run_gh(repo, &args)?;
+    let args = ["issue", "view", &number_str, "--json", ISSUE_LIST_FIELDS];
+    let stdout = run_gh(repo, &args)?;
+    let value: Value =
+        serde_json::from_str(&stdout).context("解析 gh issue view 的 JSON 输出失败")?;
+    Ok(parse_issue_value(&value))
+}
+
+/// Close or reopen a pull request; returns the fresh full record so a close
+/// that raced a merge surfaces as MERGED, not CLOSED.
+pub fn set_pull_state(repo: &Path, number: i64, closed: bool) -> Result<Pull> {
+    let number_str = number.to_string();
+    let verb = if closed { "close" } else { "reopen" };
+    let args = ["pr", verb, &number_str];
+    run_gh(repo, &args)?;
+    fetch_pull_detail(repo, number)
 }
 
 fn parse_pulls(stdout: &str) -> Result<Vec<Pull>> {
@@ -447,6 +508,49 @@ mod tests {
     #[test]
     fn parses_empty_pr_array() {
         assert!(parse_pulls("[]").unwrap().is_empty());
+    }
+
+    const COMMENTS_SAMPLE: &str = r#"{
+      "comments": [
+        {
+          "author": {"login": "alice", "isBot": false},
+          "body": "Reproduced on Fedora 44.",
+          "createdAt": "2026-09-01T12:00:00Z"
+        },
+        {
+          "author": {"login": "bob"},
+          "body": null,
+          "createdAt": null
+        }
+      ]
+    }"#;
+
+    #[test]
+    fn parses_gh_comments_json() {
+        let value: Value = serde_json::from_str(COMMENTS_SAMPLE).unwrap();
+        let comments: Vec<Comment> = value
+            .get("comments")
+            .and_then(Value::as_array)
+            .map(|arr| arr.iter().map(parse_comment_value).collect())
+            .unwrap_or_default();
+        assert_eq!(comments.len(), 2);
+        assert_eq!(comments[0].author.as_deref(), Some("alice"));
+        assert_eq!(comments[0].body.as_deref(), Some("Reproduced on Fedora 44."));
+        assert_eq!(comments[0].created_at.as_deref(), Some("2026-09-01T12:00:00Z"));
+        assert!(!comments[0].pending);
+        assert!(comments[1].body.is_none());
+        assert!(comments[1].created_at.is_none());
+    }
+
+    #[test]
+    fn parses_missing_comments_field() {
+        let value: Value = serde_json::from_str("{}").unwrap();
+        let comments: Vec<Comment> = value
+            .get("comments")
+            .and_then(Value::as_array)
+            .map(|arr| arr.iter().map(parse_comment_value).collect())
+            .unwrap_or_default();
+        assert!(comments.is_empty());
     }
 
     #[test]

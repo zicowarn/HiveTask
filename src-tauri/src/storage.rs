@@ -13,14 +13,15 @@ use anyhow::{Context, Result};
 use rusqlite::Connection;
 use serde_json::json;
 
-use crate::models::{Issue, Pull};
+use crate::models::{Comment, Issue, Pull};
 
 const MIGRATION_001: &str = include_str!("migrations/001_initial.sql");
 const MIGRATION_002: &str = include_str!("migrations/002_projects.sql");
 const MIGRATION_003: &str = include_str!("migrations/003_pr_draft.sql");
+const MIGRATION_004: &str = include_str!("migrations/004_comments.sql");
 
 /// Latest schema revision tracked through PRAGMA user_version.
-const CURRENT_SCHEMA_VERSION: i64 = 3;
+const CURRENT_SCHEMA_VERSION: i64 = 4;
 
 pub fn db_path(repo: &Path) -> PathBuf {
     repo.join(".hivetask").join("hivetask.db")
@@ -55,6 +56,9 @@ fn migrate(conn: &mut Connection) -> Result<()> {
     // guarantees a single execution on both fresh and legacy databases.
     if version < 3 {
         conn.execute_batch(MIGRATION_003).context("迁移 003 失败")?;
+    }
+    if version < 4 {
+        conn.execute_batch(MIGRATION_004).context("迁移 004 失败")?;
     }
     conn.pragma_update(None, "user_version", CURRENT_SCHEMA_VERSION)?;
     Ok(())
@@ -164,6 +168,56 @@ fn map_issue(row: &rusqlite::Row<'_>) -> rusqlite::Result<Issue> {
 fn parse_string_array(raw: Option<String>) -> Vec<String> {
     raw.and_then(|s| serde_json::from_str::<Vec<String>>(&s).ok())
         .unwrap_or_default()
+}
+
+/// Replace the cached comments of one entity (kind: "issue" | "pull").
+pub fn replace_comments(
+    conn: &mut Connection,
+    kind: &str,
+    number: i64,
+    comments: &[Comment],
+) -> Result<()> {
+    let tx = conn.transaction()?;
+    tx.execute(
+        "DELETE FROM comments WHERE kind = ?1 AND number = ?2",
+        (kind, number),
+    )?;
+    for comment in comments {
+        tx.execute(
+            "INSERT INTO comments (kind, number, author, body, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+            rusqlite::params![kind, number, comment.author, comment.body, comment.created_at],
+        )?;
+    }
+    tx.commit()?;
+    Ok(())
+}
+
+/// Read cached comments of one entity, oldest first.
+pub fn list_comments(conn: &Connection, kind: &str, number: i64) -> Result<Vec<Comment>> {
+    let mut stmt = conn.prepare(
+        "SELECT author, body, created_at FROM comments
+         WHERE kind = ?1 AND number = ?2
+         ORDER BY created_at ASC, rowid ASC",
+    )?;
+    let rows = stmt.query_map((kind, number), |row| {
+        Ok(Comment {
+            author: row.get("author")?,
+            body: row.get("body")?,
+            created_at: row.get("created_at")?,
+            pending: false,
+        })
+    })?;
+    rows.collect::<std::result::Result<Vec<_>, _>>().map_err(Into::into)
+}
+
+/// Patch one cached issue's state after a close/reopen mutation.
+pub fn update_issue_state(conn: &Connection, number: i64, state: &str) -> Result<()> {
+    conn.execute(
+        "UPDATE issues SET state = ?1, synced_at = datetime('now') WHERE number = ?2",
+        (state, number),
+    )?;
+    Ok(())
 }
 
 /// Full refresh of the cached PR set, same state-scoped semantics as
@@ -335,7 +389,7 @@ mod tests {
         let conn = open(&repo).unwrap();
         let version: i64 =
             conn.pragma_query_value(None, "user_version", |row| row.get(0)).unwrap();
-        assert_eq!(version, 3);
+        assert_eq!(version, CURRENT_SCHEMA_VERSION);
         assert_eq!(cached_issue_count(&conn, "all").unwrap(), 1);
         std::fs::remove_dir_all(&repo).ok();
     }
@@ -419,6 +473,94 @@ mod tests {
         assert!(open[0].is_draft);
         assert_eq!(open[0].review_decision.as_deref(), Some("APPROVED"));
         assert_eq!(open[0].head_ref.as_deref(), Some("feature"));
+
+        std::fs::remove_dir_all(&repo).ok();
+    }
+}
+
+#[cfg(test)]
+mod comment_tests {
+    use super::*;
+    use crate::models::Comment;
+
+    fn temp_repo() -> PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "hivetask-comments-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    fn comment(author: &str, created_at: &str) -> Comment {
+        Comment {
+            author: Some(author.into()),
+            body: Some(format!("body by {author}")),
+            created_at: Some(created_at.into()),
+            pending: false,
+        }
+    }
+
+    #[test]
+    fn comments_roundtrip_per_entity() {
+        let repo = temp_repo();
+        let mut conn = open(&repo).unwrap();
+
+        replace_comments(
+            &mut conn,
+            "issue",
+            42,
+            &[comment("alice", "2026-09-01T10:00:00Z"), comment("bob", "2026-09-02T11:00:00Z")],
+        )
+        .unwrap();
+        // A PR with the same number must not bleed across kinds.
+        replace_comments(&mut conn, "pull", 42, &[comment("carol", "2026-09-03T09:00:00Z")]).unwrap();
+
+        let issue_comments = list_comments(&conn, "issue", 42).unwrap();
+        assert_eq!(issue_comments.len(), 2);
+        assert_eq!(issue_comments[0].author.as_deref(), Some("alice"));
+        let pull_comments = list_comments(&conn, "pull", 42).unwrap();
+        assert_eq!(pull_comments.len(), 1);
+        assert_eq!(pull_comments[0].author.as_deref(), Some("carol"));
+
+        // Re-sync replaces wholesale instead of appending.
+        replace_comments(&mut conn, "issue", 42, &[comment("dave", "2026-09-04T08:00:00Z")]).unwrap();
+        let resynced = list_comments(&conn, "issue", 42).unwrap();
+        assert_eq!(resynced.len(), 1);
+        assert_eq!(resynced[0].author.as_deref(), Some("dave"));
+
+        std::fs::remove_dir_all(&repo).ok();
+    }
+
+    #[test]
+    fn update_issue_state_patches_cached_row() {
+        let repo = temp_repo();
+        let mut conn = open(&repo).unwrap();
+        let issues = vec![Issue {
+            number: 7,
+            title: "issue 7".into(),
+            state: "OPEN".into(),
+            body: None,
+            author: None,
+            milestone: None,
+            labels: vec![],
+            assignees: vec![],
+            created_at: None,
+            updated_at: None,
+            url: None,
+        }];
+        replace_issues(&mut conn, "open", &issues).unwrap();
+
+        update_issue_state(&conn, 7, "CLOSED").unwrap();
+        let open_bucket = list_issues(&conn, "open").unwrap();
+        assert!(open_bucket.is_empty());
+        let closed_bucket = list_issues(&conn, "closed").unwrap();
+        assert_eq!(closed_bucket.len(), 1);
+        assert_eq!(closed_bucket[0].state, "CLOSED");
 
         std::fs::remove_dir_all(&repo).ok();
     }

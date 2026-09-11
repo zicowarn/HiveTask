@@ -79,6 +79,18 @@ pub struct HealthInfo {
     pub gh_version: Option<String>,
 }
 
+/// One conversation comment on an issue or PR.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Comment {
+    pub author: Option<String>,
+    pub body: Option<String>,
+    pub created_at: Option<String>,
+    /// Frontend-only marker for the optimistic pending row; never set by Rust.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub pending: bool,
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RepoInfo {

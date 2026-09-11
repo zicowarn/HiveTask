@@ -26,6 +26,14 @@ export interface RepoInfo {
 
 export type IssueState = "open" | "closed" | "all";
 
+/** One conversation comment; `pending` marks the optimistic pre-ack row. */
+export interface Comment {
+  author?: string | null;
+  body?: string | null;
+  createdAt?: string | null;
+  pending?: boolean;
+}
+
 export interface Pull {
   number: number;
   title: string;

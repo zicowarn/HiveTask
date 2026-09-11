@@ -1,13 +1,16 @@
 <script setup lang="ts">
+import { watch } from "vue";
 import { storeToRefs } from "pinia";
 import PanelShell from "../workbench/PanelShell.vue";
 import MarkdownView from "../components/MarkdownView.vue";
+import CommentsSection from "../components/CommentsSection.vue";
 import { stripHtmlComments } from "../components/markdown";
 import { usePullsStore } from "../stores/pulls";
 import { useRepoStore } from "../stores/repo";
 import { useI18n } from "../i18n";
 import { openExternalUrl } from "../open-url";
 import { reviewLabel } from "./review-label";
+import { useCloseReopen } from "./close-reopen";
 
 defineProps<{ leafId?: string; panelType?: string }>();
 
@@ -15,6 +18,29 @@ const pulls = usePullsStore();
 const repo = useRepoStore();
 const { selected, detailLoading } = storeToRefs(pulls);
 const { t } = useI18n();
+
+const {
+  armed: closeArmed,
+  working: closeWorking,
+  close: closeClick,
+  reopen: reopenClick,
+} = useCloseReopen(async (closed) => {
+  if (pulls.selected) await pulls.setClosed(pulls.selected, closed);
+});
+
+// Load the conversation whenever the selection changes.
+watch(
+  () => pulls.selected?.number,
+  (number) => {
+    if (number) void pulls.loadComments(number);
+    else pulls.clearComments();
+  },
+  { immediate: true },
+);
+
+function onSubmitComment(body: string) {
+  if (pulls.selected) void pulls.addComment(pulls.selected.number, body);
+}
 
 function hasVisibleBody(body?: string | null): boolean {
   return !!body && stripHtmlComments(body).trim().length > 0;
@@ -42,6 +68,23 @@ function hasVisibleBody(body?: string | null): boolean {
           >
             {{ reviewLabel(selected.reviewDecision) }}
           </span>
+          <button
+            v-if="selected.state !== 'MERGED'"
+            class="state-action"
+            :class="{ armed: closeArmed }"
+            :disabled="closeWorking"
+            @click="selected.state === 'OPEN' ? closeClick() : reopenClick()"
+          >
+            {{
+              closeWorking
+                ? t("detail.working")
+                : selected.state === "OPEN"
+                  ? closeArmed
+                    ? t("detail.closeConfirm")
+                    : t("detail.close")
+                  : t("detail.reopen")
+            }}
+          </button>
         </div>
         <h2 class="detail-title">{{ selected.title }}</h2>
 
@@ -67,6 +110,13 @@ function hasVisibleBody(body?: string | null): boolean {
         <MarkdownView v-if="hasVisibleBody(selected.body)" :source="selected.body" />
         <p v-else-if="detailLoading" class="detail-nobody">{{ t("common.loadingFull") }}</p>
         <p v-else class="detail-nobody">{{ t("common.noBody") }}</p>
+
+        <CommentsSection
+          :comments="pulls.comments"
+          :loading="pulls.commentsLoading"
+          :submitting="pulls.commentSubmitting"
+          @submit="onSubmitComment"
+        />
       </div>
 
       <footer class="detail-footer">
@@ -107,6 +157,31 @@ function hasVisibleBody(body?: string | null): boolean {
 .detail-number {
   font-size: 13px;
   color: var(--text-dim);
+}
+.state-action {
+  margin-left: auto;
+  border: 1px solid var(--border);
+  background: var(--bg-panel);
+  color: var(--text);
+  font-size: 11px;
+  height: 22px;
+  padding: 0 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.state-action:hover:not(:disabled) {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+.state-action.armed:not(:disabled) {
+  border-color: var(--danger);
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+.state-action:disabled {
+  opacity: 0.5;
+  cursor: default;
 }
 .detail-state {
   font-size: 11px;

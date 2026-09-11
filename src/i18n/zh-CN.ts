@@ -100,6 +100,19 @@ export const zhCN = {
   "common.comments": "{n} 评论",
   "common.commits": "{n} 次提交",
 
+  // Comments (write-through)
+  "comments.title": "评论",
+  "comments.empty": "暂无评论",
+  "comments.placeholder": "写下评论，支持 Markdown（⌘↵ 发送）",
+  "comments.send": "评论",
+  "comments.sending": "发送中…",
+
+  // Detail state actions
+  "detail.close": "关闭",
+  "detail.reopen": "重新打开",
+  "detail.closeConfirm": "再点一次确认关闭",
+  "detail.working": "处理中…",
+
   // Issue workspace
   "issue.emptySelect": "从左侧选择一个 Issue 查看详情",
   "issue.emptyRepo": "先选择一个本地 Git 仓库，然后刷新 Issues",

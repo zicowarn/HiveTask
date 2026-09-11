@@ -99,6 +99,19 @@ export const enUS: Record<MessageKey, string> = {
   "common.comments": "{n} comments",
   "common.commits": "{n} commits",
 
+  // Comments (write-through)
+  "comments.title": "Comments",
+  "comments.empty": "No comments yet",
+  "comments.placeholder": "Write a comment — Markdown supported (⌘↵ to send)",
+  "comments.send": "Comment",
+  "comments.sending": "Sending…",
+
+  // Detail state actions
+  "detail.close": "Close",
+  "detail.reopen": "Reopen",
+  "detail.closeConfirm": "Click again to close",
+  "detail.working": "Working…",
+
   // Issue workspace
   "issue.emptySelect": "Select an issue on the left to see its details",
   "issue.emptyRepo": "Choose a local Git repository, then refresh issues",

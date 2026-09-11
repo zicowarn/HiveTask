@@ -10,7 +10,7 @@ use std::path::PathBuf;
 
 use tauri_plugin_dialog::DialogExt;
 
-use models::{HealthInfo, Issue, Pull, RepoInfo};
+use models::{Comment, HealthInfo, Issue, Pull, RepoInfo};
 
 /// gh CLI availability, for the onboarding banner.
 #[tauri::command]
@@ -119,6 +119,76 @@ fn cached_pull_count(repo_path: String, state: String) -> Result<i64, String> {
     storage::cached_pull_count(&conn, &state).map_err(|e| e.to_string())
 }
 
+/// Validate the entity kind shared by the comment commands ("issue" | "pull"
+/// — it becomes a gh subcommand, so it must never pass through unchecked).
+fn check_kind(kind: &str) -> Result<(), String> {
+    match kind {
+        "issue" | "pull" => Ok(()),
+        other => Err(format!("未知的实体类型: {other}")),
+    }
+}
+
+/// Read an entity's comments from the offline cache (cache-first rendering).
+#[tauri::command]
+fn list_cached_comments(
+    repo_path: String,
+    kind: String,
+    number: i64,
+) -> Result<Vec<Comment>, String> {
+    check_kind(&kind)?;
+    let repo = PathBuf::from(&repo_path);
+    let conn = storage::open(&repo).map_err(|e| e.to_string())?;
+    storage::list_comments(&conn, &kind, number).map_err(|e| e.to_string())
+}
+
+/// Fetch an entity's comments via gh, replace the cache slice, return fresh.
+#[tauri::command]
+fn fetch_comments(repo_path: String, kind: String, number: i64) -> Result<Vec<Comment>, String> {
+    check_kind(&kind)?;
+    let repo = PathBuf::from(&repo_path);
+    let comments = gh::fetch_comments(&repo, &kind, number).map_err(|e| e.to_string())?;
+    let mut conn = storage::open(&repo).map_err(|e| e.to_string())?;
+    storage::replace_comments(&mut conn, &kind, number, &comments).map_err(|e| e.to_string())?;
+    Ok(comments)
+}
+
+/// Post a comment via gh and return the fresh conversation (write-through).
+#[tauri::command]
+fn add_comment(
+    repo_path: String,
+    kind: String,
+    number: i64,
+    body: String,
+) -> Result<Vec<Comment>, String> {
+    check_kind(&kind)?;
+    let repo = PathBuf::from(&repo_path);
+    let comments = gh::add_comment(&repo, &kind, number, &body).map_err(|e| e.to_string())?;
+    let mut conn = storage::open(&repo).map_err(|e| e.to_string())?;
+    storage::replace_comments(&mut conn, &kind, number, &comments).map_err(|e| e.to_string())?;
+    Ok(comments)
+}
+
+/// Close or reopen an issue; patches the cache row and returns the fresh
+/// entity so the frontend can patch both stores from one source of truth.
+#[tauri::command]
+fn set_issue_state(repo_path: String, number: i64, closed: bool) -> Result<Issue, String> {
+    let repo = PathBuf::from(&repo_path);
+    let issue = gh::set_issue_state(&repo, number, closed).map_err(|e| e.to_string())?;
+    let conn = storage::open(&repo).map_err(|e| e.to_string())?;
+    storage::update_issue_state(&conn, number, &issue.state).map_err(|e| e.to_string())?;
+    Ok(issue)
+}
+
+/// Close or reopen a pull request; upserts the fresh full record.
+#[tauri::command]
+fn set_pull_state(repo_path: String, number: i64, closed: bool) -> Result<Pull, String> {
+    let repo = PathBuf::from(&repo_path);
+    let pull = gh::set_pull_state(&repo, number, closed).map_err(|e| e.to_string())?;
+    let conn = storage::open(&repo).map_err(|e| e.to_string())?;
+    storage::upsert_pull(&conn, &pull).map_err(|e| e.to_string())?;
+    Ok(pull)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -135,7 +205,12 @@ pub fn run() {
             refresh_pulls,
             refresh_pull_detail,
             list_cached_pulls,
-            cached_pull_count
+            cached_pull_count,
+            list_cached_comments,
+            fetch_comments,
+            add_comment,
+            set_issue_state,
+            set_pull_state
         ])
         .run(tauri::generate_context!())
         .expect("error while running HiveTask");

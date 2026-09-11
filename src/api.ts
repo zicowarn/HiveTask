@@ -6,6 +6,7 @@
  */
 import { invoke } from "@tauri-apps/api/core";
 import type {
+  Comment,
   HealthInfo,
   Issue,
   IssueState,
@@ -35,4 +36,15 @@ export const api = {
     invoke<Pull[]>("list_cached_pulls", { repoPath, state }),
   cachedPullCount: (repoPath: string, state: PullState) =>
     invoke<number>("cached_pull_count", { repoPath, state }),
+  listCachedComments: (repoPath: string, kind: "issue" | "pull", number: number) =>
+    invoke<Comment[]>("list_cached_comments", { repoPath, kind, number }),
+  fetchComments: (repoPath: string, kind: "issue" | "pull", number: number) =>
+    invoke<Comment[]>("fetch_comments", { repoPath, kind, number }),
+  // Returns the fresh conversation — the write-through contract.
+  addComment: (repoPath: string, kind: "issue" | "pull", number: number, body: string) =>
+    invoke<Comment[]>("add_comment", { repoPath, kind, number, body }),
+  setIssueState: (repoPath: string, number: number, closed: boolean) =>
+    invoke<Issue>("set_issue_state", { repoPath, number, closed }),
+  setPullState: (repoPath: string, number: number, closed: boolean) =>
+    invoke<Pull>("set_pull_state", { repoPath, number, closed }),
 };
