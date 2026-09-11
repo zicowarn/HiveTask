@@ -35,7 +35,7 @@
 - `src/stores/workbench.ts`（新增 Pinia store）：
   - 二叉布局树：`LeafNode {id,type:"leaf",panel}` / `SplitNode {id,type:"split",dir:"h"|"v",ratio,first,second}`。
   - 操作：`splitLeaf(id, dir)`（叶子原位替换为 0.5 分割节点）、`closeLeaf(id)`（仅允许有父节点的叶子，兄弟节点继承其位置或成为新根）、`canCloseLeaf`（最后一个面板时关闭按钮禁用）、`resetWorkspace`。
-  - 每个 Workspace 一棵独立布局树；深 watch + 250ms 合并写入 localStorage（`hivetask-workbench-layout-v1`）。
+  - 每个 Workspace 一棵独立布局树；深 watch + 250ms 合并写入 localStorage（`hivetask.workbench-layout-v1`）。
   - 读取时递归校验节点结构与面板类型白名单，损坏/缺失按工作区回退默认布局（h 分割 0.38：列表 + 详情）。
 - `src/workbench/WorkbenchNode.vue`（新增）：递归渲染器，叶子渲染注册面板并透传 `leafId`，分割节点渲染 SplitPane 并双向绑定 `ratio`。
 - `src/workbench/PanelShell.vue`：头部新增 ▥（左右分屏）/ ▤（上下分屏）/ ✕（关闭）三个控件，固定位于面板最右端（筛选/刷新之后）。
