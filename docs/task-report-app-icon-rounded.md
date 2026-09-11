@@ -17,11 +17,17 @@ Dock / 任务栏中应用图标显示为**方形**，没有圆角。
 
 ## 2. 圆角资源生成
 
-- 新增 `src-tauri/scripts/make-rounded-icon.swift`：把原方形图标裁进透明画布，
-  圆角比例取 Big Sur 连续圆角模板的 `0.2235`（1024 图上半径≈228px）。
+- 新增 `src-tauri/scripts/make-rounded-icon.swift`：把原方形图标缩进**居中的圆角
+  瓦片**，瓦片外留透明边距。
+  - **瓦片占比 `tile=0.82`**：Apple 的 macOS 图标网格是 1024 画布上约 824×824
+    的瓦片（≈80.5%），其余为透明边距。首版做成满画布（100%）会明显比系统应用
+    偏大，故默认缩到 82%（实测不透明包围盒 840/1024＝82.03%，四周各留 92px）。
+  - **圆角比例 `radiusFraction=0.2235` 相对瓦片边长**（而非画布），这样加边距
+    不会改变角部观感（1024 下半径 187，对应 Apple 的 185.4/824）。
   - 用 `NSBitmapImageRep` 显式位图渲染，而非 `lockFocus()`——后者会继承屏幕
     backing scale，在 Retina 上输出 2048 图、换机器结果漂移。
-  - 源图本身已有不透明 `#1e1f22` 底，故只做"圆角裁剪 + 绘制"，圆角外为真透明。
+  - 源图本身已有不透明 `#1e1f22` 底，故只做"圆角裁剪 + 绘制"，瓦片外与圆角
+    缺口均为真透明。
 - 以生成图为输入跑 `pnpm tauri icon`，重新导出桌面图标；随后**还原
   iOS/Android/Windows 磁贴生成物**——桌面项目不打包它们，且 iOS 要求图标
   不得带 alpha（自动圆角会被系统拒绝），保留会埋雷。
@@ -64,6 +70,12 @@ println!("cargo:rerun-if-changed=icons");
 ## 5. 备注
 
 - 若 Dock 仍显示旧图标，属系统图标缓存：`killall Dock Finder` 后重开。
-- 调圆角弧度：改脚本最后一个参数重跑即可（`0.2235`≈Big Sur，想更圆可到 `0.25`）。
+- 调尺寸/圆角：脚本参数依次为 `<输入> <输出> [画布] [瓦片占比] [圆角比例]`
+  ```bash
+  cd src-tauri && swift scripts/make-rounded-icon.swift \
+      icons/icon.png icons/icon-rounded-1024.png 1024 0.82 0.2235
+  ```
+  瓦片占比越小图标越小（macOS 网格约 0.805～0.83）；圆角比例越大越圆
+  （`0.2235`≈Big Sur，想更圆可到 `0.25`）。
 - 脚本用的是圆角矩形路径（`NSBezierPath` 无 squircle API），比例已调到与
   Big Sur 视觉一致；如需数学意义上的连续曲率超椭圆需另写路径算法。
