@@ -16,21 +16,20 @@ import PullDetailPanel from "../panels/PullDetailPanel.vue";
 import IssueListMode from "../panels/modes/IssueListMode.vue";
 import IssueMilestoneMode from "../panels/modes/IssueMilestoneMode.vue";
 import { workspaces } from "./workspaces";
-import { panelTitle } from "./panel-types";
+import type { MessageKey } from "../i18n";
 
 export type { WorkspaceDefinition } from "./workspaces";
 export { workspaces };
 
 export interface ModeDefinition {
   key: string;
-  label: string;
+  /** i18n key; ModeTabs resolves it so a locale switch re-renders. */
+  labelKey: MessageKey;
   component: Component;
 }
 
 export interface PanelDefinition {
   type: string;
-  /** Human label sourced from the plain-data panel-types catalog. */
-  title: string;
   component: Component;
   modes?: ModeDefinition[];
 }
@@ -38,18 +37,18 @@ export interface PanelDefinition {
 const panels = new Map<string, PanelDefinition>();
 
 function registerPanel(type: string, component: Component, modes?: ModeDefinition[]): void {
-  panels.set(type, { type, title: panelTitle(type), component, modes });
+  panels.set(type, { type, component, modes });
 }
 
 export function resolvePanel(type: string): PanelDefinition {
   const panel = panels.get(type);
-  if (!panel) throw new Error(`未注册的面板类型: ${type}`);
+  if (!panel) throw new Error(`Unregistered panel type: ${type}`);
   return panel;
 }
 
 registerPanel("issue.list", IssueListPanel, [
-  { key: "list", label: "列表", component: IssueListMode },
-  { key: "milestone", label: "里程碑", component: IssueMilestoneMode },
+  { key: "list", labelKey: "mode.list", component: IssueListMode },
+  { key: "milestone", labelKey: "mode.milestone", component: IssueMilestoneMode },
 ]);
 registerPanel("issue.detail", IssueDetailPanel);
 registerPanel("pull.list", PullListPanel);

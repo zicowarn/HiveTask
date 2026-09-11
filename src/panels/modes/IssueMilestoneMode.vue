@@ -2,13 +2,15 @@
 /**
  * Issue panel "milestone" mode: issues grouped by milestone, matching the
  * old Qt client's IssueMilestone view. Named milestones sort alphabetically;
- * issues without one collapse into a trailing "未设置里程碑" group.
+ * issues without one collapse into a trailing "no milestone" group
+ * (label: `common.unassignedMilestone`).
  * Order inside a group follows the store's sync order (recently updated first).
  */
 import { computed } from "vue";
 import { storeToRefs } from "pinia";
 import IssueRow from "../IssueRow.vue";
 import { useIssuesStore } from "../../stores/issues";
+import { useI18n } from "../../i18n";
 import type { Issue } from "../../types";
 
 interface MilestoneGroup {
@@ -18,6 +20,7 @@ interface MilestoneGroup {
 
 const store = useIssuesStore();
 const { issues, loading } = storeToRefs(store);
+const { t } = useI18n();
 
 const groups = computed<MilestoneGroup[]>(() => {
   const byName = new Map<string, Issue[]>();
@@ -39,13 +42,13 @@ const groups = computed<MilestoneGroup[]>(() => {
 
 <template>
   <div v-if="!loading && issues.length === 0" class="empty-row">
-    暂无数据，点击「刷新」从 GitHub 拉取
+    {{ t("common.empty") }}
   </div>
   <div v-else class="milestone-scroll">
     <section v-for="group in groups" :key="group.name ?? '__none'" class="milestone-group">
       <header class="group-header">
         <span class="group-name" :class="{ unassigned: group.name === null }">
-          {{ group.name ?? "未设置里程碑" }}
+          {{ group.name ?? t("common.unassignedMilestone") }}
         </span>
         <span class="group-count">{{ group.issues.length }}</span>
       </header>

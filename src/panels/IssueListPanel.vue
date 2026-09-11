@@ -10,6 +10,7 @@ import PanelShell from "../workbench/PanelShell.vue";
 import ModeTabs from "../components/ModeTabs.vue";
 import { resolvePanel } from "../workbench/registry";
 import { useIssuesStore } from "../stores/issues";
+import { useI18n } from "../i18n";
 import type { IssueState } from "../types";
 
 defineProps<{ leafId?: string; panelType?: string }>();
@@ -21,6 +22,7 @@ const def = resolvePanel(PANEL_TYPE);
 const modes = def.modes ?? [];
 
 const store = useIssuesStore();
+const { t } = useI18n();
 const { state, loading, error } = storeToRefs(store);
 
 const storedMode =
@@ -55,7 +57,7 @@ const states: { value: IssueState; label: string }[] = [
         </button>
       </div>
       <button class="refresh-btn" :disabled="loading" @click="store.refresh()">
-        {{ loading ? "同步中…" : "刷新" }}
+        {{ loading ? t("common.syncing") : t("common.refresh") }}
       </button>
     </template>
 

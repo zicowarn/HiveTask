@@ -4,9 +4,14 @@
  * key (and persist it per panel type); this is a pure v-model component.
  */
 import type { ModeDefinition } from "../workbench/registry";
+import { useI18n } from "../i18n";
 
 defineProps<{ modes: ModeDefinition[]; modelValue: string }>();
 defineEmits<{ "update:modelValue": [key: string] }>();
+
+// Resolve labels here (not in the registry data) so switching language
+// re-renders the tabs.
+const { t } = useI18n();
 </script>
 
 <template>
@@ -18,7 +23,7 @@ defineEmits<{ "update:modelValue": [key: string] }>();
       :class="{ active: modelValue === m.key }"
       @click="$emit('update:modelValue', m.key)"
     >
-      {{ m.label }}
+      {{ t(m.labelKey) }}
     </button>
   </div>
 </template>

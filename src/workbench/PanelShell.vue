@@ -14,6 +14,7 @@
  */
 import { computed } from "vue";
 import { useWorkbenchStore } from "../stores/workbench";
+import { useI18n } from "../i18n";
 import { panelTypes } from "./panel-types";
 
 const props = defineProps<{
@@ -22,7 +23,7 @@ const props = defineProps<{
 }>();
 
 const workbench = useWorkbenchStore();
-const switchableTypes = panelTypes;
+const { t } = useI18n();
 
 const canClose = computed(() => (props.leafId ? workbench.canCloseLeaf(props.leafId) : false));
 
@@ -46,11 +47,11 @@ function onTypeChange(event: Event) {
           v-if="leafId && panelType"
           class="panel-type-select"
           :value="panelType"
-          title="切换面板类型"
+          :title="t('panel.switchType')"
           @change="onTypeChange"
         >
-          <option v-for="p in switchableTypes" :key="p.type" :value="p.type">
-            {{ p.title }}
+          <option v-for="p in panelTypes" :key="p.type" :value="p.type">
+            {{ t(p.titleKey) }}
           </option>
         </select>
         <div v-if="$slots.switcher" class="panel-switcher">
@@ -63,9 +64,9 @@ function onTypeChange(event: Event) {
           <slot name="actions" />
         </div>
         <div v-if="leafId" class="layout-actions">
-          <button class="icon-btn" title="左右分屏" @click="split('h')">▥</button>
-          <button class="icon-btn" title="上下分屏" @click="split('v')">▤</button>
-          <button class="icon-btn close-btn" title="关闭面板" :disabled="!canClose" @click="close">✕</button>
+          <button class="icon-btn" :title="t('panel.splitH')" @click="split('h')">▥</button>
+          <button class="icon-btn" :title="t('panel.splitV')" @click="split('v')">▤</button>
+          <button class="icon-btn close-btn" :title="t('panel.close')" :disabled="!canClose" @click="close">✕</button>
         </div>
       </div>
     </header>

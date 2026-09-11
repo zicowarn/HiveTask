@@ -5,12 +5,14 @@ import MarkdownView from "../components/MarkdownView.vue";
 import { stripHtmlComments } from "../components/markdown";
 import { useIssuesStore } from "../stores/issues";
 import { useRepoStore } from "../stores/repo";
+import { useI18n } from "../i18n";
 
 defineProps<{ leafId?: string; panelType?: string }>();
 
 const issues = useIssuesStore();
 const repo = useRepoStore();
 const { selected } = storeToRefs(issues);
+const { t } = useI18n();
 
 function hasVisibleBody(body?: string | null): boolean {
   return !!body && stripHtmlComments(body).trim().length > 0;
@@ -44,25 +46,25 @@ function openUrl(url?: string | null) {
 
       <div class="detail-body">
         <MarkdownView v-if="hasVisibleBody(selected.body)" :source="selected.body" />
-        <p v-else class="detail-nobody">（无描述内容）</p>
+        <p v-else class="detail-nobody">{{ t("common.noBody") }}</p>
       </div>
 
       <footer class="detail-footer">
         <div class="detail-people">
-          <template v-if="selected.author">作者：{{ selected.author }}</template>
+          <template v-if="selected.author">{{ t("common.author", { name: selected.author }) }}</template>
           <template v-if="selected.assignees.length">
-            　·　负责人：{{ selected.assignees.join(", ") }}
+            　·　{{ t("common.assignees", { name: selected.assignees.join(", ") }) }}
           </template>
         </div>
         <button v-if="selected.url" class="open-github" @click="openUrl(selected.url)">
-          在 GitHub 打开
+          {{ t("common.openInGithub") }}
         </button>
       </footer>
     </template>
 
     <div v-else class="detail-empty">
-      <p v-if="repo.current">从左侧选择一个 Issue 查看详情</p>
-      <p v-else>先选择一个本地 Git 仓库，然后刷新 Issues</p>
+      <p v-if="repo.current">{{ t("issue.emptySelect") }}</p>
+      <p v-else>{{ t("issue.emptyRepo") }}</p>
     </div>
   </PanelShell>
 </template>

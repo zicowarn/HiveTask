@@ -1,6 +1,7 @@
 import { defineStore } from "pinia";
 import { computed, ref } from "vue";
 import { api, isTauri } from "../api";
+import { t } from "../i18n";
 import type { Pull, PullState } from "../types";
 import { useRepoStore } from "./repo";
 
@@ -36,7 +37,7 @@ export const usePullsStore = defineStore("pulls", () => {
       detailedNumbers.value.add(full.number);
     } catch (e) {
       // Detail is an enhancement: keep showing the list row on failure.
-      console.error("加载 PR 详情失败", e);
+      console.error("Failed to load pull request detail", e);
     } finally {
       detailLoading.value = false;
     }
@@ -67,7 +68,7 @@ export const usePullsStore = defineStore("pulls", () => {
     const repo = useRepoStore();
     if (!repo.current) return;
     if (!isTauri()) {
-      error.value = "浏览器预览模式无法调用本地 gh，请在 Tauri 窗口中操作";
+      error.value = t("error.browserPreview");
       return;
     }
     loading.value = true;

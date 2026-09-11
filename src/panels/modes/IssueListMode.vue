@@ -6,16 +6,18 @@
 import { storeToRefs } from "pinia";
 import IssueRow from "../IssueRow.vue";
 import { useIssuesStore } from "../../stores/issues";
+import { useI18n } from "../../i18n";
 
 const store = useIssuesStore();
 const { issues, loading } = storeToRefs(store);
+const { t } = useI18n();
 </script>
 
 <template>
   <ul class="item-list">
     <IssueRow v-for="issue in issues" :key="issue.number" :issue="issue" />
     <li v-if="!loading && issues.length === 0" class="empty-row">
-      暂无数据，点击「刷新」从 GitHub 拉取
+      {{ t("common.empty") }}
     </li>
   </ul>
 </template>

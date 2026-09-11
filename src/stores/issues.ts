@@ -1,6 +1,7 @@
 import { defineStore } from "pinia";
 import { computed, ref } from "vue";
 import { api, isTauri } from "../api";
+import { t } from "../i18n";
 import type { Issue, IssueState } from "../types";
 import { useRepoStore } from "./repo";
 
@@ -38,7 +39,7 @@ export const useIssuesStore = defineStore("issues", () => {
     const repo = useRepoStore();
     if (!repo.current) return;
     if (!isTauri()) {
-      error.value = "浏览器预览模式无法调用本地 gh，请在 Tauri 窗口中操作";
+      error.value = t("error.browserPreview");
       return;
     }
     loading.value = true;

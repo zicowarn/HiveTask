@@ -5,12 +5,15 @@ import MarkdownView from "../components/MarkdownView.vue";
 import { stripHtmlComments } from "../components/markdown";
 import { usePullsStore } from "../stores/pulls";
 import { useRepoStore } from "../stores/repo";
+import { useI18n } from "../i18n";
+import { reviewLabel } from "./review-label";
 
 defineProps<{ leafId?: string; panelType?: string }>();
 
 const pulls = usePullsStore();
 const repo = useRepoStore();
 const { selected, detailLoading } = storeToRefs(pulls);
+const { t } = useI18n();
 
 function hasVisibleBody(body?: string | null): boolean {
   return !!body && stripHtmlComments(body).trim().length > 0;
@@ -24,12 +27,6 @@ function openUrl(url?: string | null) {
     window.open(url, "_blank", "noopener");
   }
 }
-
-const decisionLabel: Record<string, string> = {
-  APPROVED: "已批准",
-  REVIEW_REQUIRED: "待评审",
-  CHANGES_REQUESTED: "需修改",
-};
 </script>
 
 <template>
@@ -41,17 +38,17 @@ const decisionLabel: Record<string, string> = {
           <span
             v-if="selected.isDraft"
             class="detail-state draft"
-          >草稿</span>
+          >{{ t("common.draft") }}</span>
           <span
             class="detail-state"
             :class="selected.state.toLowerCase()"
-          >{{ selected.state === "MERGED" ? "已合并" : selected.state }}</span>
+          >{{ selected.state === "MERGED" ? t("common.merged") : selected.state }}</span>
           <span
             v-if="selected.reviewDecision"
             class="detail-decision"
             :class="selected.reviewDecision.toLowerCase()"
           >
-            {{ decisionLabel[selected.reviewDecision] ?? selected.reviewDecision }}
+            {{ reviewLabel(selected.reviewDecision) }}
           </span>
         </div>
         <h2 class="detail-title">{{ selected.title }}</h2>
@@ -69,36 +66,36 @@ const decisionLabel: Record<string, string> = {
         <div class="detail-stats">
           <span class="stat additions">+{{ selected.additions }}</span>
           <span class="stat deletions">−{{ selected.deletions }}</span>
-          <span class="stat">{{ selected.commits }} commits</span>
-          <span class="stat">{{ selected.comments }} 评论</span>
+          <span class="stat">{{ t("common.commits", { n: selected.commits }) }}</span>
+          <span class="stat">{{ t("common.comments", { n: selected.comments }) }}</span>
         </div>
       </header>
 
       <div class="detail-body">
         <MarkdownView v-if="hasVisibleBody(selected.body)" :source="selected.body" />
-        <p v-else-if="detailLoading" class="detail-nobody">正在从 GitHub 加载完整信息…</p>
-        <p v-else class="detail-nobody">（无描述内容）</p>
+        <p v-else-if="detailLoading" class="detail-nobody">{{ t("common.loadingFull") }}</p>
+        <p v-else class="detail-nobody">{{ t("common.noBody") }}</p>
       </div>
 
       <footer class="detail-footer">
         <div class="detail-people">
-          <template v-if="selected.author">作者：{{ selected.author }}</template>
+          <template v-if="selected.author">{{ t("common.author", { name: selected.author }) }}</template>
           <template v-if="selected.assignees.length">
-            　·　负责人：{{ selected.assignees.join(", ") }}
+            　·　{{ t("common.assignees", { name: selected.assignees.join(", ") }) }}
           </template>
           <template v-if="selected.reviewers.length">
-            　·　评审：{{ selected.reviewers.join(", ") }}
+            　·　{{ t("common.reviewers", { name: selected.reviewers.join(", ") }) }}
           </template>
         </div>
         <button v-if="selected.url" class="open-github" @click="openUrl(selected.url)">
-          在 GitHub 打开
+          {{ t("common.openInGithub") }}
         </button>
       </footer>
     </template>
 
     <div v-else class="detail-empty">
-      <p v-if="repo.current">从左侧选择一个 Pull Request 查看详情</p>
-      <p v-else>先选择一个本地 Git 仓库，然后刷新 Pull Requests</p>
+      <p v-if="repo.current">{{ t("pull.emptySelect") }}</p>
+      <p v-else>{{ t("pull.emptyRepo") }}</p>
     </div>
   </PanelShell>
 </template>

@@ -6,12 +6,15 @@
 import { storeToRefs } from "pinia";
 import PanelShell from "../workbench/PanelShell.vue";
 import { usePullsStore } from "../stores/pulls";
+import { useI18n } from "../i18n";
+import { reviewLabel } from "./review-label";
 import type { PullState } from "../types";
 
 defineProps<{ leafId?: string; panelType?: string }>();
 
 const store = usePullsStore();
 const { pulls, state, loading, error, selectedNumber } = storeToRefs(store);
+const { t } = useI18n();
 
 const states: { value: PullState; label: string }[] = [
   { value: "open", label: "Open" },
@@ -23,12 +26,6 @@ const states: { value: PullState; label: string }[] = [
 function timeLabel(iso?: string | null): string {
   return iso ? iso.slice(0, 10) : "";
 }
-
-const decisionLabel: Record<string, string> = {
-  APPROVED: "已批准",
-  REVIEW_REQUIRED: "待评审",
-  CHANGES_REQUESTED: "需修改",
-};
 </script>
 
 <template>
@@ -46,7 +43,7 @@ const decisionLabel: Record<string, string> = {
         </button>
       </div>
       <button class="refresh-btn" :disabled="loading" @click="store.refresh()">
-        {{ loading ? "同步中…" : "刷新" }}
+        {{ loading ? t("common.syncing") : t("common.refresh") }}
       </button>
     </template>
 
@@ -62,7 +59,7 @@ const decisionLabel: Record<string, string> = {
       >
         <div class="item-main">
           <span class="item-title">
-            <span v-if="pull.isDraft" class="draft-badge">草稿</span>
+            <span v-if="pull.isDraft" class="draft-badge">{{ t("common.draft") }}</span>
             {{ pull.title }}
           </span>
           <span class="item-meta">
@@ -75,7 +72,7 @@ const decisionLabel: Record<string, string> = {
             <span class="arrow">→</span>
             <code>{{ pull.baseRef || "?" }}</code>
             <span v-if="pull.reviewDecision" class="decision" :class="pull.reviewDecision.toLowerCase()">
-              {{ decisionLabel[pull.reviewDecision] ?? pull.reviewDecision }}
+              {{ reviewLabel(pull.reviewDecision) }}
             </span>
           </span>
         </div>
@@ -88,7 +85,7 @@ const decisionLabel: Record<string, string> = {
         </div>
       </li>
       <li v-if="!loading && pulls.length === 0" class="empty-row">
-        暂无数据，点击「刷新」从 GitHub 拉取
+        {{ t("common.empty") }}
       </li>
     </ul>
   </PanelShell>

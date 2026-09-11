@@ -8,6 +8,7 @@ import { useRepoStore } from "./stores/repo";
 import { useIssuesStore } from "./stores/issues";
 import { usePullsStore } from "./stores/pulls";
 import { useWorkbenchStore } from "./stores/workbench";
+import { useI18n } from "./i18n";
 import type { HealthInfo } from "./types";
 
 const WORKSPACE_KEY = "hivetask.workspace";
@@ -17,6 +18,7 @@ const issues = useIssuesStore();
 const pulls = usePullsStore();
 const workbench = useWorkbenchStore();
 const { current, origin } = storeToRefs(repo);
+const { t, locale, toggleLocale } = useI18n();
 
 const health = ref<HealthInfo | null>(null);
 
@@ -90,18 +92,21 @@ onMounted(async () => {
           <span class="repo-path" :title="current">{{ current }}</span>
           <span v-if="origin" class="repo-origin" :title="origin">{{ origin }}</span>
         </template>
-        <span v-else class="repo-hint">未选择仓库</span>
+        <span v-else class="repo-hint">{{ t("app.repoNone") }}</span>
       </div>
 
       <div class="header-actions">
         <button class="header-btn" @click="repo.pick()">
-          {{ current ? "切换仓库" : "选择仓库" }}
+          {{ current ? t("app.repoSwitch") : t("app.repoPick") }}
+        </button>
+        <button class="header-btn lang-btn" :title="t('lang.switch')" @click="toggleLocale()">
+          {{ locale === "zh-CN" ? "EN" : "中文" }}
         </button>
       </div>
     </header>
 
     <div v-if="health && !health.ghAvailable" class="gh-warning">
-      未检测到 gh CLI。请先安装并完成登录：
+      {{ t("app.ghMissing") }}
       <code>brew install gh &amp;&amp; gh auth login</code>
     </div>
 
@@ -200,6 +205,11 @@ onMounted(async () => {
   font-size: 12px;
   color: var(--text-dim);
 }
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
 .header-btn {
   border: 1px solid var(--border);
   background: var(--bg-panel);
@@ -208,6 +218,9 @@ onMounted(async () => {
   padding: 4px 14px;
   border-radius: 6px;
   cursor: pointer;
+}
+.lang-btn {
+  padding: 4px 10px;
 }
 .header-btn:hover {
   border-color: var(--accent);
