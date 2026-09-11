@@ -13,8 +13,10 @@ import IssueListPanel from "../panels/IssueListPanel.vue";
 import IssueDetailPanel from "../panels/IssueDetailPanel.vue";
 import PullListPanel from "../panels/PullListPanel.vue";
 import PullDetailPanel from "../panels/PullDetailPanel.vue";
+import SettingsPanel from "../panels/SettingsPanel.vue";
 import IssueListMode from "../panels/modes/IssueListMode.vue";
 import IssueMilestoneMode from "../panels/modes/IssueMilestoneMode.vue";
+import SettingsBasicMode from "../panels/modes/SettingsBasicMode.vue";
 import { workspaces } from "./workspaces";
 import type { MessageKey } from "../i18n";
 
@@ -53,3 +55,6 @@ registerPanel("issue.list", IssueListPanel, [
 registerPanel("issue.detail", IssueDetailPanel);
 registerPanel("pull.list", PullListPanel);
 registerPanel("pull.detail", PullDetailPanel);
+registerPanel("settings", SettingsPanel, [
+  { key: "basic", labelKey: "mode.settings.basic", component: SettingsBasicMode },
+]);

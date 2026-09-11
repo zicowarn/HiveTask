@@ -14,6 +14,25 @@ export const zhCN = {
   "lang.switch": "切换语言",
   "theme.switch": "切换明亮 / 暗色主题",
 
+  // Menus
+  "menu.file": "文件",
+  "menu.view": "视图",
+  "menu.tools": "工具",
+  "menu.help": "帮助",
+  "menu.issues": "Issues",
+  "menu.pulls": "Pull Requests",
+  "menu.openRepo": "选择仓库…",
+  "menu.preferences": "偏好设置",
+  "menu.toggleStatusbar": "显示状态栏",
+  "menu.copyUrl": "复制链接",
+  "menu.about": "关于 HiveTask",
+
+  // Status bar
+  "statusbar.noRepo": "未选择仓库",
+  "statusbar.syncedAt": "同步于 {time}",
+  "statusbar.ghOk": "gh CLI 可用",
+  "statusbar.ghMissing": "未检测到 gh CLI",
+
   // Panel chrome
   "panel.switchType": "切换面板类型",
   "panel.splitH": "左右分屏",
@@ -25,10 +44,33 @@ export const zhCN = {
   "panelTitle.issue.detail": "Issue 详情",
   "panelTitle.pull.list": "PR 列表",
   "panelTitle.pull.detail": "PR 详情",
+  "panelTitle.settings": "设置",
 
   // Panel modes
   "mode.list": "列表",
   "mode.milestone": "里程碑",
+  "mode.settings.basic": "基础设置",
+
+  // Settings — basic mode
+  "settings.language": "语言",
+  "settings.languageDesc": "界面显示语言",
+  "settings.theme": "主题",
+  "settings.themeDesc": "界面配色，「跟随系统」时随系统外观自动切换",
+  "settings.themeDark": "暗色",
+  "settings.themeLight": "明亮",
+  "settings.themeSystem": "跟随系统",
+  "settings.statusbar": "显示状态栏",
+  "settings.statusbarDesc": "在窗口底部显示仓库与同步状态",
+
+  // About dialog
+  "about.description":
+    "独立的项目管理桌面工具——「Have a task」：管理 GitHub 仓库的 Issues、Pull Requests 与里程碑。",
+  "about.version": "当前版本",
+  "about.builtWith": "基于 Vue 3 + Tauri 2 构建",
+  "about.license": "开源许可（MIT）",
+  "about.libraries": "第三方组件",
+  "about.copyright": "版权所有 © {year} HiveTask Contributors",
+  "about.close": "关闭",
 
   // Shared strings
   "common.refresh": "刷新",

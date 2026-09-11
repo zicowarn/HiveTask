@@ -1,28 +1,31 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { storeToRefs } from "pinia";
 import WorkbenchNode from "./workbench/WorkbenchNode.vue";
+import StatusBar from "./workbench/StatusBar.vue";
+import AppMenu, { type MenuDef } from "./components/AppMenu.vue";
+import AboutDialog from "./components/AboutDialog.vue";
 import { workspaces } from "./workbench/registry";
-import { api, isTauri } from "./api";
+import { openExternalUrl } from "./open-url";
+import { isTauri } from "./api";
 import { useRepoStore } from "./stores/repo";
 import { useIssuesStore } from "./stores/issues";
 import { usePullsStore } from "./stores/pulls";
+import { useSettingsStore } from "./stores/settings";
 import { useWorkbenchStore } from "./stores/workbench";
 import { useI18n } from "./i18n";
 import { useTheme } from "./theme";
-import type { HealthInfo } from "./types";
 
 const WORKSPACE_KEY = "hivetask.workspace";
 
 const repo = useRepoStore();
 const issues = useIssuesStore();
 const pulls = usePullsStore();
+const settings = useSettingsStore();
 const workbench = useWorkbenchStore();
 const { current, origin } = storeToRefs(repo);
 const { t, locale, toggleLocale } = useI18n();
-const { theme, toggleTheme } = useTheme();
-
-const health = ref<HealthInfo | null>(null);
+const { resolvedTheme, toggleTheme } = useTheme();
 
 const activeKey = ref(localStorage.getItem(WORKSPACE_KEY) ?? "issues");
 const active = computed(
@@ -33,6 +36,119 @@ const activeLayout = computed(() => workbench.layouts[active.value.key]);
 function switchWorkspace(key: string) {
   activeKey.value = key;
   localStorage.setItem(WORKSPACE_KEY, key);
+}
+
+// ---- Menu & accelerator actions ----
+
+function refreshActive() {
+  if (activeKey.value === "issues") void issues.refresh();
+  else if (activeKey.value === "pulls") void pulls.refresh();
+}
+
+/**
+ * Preferences opens the settings Editor in the active workspace — the same
+ * mechanism as the panel-type dropdown (switch back there anytime). Uses
+ * the workspace's first pane since there is no per-pane focus tracking.
+ */
+function openPreferences() {
+  const leafId = workbench.firstLeafId(activeKey.value);
+  if (leafId) workbench.setLeafPanel(leafId, "settings");
+}
+
+/** The URL the Tools menu works on: the selected issue/PR, else the repo. */
+function currentGitHubUrl(): string | null {
+  const selectedUrl = issues.selected?.url ?? pulls.selected?.url;
+  if (selectedUrl) return selectedUrl;
+  return origin.value ? `https://github.com/${origin.value}` : null;
+}
+
+function openInGithub() {
+  const url = currentGitHubUrl();
+  if (url) openExternalUrl(url);
+}
+
+async function copyGithubUrl() {
+  const url = currentGitHubUrl();
+  if (url) await navigator.clipboard.writeText(url);
+}
+
+const aboutOpen = ref(false);
+
+// Computed (not constant) so menu labels follow the locale.
+const menus = computed<MenuDef[]>(() => [
+  {
+    label: t("menu.file"),
+    items: [
+      { label: t("menu.openRepo"), shortcut: "⌘O", action: () => void repo.pick() },
+      {
+        label: t("common.refresh"),
+        shortcut: "⌘R",
+        action: refreshActive,
+        disabled: activeKey.value === "settings",
+      },
+      { separator: true },
+      {
+        label: t("menu.preferences"),
+        shortcut: "⌘,",
+        action: openPreferences,
+      },
+    ],
+  },
+  {
+    label: t("menu.view"),
+    items: [
+      { label: t("menu.issues"), shortcut: "⌘1", action: () => switchWorkspace("issues") },
+      { label: t("menu.pulls"), shortcut: "⌘2", action: () => switchWorkspace("pulls") },
+      { separator: true },
+      {
+        label: t("menu.toggleStatusbar"),
+        checked: settings.statusbarVisible,
+        action: () => settings.toggleStatusbar(),
+      },
+    ],
+  },
+  {
+    label: t("menu.tools"),
+    items: [
+      {
+        label: t("common.openInGithub"),
+        shortcut: "⌘⇧O",
+        action: openInGithub,
+        disabled: !currentGitHubUrl(),
+      },
+      {
+        label: t("menu.copyUrl"),
+        shortcut: "⌘⇧C",
+        action: () => void copyGithubUrl(),
+        disabled: !currentGitHubUrl(),
+      },
+    ],
+  },
+  {
+    label: t("menu.help"),
+    items: [{ label: t("menu.about"), action: () => (aboutOpen.value = true) }],
+  },
+]);
+
+// ---- Keyboard shortcuts (the menu accelerators, AppMenu is click-only) ----
+
+function onKeydown(event: KeyboardEvent) {
+  if (!(event.metaKey || event.ctrlKey)) return;
+  const key = event.key.toLowerCase();
+  const plain: Record<string, () => void> = {
+    o: () => void repo.pick(),
+    r: refreshActive,
+    "1": () => switchWorkspace("issues"),
+    "2": () => switchWorkspace("pulls"),
+    ",": openPreferences,
+  };
+  // Shifted layer only, so ⌘C/⌘O stay the webview's native copy/open.
+  const shifted: Record<string, () => void> = { o: openInGithub, c: () => void copyGithubUrl() };
+  const handler = event.shiftKey ? shifted[key] : plain[key];
+  if (handler) {
+    event.preventDefault();
+    handler();
+  }
 }
 
 // Repo context changes (startup restore, folder picker, VITE_AUTO_REPO) pull
@@ -47,8 +163,9 @@ watch(
 );
 
 onMounted(async () => {
+  window.addEventListener("keydown", onKeydown);
   if (!isTauri()) return;
-  health.value = await api.healthCheck();
+  await repo.checkHealth();
   await repo.refreshInfo();
 
   // Dev affordance: VITE_AUTO_REPO=/path/to/repo loads and syncs a repo at
@@ -65,6 +182,7 @@ onMounted(async () => {
     }
   }
 });
+onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
 </script>
 
 <template>
@@ -74,6 +192,8 @@ onMounted(async () => {
         <span class="brand-mark">⬡</span>
         <span class="brand-name">HiveTask</span>
       </div>
+
+      <AppMenu :menus="menus" />
 
       <nav class="workspace-tabs">
         <button
@@ -102,7 +222,7 @@ onMounted(async () => {
           {{ current ? t("app.repoSwitch") : t("app.repoPick") }}
         </button>
         <button class="header-btn theme-btn" :title="t('theme.switch')" @click="toggleTheme()">
-          {{ theme === "dark" ? "☀" : "☾" }}
+          {{ resolvedTheme === "dark" ? "☀" : "☾" }}
         </button>
         <button class="header-btn lang-btn" :title="t('lang.switch')" @click="toggleLocale()">
           {{ locale === "zh-CN" ? "EN" : "中文" }}
@@ -110,7 +230,7 @@ onMounted(async () => {
       </div>
     </header>
 
-    <div v-if="health && !health.ghAvailable" class="gh-warning">
+    <div v-if="repo.ghAvailable === false" class="gh-warning">
       {{ t("app.ghMissing") }}
       <code>brew install gh &amp;&amp; gh auth login</code>
     </div>
@@ -118,6 +238,10 @@ onMounted(async () => {
     <main class="workbench">
       <WorkbenchNode :key="active.key" :node="activeLayout" />
     </main>
+
+    <StatusBar v-if="settings.statusbarVisible" :workspace="activeKey" />
+
+    <AboutDialog :open="aboutOpen" @close="aboutOpen = false" />
   </div>
 </template>
 

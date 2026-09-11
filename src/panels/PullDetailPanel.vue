@@ -6,6 +6,7 @@ import { stripHtmlComments } from "../components/markdown";
 import { usePullsStore } from "../stores/pulls";
 import { useRepoStore } from "../stores/repo";
 import { useI18n } from "../i18n";
+import { openExternalUrl } from "../open-url";
 import { reviewLabel } from "./review-label";
 
 defineProps<{ leafId?: string; panelType?: string }>();
@@ -17,15 +18,6 @@ const { t } = useI18n();
 
 function hasVisibleBody(body?: string | null): boolean {
   return !!body && stripHtmlComments(body).trim().length > 0;
-}
-
-function openUrl(url?: string | null) {
-  if (!url) return;
-  if ("__TAURI_INTERNALS__" in window) {
-    void import("@tauri-apps/plugin-opener").then((m) => m.openUrl(url));
-  } else {
-    window.open(url, "_blank", "noopener");
-  }
 }
 </script>
 
@@ -87,7 +79,7 @@ function openUrl(url?: string | null) {
             　·　{{ t("common.reviewers", { name: selected.reviewers.join(", ") }) }}
           </template>
         </div>
-        <button v-if="selected.url" class="open-github" @click="openUrl(selected.url)">
+        <button v-if="selected.url" class="open-github" @click="openExternalUrl(selected.url)">
           {{ t("common.openInGithub") }}
         </button>
       </footer>

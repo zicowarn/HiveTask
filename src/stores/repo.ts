@@ -1,6 +1,6 @@
 import { defineStore } from "pinia";
 import { ref } from "vue";
-import { api } from "../api";
+import { api, isTauri } from "../api";
 import type { RepoInfo } from "../types";
 
 const RECENT_KEY = "hivetask.recentRepos";
@@ -23,6 +23,18 @@ export const useRepoStore = defineStore("repo", () => {
   const current = ref<string | null>(localStorage.getItem(LAST_KEY));
   const origin = ref<string | null>(null);
   const recent = ref<string[]>(loadRecent());
+  // null = not checked yet (e.g. plain-browser preview skips the probe).
+  const ghAvailable = ref<boolean | null>(null);
+
+  async function checkHealth() {
+    if (!isTauri()) return;
+    try {
+      const health = await api.healthCheck();
+      ghAvailable.value = health.ghAvailable;
+    } catch {
+      ghAvailable.value = false;
+    }
+  }
 
   function setCurrent(path: string) {
     current.value = path;
@@ -50,5 +62,5 @@ export const useRepoStore = defineStore("repo", () => {
     }
   }
 
-  return { current, origin, recent, setCurrent, pick, refreshInfo };
+  return { current, origin, recent, ghAvailable, checkHealth, setCurrent, pick, refreshInfo };
 });

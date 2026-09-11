@@ -229,6 +229,14 @@ export const useWorkbenchStore = defineStore("workbench", () => {
     }
   }
 
+  /** First leaf of a workspace, for menu actions with no focused pane. */
+  function firstLeafId(wsKey: string): string | null {
+    const root = layouts.value[wsKey];
+    const walk = (node: LayoutNode): string | null =>
+      node.type === "leaf" ? node.id : (walk(node.first) ?? walk(node.second));
+    return root ? walk(root) : null;
+  }
+
   function resetWorkspace(wsKey: string): void {
     const ws = workspaces.find((w) => w.key === wsKey);
     if (ws) layouts.value[wsKey] = defaultLayout(ws);
@@ -240,6 +248,7 @@ export const useWorkbenchStore = defineStore("workbench", () => {
     splitLeaf,
     closeLeaf,
     setLeafPanel,
+    firstLeafId,
     countLeaves,
     resetWorkspace,
   };
