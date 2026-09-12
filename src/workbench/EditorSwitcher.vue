@@ -150,7 +150,7 @@ onBeforeUnmount(() => {
 }
 .pop-columns {
   display: flex;
-  gap: 26px;
+  gap: 8px;
 }
 .pop-column {
   display: flex;
