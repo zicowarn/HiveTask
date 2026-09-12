@@ -64,24 +64,24 @@ onBeforeUnmount(() => {
     </button>
 
     <div v-if="open" class="switcher-pop" role="menu">
-      <section v-for="section in sections" :key="section.category" class="pop-section">
-        <div class="section-title">{{ t(section.category) }}</div>
-        <div class="section-grid">
+      <div class="pop-title">{{ t("panel.switchType") }}</div>
+      <div class="pop-columns">
+        <section v-for="section in sections" :key="section.category" class="pop-column">
+          <div class="column-title">{{ t(section.category) }}</div>
           <button
             v-for="item in section.items"
             :key="item.type"
-            class="editor-pill"
+            class="editor-item"
             role="menuitemradio"
             :aria-checked="item.type === panelType"
             :class="{ current: item.type === panelType }"
             @click.stop="pick(item.type)"
           >
             <EditorIcon :name="item.icon" />
-            <span class="pill-label">{{ t(item.titleKey) }}</span>
-            <span v-if="item.type === panelType" class="pill-check">✓</span>
+            <span class="item-label">{{ t(item.titleKey) }}</span>
           </button>
-        </div>
-      </section>
+        </section>
+      </div>
     </div>
   </div>
 </template>
@@ -127,70 +127,65 @@ onBeforeUnmount(() => {
   transform: rotate(180deg);
 }
 
-/* Blender 式弹层：分类标题 + 每类横向网格。 */
+/* Blender 形态：标题行 + 多列并排（每分类一列，列内竖排图标+文字）。 */
 .switcher-pop {
   position: absolute;
   top: calc(100% + 5px);
   left: 0;
   z-index: 100;
-  width: 340px;
-  max-width: calc(100vw - 32px);
-  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  padding: 10px 12px 12px;
   background: var(--bg-panel);
   border: 1px solid var(--border);
   border-radius: 9px;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
 }
-.pop-section + .pop-section {
-  margin-top: 4px;
-  padding-top: 6px;
-  border-top: 1px solid var(--border);
+.pop-title {
+  font-size: 12px;
+  color: var(--text);
+  padding-bottom: 7px;
+  margin-bottom: 8px;
+  border-bottom: 1px solid var(--border);
 }
-.section-title {
-  font-size: 10px;
-  letter-spacing: 0.04em;
+.pop-columns {
+  display: flex;
+  gap: 26px;
+}
+.pop-column {
+  display: flex;
+  flex-direction: column;
+  min-width: 128px;
+}
+.column-title {
+  font-size: 11.5px;
   color: var(--text-dim);
-  padding: 2px 2px 5px;
+  padding: 2px 6px 6px;
 }
-.section-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
-  gap: 5px;
-}
-.editor-pill {
-  display: inline-flex;
+.editor-item {
+  display: flex;
   align-items: center;
-  gap: 7px;
-  min-width: 0;
-  height: 28px;
-  padding: 0 9px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--bg-app);
+  gap: 8px;
+  border: none;
+  background: transparent;
   color: var(--text);
   font-size: 12px;
+  line-height: 1;
+  height: 26px;
+  padding: 0 6px;
+  border-radius: 5px;
   cursor: pointer;
-  text-align: left;
-}
-.editor-pill:hover {
-  background: var(--bg-hover);
-  border-color: var(--accent);
-}
-.editor-pill.current {
-  background: var(--bg-selected);
-  border-color: var(--accent);
-  color: var(--accent);
-}
-.pill-label {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
   white-space: nowrap;
   text-align: left;
 }
-.pill-check {
-  flex: none;
-  font-size: 10px;
+.editor-item:hover {
+  background: var(--bg-hover);
+}
+.editor-item.current {
+  background: var(--bg-selected);
+  color: var(--accent);
+}
+.item-label {
+  white-space: nowrap;
 }
 </style>
