@@ -66,8 +66,9 @@ async fn pick_repo(window: tauri::WebviewWindow) -> Result<Option<String>, Strin
 fn repo_info(repo_path: String) -> RepoInfo {
     let path = PathBuf::from(&repo_path);
     RepoInfo {
-        path: repo_path,
         origin: gh::git_origin(&path),
+        valid: path.is_dir(),
+        path: repo_path,
     }
 }
 

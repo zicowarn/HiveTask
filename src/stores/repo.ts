@@ -23,6 +23,21 @@ function loadRecent(): string[] {
  */
 export const useRepoStore = defineStore("repo", () => {
   const current = ref<string | null>(localStorage.getItem(LAST_KEY));
+
+  // Startup guard: a persisted path may have rotted away (e.g. /tmp cleanup).
+  // Clear it so the UI falls back to "未选择仓库" instead of dead reads.
+  void (async () => {
+    if (!current.value || !isTauri()) return;
+    try {
+      const info = await api.repoInfo(current.value);
+      if (info.valid === false) {
+        current.value = null;
+        localStorage.removeItem(LAST_KEY);
+      }
+    } catch {
+      // Probe is best-effort; keep the persisted path on failure.
+    }
+  })();
   const origin = ref<string | null>(null);
   const recent = ref<string[]>(loadRecent());
   // null = not checked yet (e.g. plain-browser preview skips the probe).

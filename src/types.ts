@@ -51,6 +51,8 @@ export interface HealthInfo {
 export interface RepoInfo {
   path: string;
   origin?: string | null;
+  /** Path exists on disk — false means the persisted repo rotted away. */
+  valid?: boolean;
 }
 
 export type IssueState = "open" | "closed" | "all";

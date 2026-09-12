@@ -140,4 +140,7 @@ pub struct RepoInfo {
     pub path: String,
     /// Output of `git remote get-url origin`, if it exists.
     pub origin: Option<String>,
+    /// Path exists on disk — guards against stale persisted repo paths
+    /// (e.g. a demo clone under /tmp removed by periodic cleanup).
+    pub valid: bool,
 }

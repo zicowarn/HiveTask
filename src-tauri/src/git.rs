@@ -170,8 +170,8 @@ mod git_tests {
 
     #[test]
     fn history_reads_real_clone() {
-        // The demo clone used during development; skip if absent (CI).
-        let path = "/tmp/tauri-real";
+        // The durable demo clone; skip if absent (CI).
+        let path = "/Users/mrwang/.hivetask-demos/tauri-real";
         if !std::path::Path::new(path).exists() {
             return;
         }
