@@ -4,6 +4,16 @@
 > 手段；新手段必须实测连续成功 3 次后才可收录。
 > 纯逻辑验证不走本手册——先跑 `pnpm gate`（i18n/ESLint/Vitest/vue-tsc/clippy/cargo test）。
 
+## 背景：dev 与生产的端口模型
+
+- **dev**：页面来自 vite（:1420），端口是"页面地址"的一部分——tauri 二进制
+  编译期记住 devUrl，vite 换口而二进制不知就会白屏/错配。因此 strictPort
+  必须保留；两个 Tauri 项目并行开发 = 各自改对（vite port + tauri.conf
+  devUrl 成对改）。
+- **生产**（tauri build）：页面打进二进制（内部资源协议），**不占任何
+  TCP 端口**——多应用安装/运行零冲突。唯一要求：bundle identifier
+  全局唯一（本项目 dev.zicowarn.hivetask 已配置）。
+
 ## 标准流程
 
 1. **改代码后先整页验证**：HMR 长会话会积累幽灵状态（模块实例重复、监听器错乱）。
@@ -23,6 +33,10 @@
 | 前置应用 | `set frontmost to true` | 激活失败时重试一次 |
 
 ## 🚫 禁用清单（实测翻车，勿再尝试）
+
+- **助手长期占用 :1420**：dev server 归属用户终端（`pnpm tauri dev` 是一体的）。
+  助手后台起的 vite 会与用户的工作流抢端口（双方连环失败）。需要应用运行时
+  请求用户启动，或临时起用后**用完即还**（`lsof -ti :1420 | xargs kill`）；
 
 - **CUA 坐标点击**：被通知横幅的全屏透明覆盖层劫持，所有坐标解析到 NotificationCenter；
 - **原生对话框合成按键**（打开文件夹面板 + ⌘⇧G）：静默失败。绕法：直改 localStorage；

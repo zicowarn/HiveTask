@@ -10,12 +10,21 @@ import { ref, watch } from "vue";
 
 const STATUSBAR_KEY = "hivetask.statusbar";
 const TERMINAL_SHELL_KEY = "hivetask.terminalShell";
+const GITEA_HOST_KEY = "hivetask.giteaHost";
 
 function loadStatusbarVisible(): boolean {
   try {
     return localStorage.getItem(STATUSBAR_KEY) !== "0";
   } catch {
     return true;
+  }
+}
+
+function loadGiteaHost(): string {
+  try {
+    return localStorage.getItem(GITEA_HOST_KEY) ?? "";
+  } catch {
+    return "";
   }
 }
 
@@ -31,6 +40,8 @@ export const useSettingsStore = defineStore("settings", () => {
   const statusbarVisible = ref(loadStatusbarVisible());
   /** "" = auto ($SHELL / COMSPEC); else an explicit shell path/name. */
   const terminalShell = ref(loadTerminalShell());
+  /** Gitea 实例地址（token 在 OS 钥匙串，见 credentials.rs）。 */
+  const giteaHost = ref(loadGiteaHost());
 
   watch(statusbarVisible, (visible) => {
     try {
@@ -48,9 +59,17 @@ export const useSettingsStore = defineStore("settings", () => {
     }
   });
 
+  watch(giteaHost, (host) => {
+    try {
+      localStorage.setItem(GITEA_HOST_KEY, host);
+    } catch {
+      // Storage unavailable — the choice still applies for this session.
+    }
+  });
+
   function toggleStatusbar(): void {
     statusbarVisible.value = !statusbarVisible.value;
   }
 
-  return { statusbarVisible, terminalShell, toggleStatusbar };
+  return { statusbarVisible, terminalShell, giteaHost, toggleStatusbar };
 });

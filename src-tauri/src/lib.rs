@@ -2,6 +2,7 @@
 //! local core (gh CLI + SQLite cache). This same core will later back the
 //! headless MCP server from Phase 4.
 
+mod credentials;
 mod gh;
 mod git;
 mod models;
@@ -289,7 +290,10 @@ pub fn run() {
             pty::pty_spawn,
             pty::pty_write,
             pty::pty_resize,
-            pty::pty_kill
+            pty::pty_kill,
+            credentials::credential_set,
+            credentials::credential_get,
+            credentials::credential_delete
         ])
         .manage(pty::PtyMap(std::sync::Mutex::new(std::collections::HashMap::new())))
         .run(tauri::generate_context!())
