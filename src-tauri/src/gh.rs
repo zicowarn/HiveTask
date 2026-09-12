@@ -138,7 +138,7 @@ fn parse_issue_value(v: &Value) -> Issue {
             .and_then(Value::as_str)
             .unwrap_or("OPEN")
             .to_string(),
-        body: string_field(&v, "body"),
+        body: string_field(v, "body"),
         author: v.get("author").and_then(|a| a.get("login")).and_then(Value::as_str).map(str::to_string),
         milestone: v
             .get("milestone")
@@ -147,9 +147,9 @@ fn parse_issue_value(v: &Value) -> Issue {
             .map(str::to_string),
         labels,
         assignees,
-        created_at: string_field(&v, "createdAt"),
-        updated_at: string_field(&v, "updatedAt"),
-        url: string_field(&v, "url"),
+        created_at: string_field(v, "createdAt"),
+        updated_at: string_field(v, "updatedAt"),
+        url: string_field(v, "url"),
     }
 }
 

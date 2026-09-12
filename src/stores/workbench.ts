@@ -229,6 +229,24 @@ export const useWorkbenchStore = defineStore("workbench", () => {
     }
   }
 
+  /** Set a split node's ratio (divider drag); walks every workspace tree. */
+  function setRatio(splitId: string, ratio: number): void {
+    const clamped = Math.min(0.82, Math.max(0.18, ratio));
+    for (const root of Object.values(layouts.value)) {
+      const walk = (node: LayoutNode): boolean => {
+        if (node.type === "split") {
+          if (node.id === splitId) {
+            node.ratio = clamped;
+            return true;
+          }
+          return walk(node.first) || walk(node.second);
+        }
+        return false;
+      };
+      if (walk(root)) return;
+    }
+  }
+
   /** First leaf of a workspace, for menu actions with no focused pane. */
   function firstLeafId(wsKey: string): string | null {
     const root = layouts.value[wsKey];
@@ -248,6 +266,7 @@ export const useWorkbenchStore = defineStore("workbench", () => {
     splitLeaf,
     closeLeaf,
     setLeafPanel,
+    setRatio,
     firstLeafId,
     countLeaves,
     resetWorkspace,
