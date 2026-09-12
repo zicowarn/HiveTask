@@ -265,9 +265,13 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
             v-for="(commit, index) in history!.commits"
             :key="commit.oid"
             class="commit-row"
+            role="button"
+            tabindex="0"
+            :aria-expanded="expandedOid === commit.oid"
             :class="{ expanded: expandedOid === commit.oid }"
             :style="{ top: rowOffset(index) + 'px' }"
             @click="selectCommit(commit)"
+            @keydown.enter.prevent="selectCommit(commit)"
           >
             <div v-if="expandedOid === commit.oid" class="row-details">
               <div class="detail-line">
@@ -500,6 +504,7 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
 .rows {
   position: absolute;
   top: 0;
+  right: 0;
 }
 .commit-row:hover {
   background: var(--bg-hover);
