@@ -19,6 +19,7 @@ import { useWorkbenchStore } from "./stores/workbench";
 import { useI18n } from "./i18n";
 import { useTheme } from "./theme";
 import { probeNow } from "./net";
+import { shortOrigin } from "./origin";
 
 const WORKSPACE_KEY = "hivetask.workspace";
 
@@ -29,7 +30,7 @@ const settings = useSettingsStore();
 const workbench = useWorkbenchStore();
 const { current, origin } = storeToRefs(repo);
 const { t } = useI18n();
-const { resolvedTheme, toggleTheme } = useTheme();
+const { theme, resolvedTheme, cycleTheme } = useTheme();
 
 // Browser preview has no system menubar — there the in-header AppMenu and
 // a webview keydown handler stand in; in Tauri the native menu owns both.
@@ -193,7 +194,7 @@ onBeforeUnmount(() => {
       <div class="repo-box">
         <template v-if="current">
           <span class="repo-path" :title="current">{{ current }}</span>
-          <span v-if="origin" class="repo-origin" :title="origin">{{ origin }}</span>
+          <span v-if="origin" class="repo-origin" :title="origin">{{ shortOrigin(origin) }}</span>
         </template>
         <span v-else class="repo-hint">{{ t("app.repoNone") }}</span>
       </div>
@@ -202,8 +203,8 @@ onBeforeUnmount(() => {
         <button class="header-btn" @click="repo.pick()">
           {{ current ? t("app.repoSwitch") : t("app.repoPick") }}
         </button>
-        <button class="header-btn theme-btn" :title="t('theme.switch')" @click="toggleTheme()">
-          {{ resolvedTheme === "dark" ? "☀" : "☾" }}
+        <button class="header-btn theme-btn" :title="t('theme.switch')" @click="cycleTheme()">
+          {{ theme === "system" ? "◐" : resolvedTheme === "dark" ? "☾" : "☀" }}
         </button>
         <button
           class="header-btn gear-btn"

@@ -1,5 +1,7 @@
 import { defineStore } from "pinia";
 import { ref } from "vue";
+import { pushToast } from "../toast";
+import { t } from "../i18n";
 import { api, isTauri } from "../api";
 import type { RepoInfo } from "../types";
 
@@ -45,6 +47,10 @@ export const useRepoStore = defineStore("repo", () => {
   }
 
   async function pick() {
+    if (!isTauri()) {
+      pushToast({ kind: "info", message: t("error.browserPreview") });
+      return;
+    }
     const path = await api.pickRepo();
     if (path) setCurrent(path);
   }

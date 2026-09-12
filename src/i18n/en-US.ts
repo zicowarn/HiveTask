@@ -11,7 +11,8 @@ export const enUS: Record<MessageKey, string> = {
   "app.repoSwitch": "Switch repository",
   "app.ghMissing": "gh CLI not found. Install and sign in first:",
   "lang.switch": "Switch language",
-  "theme.switch": "Toggle light / dark theme",
+  "lang.system": "System",
+  "theme.switch": "Theme: dark → light → system (click to cycle)",
 
   // Menus
   "menu.file": "File",

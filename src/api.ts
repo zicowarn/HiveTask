@@ -66,6 +66,8 @@ export const api = {
   ptyWrite: (id: string, data: string) => invoke<void>("pty_write", { id, data }),
   ptyResize: (id: string, rows: number, cols: number) => invoke<void>("pty_resize", { id, rows, cols }),
   ptyKill: (id: string) => invoke<void>("pty_kill", { id }),
+  logLine: (level: "error" | "warn" | "info" | "debug", message: string) =>
+    invoke<void>("log_line", { level, message }).catch(() => {}),
   listSyncedAt: (repoPath: string) =>
     invoke<[string, string][]>("list_synced_at", { repoPath }),
   probeNetwork: () => invoke<void>("probe_network"),

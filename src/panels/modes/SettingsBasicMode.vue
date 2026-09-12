@@ -5,11 +5,11 @@
  * Controls write straight through to their owning modules (i18n / theme /
  * settings store); there is no separate save step.
  */
-import { useI18n, locales, type Locale } from "../../i18n";
+import { useI18n, type LocaleChoice } from "../../i18n";
 import { useTheme, type ThemeChoice } from "../../theme";
 import { useSettingsStore } from "../../stores/settings";
 
-const { t, locale, setLocale } = useI18n();
+const { t, localeChoice, setLocale } = useI18n();
 const { theme, setTheme } = useTheme();
 const settings = useSettingsStore();
 
@@ -34,8 +34,13 @@ const shellChoices: { value: string; label: string }[] = isWindows
       { value: "/bin/bash", label: "bash" },
     ];
 
+const languageChoices: { value: "zh-CN" | "en-US"; label: string }[] = [
+  { value: "zh-CN", label: "中文" },
+  { value: "en-US", label: "English" },
+];
+
 function onLocaleChange(event: Event) {
-  setLocale((event.target as HTMLSelectElement).value as Locale);
+  setLocale((event.target as HTMLSelectElement).value as LocaleChoice);
 }
 function onThemeChange(event: Event) {
   setTheme((event.target as HTMLSelectElement).value as ThemeChoice);
@@ -49,8 +54,9 @@ function onThemeChange(event: Event) {
         <span class="setting-name">{{ t("settings.language") }}</span>
         <span class="setting-desc">{{ t("settings.languageDesc") }}</span>
       </div>
-      <select class="setting-select" :value="locale" @change="onLocaleChange">
-        <option v-for="l in locales" :key="l.value" :value="l.value">{{ l.label }}</option>
+      <select class="setting-select" :value="localeChoice" @change="onLocaleChange">
+        <option v-for="l in languageChoices" :key="l.value" :value="l.value">{{ l.label }}</option>
+        <option value="system">{{ t("lang.system") }}</option>
       </select>
     </div>
 

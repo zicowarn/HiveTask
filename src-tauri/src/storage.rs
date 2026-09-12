@@ -38,8 +38,27 @@ pub fn open(repo: &Path) -> Result<Connection> {
         .with_context(|| format!("打开数据库失败: {}", db_path(repo).display()))?;
     conn.pragma_update(None, "foreign_keys", true)?;
 
+    ensure_git_exclude(repo);
     migrate(&mut conn)?;
     Ok(conn)
+}
+
+/// Best-effort: keep `.hivetask/` out of `git status` by appending it to the
+/// repo-local `.git/info/exclude` (works without touching the user's tracked
+/// .gitignore; silently skipped for worktrees where .git is a file).
+fn ensure_git_exclude(repo: &Path) {
+    let exclude = repo.join(".git").join("info").join("exclude");
+    let Ok(_) = std::fs::read_to_string(&exclude) else { return };
+    let Ok(existing) = std::fs::read_to_string(&exclude) else { return };
+    if existing.lines().any(|line| line.trim() == ".hivetask/") {
+        return;
+    }
+    let mut content = existing;
+    if !content.ends_with('\n') && !content.is_empty() {
+        content.push('\n');
+    }
+    content.push_str(".hivetask/\n");
+    let _ = std::fs::write(&exclude, content);
 }
 
 fn migrate(conn: &mut Connection) -> Result<()> {
@@ -624,6 +643,43 @@ mod meta_tests {
         // RFC3339 shape from strftime.
         assert!(value.ends_with('Z') && value.contains('T'), "got {value}");
 
+        std::fs::remove_dir_all(&repo).ok();
+    }
+}
+
+#[cfg(test)]
+mod exclude_tests {
+    use super::*;
+
+    fn temp_repo() -> PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "hivetask-excl-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn hivetask_excluded_once() {
+        let repo = temp_repo();
+        // init a real git repo so .git/info/ exists
+        git2::Repository::init(&repo).unwrap();
+        open(&repo).unwrap();
+        open(&repo).unwrap(); // idempotent second open
+
+        let exclude = std::fs::read_to_string(repo.join(".git/info/exclude")).unwrap();
+        assert_eq!(exclude.lines().filter(|l| l.trim() == ".hivetask/").count(), 1);
+
+        // A repo without .git dir must not crash storage::open.
+        let plain = std::env::temp_dir().join(format!("hivetask-plain-{}", std::process::id()));
+        std::fs::create_dir_all(&plain).unwrap();
+        let _ = open(&plain);
+        std::fs::remove_dir_all(&plain).ok();
         std::fs::remove_dir_all(&repo).ok();
     }
 }

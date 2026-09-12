@@ -21,6 +21,7 @@ import { useSyncMetaStore } from "../stores/sync-meta";
 import { netOnline, probeNow } from "../net";
 import { useI18n } from "../i18n";
 import { APP_VERSION } from "../app-info";
+import { shortOrigin } from "../origin";
 
 const props = defineProps<{ workspace: string }>();
 
@@ -28,13 +29,15 @@ const repo = useRepoStore();
 const issues = useIssuesStore();
 const pulls = usePullsStore();
 const syncMeta = useSyncMetaStore();
-const { t, locale, locales, cycleLocale } = useI18n();
+const { t, locale, localeChoice, locales, cycleLocale } = useI18n();
 const { current, origin, ghAvailable } = storeToRefs(repo);
 
-/** Self-name of the active locale (中文 / English / …) — scales to any N. */
-const localeLabel = computed(
-  () => locales.find((l) => l.value === locale.value)?.label ?? locale.value,
-);
+/** Cell shows the raw choice ("跟随系统" when following the OS), else the
+ * language's self-name — scales to any N. */
+const localeLabel = computed(() => {
+  if (localeChoice.value === "system") return t("lang.system");
+  return locales.find((l) => l.value === locale.value)?.label ?? locale.value;
+});
 
 const repoName = computed(() => {
   if (!current.value) return null;
@@ -104,7 +107,7 @@ async function probe() {
         <span class="cell-mark">⬡</span>
         {{ repoName ?? t("statusbar.noRepo") }}
       </button>
-      <span v-if="origin" class="status-cell" :title="origin">{{ origin }}</span>
+      <span v-if="origin" class="status-cell" :title="origin">{{ shortOrigin(origin) }}</span>
       <span class="status-cell source-cell">GitHub</span>
     </div>
 

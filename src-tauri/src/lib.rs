@@ -15,6 +15,18 @@ use tauri_plugin_dialog::DialogExt;
 use models::{Comment, HealthInfo, Issue, Pull, RepoInfo};
 
 /// gh CLI availability, for the onboarding banner.
+/// Frontend log bridge (zero npm deps): the webview forwards one line per
+/// call; plugin writes to the OS log dir alongside Rust-side entries.
+#[tauri::command]
+fn log_line(level: String, message: String) {
+    match level.as_str() {
+        "error" => log::error!("{message}"),
+        "warn" => log::warn!("{message}"),
+        "info" => log::info!("{message}"),
+        _ => log::debug!("{message}"),
+    }
+}
+
 #[tauri::command]
 fn health_check() -> HealthInfo {
     HealthInfo {
@@ -239,6 +251,17 @@ fn set_pull_state(repo_path: String, number: i64, closed: bool) -> Result<Pull, 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(
+            tauri_plugin_log::Builder::new()
+                .level(log::LevelFilter::Debug)
+                .targets([
+                    tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::LogDir {
+                        file_name: Some("hivetask".into()),
+                    }),
+                    tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Stdout),
+                ])
+                .build(),
+        )
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_store::Builder::new().build())
@@ -261,6 +284,7 @@ pub fn run() {
             list_synced_at,
             probe_network,
             merge_pull,
+            log_line,
             git_history,
             git_branches,
             git_fetch,

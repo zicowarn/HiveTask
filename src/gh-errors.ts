@@ -55,10 +55,18 @@ export function isNetworkError(raw: string): boolean {
 }
 
 /** Translate + toast in one call — the standard mutation error path.
- * `detail` (the raw string) is attached only when translation happened. */
+ * The raw output also lands in the app log (same moment as the toast),
+ * so 8s-later toast expiry never means the evidence is gone.
+ * `detail` is attached only when translation happened. */
 export function reportError(raw: string): void {
   const message = translateError(raw);
   pushToast(
     message === raw ? { kind: "error", message } : { kind: "error", message, detail: raw },
   );
+  // Dynamic import keeps @tauri-apps/api out of pure-logic unit tests.
+  if ("__TAURI_INTERNALS__" in window) {
+    void import("./api")
+      .then((m) => m.api.logLine("error", raw))
+      .catch(() => {});
+  }
 }

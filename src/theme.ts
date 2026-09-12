@@ -68,11 +68,12 @@ export function setTheme(choice: ThemeChoice): void {
   }
 }
 
-/** Flip between light and dark, replacing any "system" choice. */
-export function toggleTheme(): void {
-  setTheme(resolvedTheme.value === "dark" ? "light" : "dark");
+/** Cycle dark → light → system → dark (header button). */
+export function cycleTheme(): void {
+  const order: ThemeChoice[] = ["dark", "light", "system"];
+  setTheme(order[(order.indexOf(theme.value) + 1) % order.length]);
 }
 
 export function useTheme() {
-  return { theme, resolvedTheme, setTheme, toggleTheme };
+  return { theme, resolvedTheme, setTheme, cycleTheme };
 }

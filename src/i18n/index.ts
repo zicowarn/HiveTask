@@ -17,6 +17,8 @@ import { enUS } from "./en-US";
 export type { MessageKey };
 
 export type Locale = "zh-CN" | "en-US";
+/** 用户可选项：两种语言 + 跟随系统。localStorage 里存的是 LocaleChoice。 */
+export type LocaleChoice = Locale | "system";
 
 const STORAGE_KEY = "hivetask.locale";
 
@@ -30,21 +32,38 @@ const catalogs: Record<Locale, Record<MessageKey, string>> = {
   "en-US": enUS,
 };
 
-/** Saved choice wins; otherwise follow the system language. */
-function detectLocale(): Locale {
+/** Saved choice wins; "system" (or legacy default) follows the OS language. */
+function detectLocaleChoice(): LocaleChoice {
   try {
     const saved = localStorage.getItem(STORAGE_KEY);
-    if (saved === "zh-CN" || saved === "en-US") return saved;
+    if (saved === "zh-CN" || saved === "en-US" || saved === "system") return saved;
   } catch {
     // Storage unavailable — fall through to system detection.
   }
+  return "system";
+}
+
+/** The OS language, re-read so "system" tracks `languagechange` live. */
+function systemLocale(): Locale {
   return navigator.language?.toLowerCase().startsWith("zh") ? "zh-CN" : "en-US";
 }
 
-export const locale = ref<Locale>(detectLocale());
+/** The user's raw choice — statusbar cell and settings select bind this. */
+export const localeChoice = ref<LocaleChoice>(detectLocaleChoice());
+/** What t() actually renders. */
+export const locale = ref<Locale>(
+  localeChoice.value === "system" ? systemLocale() : localeChoice.value,
+);
 
-export function setLocale(next: Locale): void {
-  locale.value = next;
+if (typeof window !== "undefined") {
+  window.addEventListener("languagechange", () => {
+    if (localeChoice.value === "system") locale.value = systemLocale();
+  });
+}
+
+export function setLocale(next: LocaleChoice): void {
+  localeChoice.value = next;
+  locale.value = next === "system" ? systemLocale() : next;
   try {
     localStorage.setItem(STORAGE_KEY, next);
   } catch {
@@ -52,14 +71,11 @@ export function setLocale(next: Locale): void {
   }
 }
 
-export function toggleLocale(): void {
-  setLocale(locale.value === "zh-CN" ? "en-US" : "zh-CN");
-}
-
-/** Cycle through `locales` in order, wrapping around (statusbar cell). */
+/** Cycle through `choices` in order, wrapping around (statusbar cell). */
 export function cycleLocale(): void {
-  const index = locales.findIndex((l) => l.value === locale.value);
-  setLocale(locales[(index + 1) % locales.length].value);
+  const choices: LocaleChoice[] = ["zh-CN", "en-US", "system"];
+  const index = choices.indexOf(localeChoice.value);
+  setLocale(choices[(index + 1) % choices.length]);
 }
 
 export type TranslateParams = Record<string, string | number>;
@@ -77,5 +93,5 @@ export function t(key: MessageKey, params?: TranslateParams): string {
 }
 
 export function useI18n() {
-  return { t, locale, setLocale, toggleLocale, cycleLocale, locales };
+  return { t, locale, localeChoice, setLocale, cycleLocale, locales };
 }

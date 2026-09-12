@@ -61,6 +61,7 @@ fn run_gh(repo: &Path, args: &[&str]) -> Result<String> {
     let gh = find_gh().ok_or_else(|| {
         anyhow!("找不到 gh CLI，请先安装并执行 `gh auth login`（macOS: brew install gh）")
     })?;
+    log::debug!("gh {:?} (cwd {})", args, repo.display());
 
     let output = Command::new(gh)
         .args(args)
@@ -70,6 +71,7 @@ fn run_gh(repo: &Path, args: &[&str]) -> Result<String> {
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        log::debug!("gh 退出码 {:?}: {stderr}", output.status.code());
         return Err(anyhow!("gh 退出码 {:?}: {stderr}", output.status.code()));
     }
     Ok(String::from_utf8_lossy(&output.stdout).into_owned())
