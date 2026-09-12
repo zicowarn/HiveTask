@@ -138,6 +138,7 @@ export const zhCN = {
   "common.loadingFull": "正在从 GitHub 加载完整信息…",
   "common.draft": "草稿",
   "common.unassignedMilestone": "未设置里程碑",
+  "milestone.noneInUse": "该仓库未使用里程碑，以下按列表展示",
   "common.author": "作者：{name}",
   "common.assignees": "负责人：{name}",
   "common.reviewers": "评审：{name}",

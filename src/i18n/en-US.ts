@@ -137,6 +137,7 @@ export const enUS: Record<MessageKey, string> = {
   "common.loadingFull": "Loading full details from GitHub…",
   "common.draft": "Draft",
   "common.unassignedMilestone": "No milestone",
+  "milestone.noneInUse": "This repository doesn't use milestones — shown as a flat list",
   "common.author": "Author: {name}",
   "common.assignees": "Assignees: {name}",
   "common.reviewers": "Reviewers: {name}",
