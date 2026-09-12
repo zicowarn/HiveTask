@@ -88,6 +88,12 @@ export const zhCN = {
   "terminal.exited": "—— shell 已退出 ——",
   "terminal.restart": "重新启动",
 
+  // Editor 切换弹层分类
+  "editorCat.issues": "Issues",
+  "editorCat.pulls": "Pull Requests",
+  "editorCat.tools": "工具",
+  "editorCat.general": "通用",
+
   // Panel modes
   "mode.list": "列表",
   "mode.milestone": "里程碑",

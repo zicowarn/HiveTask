@@ -15,7 +15,7 @@
 import { computed } from "vue";
 import { useWorkbenchStore } from "../stores/workbench";
 import { useI18n } from "../i18n";
-import { panelTypes } from "./panel-types";
+import EditorSwitcher from "./EditorSwitcher.vue";
 
 const props = defineProps<{
   leafId?: string;
@@ -33,8 +33,7 @@ function split(dir: "h" | "v") {
 function close() {
   if (props.leafId) workbench.closeLeaf(props.leafId);
 }
-function onTypeChange(event: Event) {
-  const value = (event.target as HTMLSelectElement).value;
+function onTypeChange(value: string) {
   if (props.leafId && value) workbench.setLeafPanel(props.leafId, value);
 }
 </script>
@@ -43,17 +42,11 @@ function onTypeChange(event: Event) {
   <section class="panel-shell">
     <header v-if="$slots.switcher || $slots.actions || leafId" class="panel-header">
       <div class="panel-header-left">
-        <select
+        <EditorSwitcher
           v-if="leafId && panelType"
-          class="panel-type-select"
-          :value="panelType"
-          :title="t('panel.switchType')"
+          :panel-type="panelType"
           @change="onTypeChange"
-        >
-          <option v-for="p in panelTypes" :key="p.type" :value="p.type">
-            {{ t(p.titleKey) }}
-          </option>
-        </select>
+        />
         <div v-if="$slots.switcher" class="panel-switcher">
           <slot name="switcher" />
         </div>
@@ -105,38 +98,6 @@ function onTypeChange(event: Event) {
 .panel-switcher {
   display: flex;
   align-items: center;
-}
-/* Same chrome metrics as ModeTabs: 22px tall, 6px radius, quiet colors.
-   appearance:none removes the native macOS aqua bezel/gradient; a flat
-   background plus a small chevron keeps the affordance. */
-.panel-type-select {
-  appearance: none;
-  -webkit-appearance: none;
-  height: 22px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background-color: var(--bg-app);
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 10 10'%3E%3Cpath d='M2 3.5L5 6.5L8 3.5' fill='none' stroke='%239aa0a8' stroke-width='1.4' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
-  background-repeat: no-repeat;
-  background-position: right 5px center;
-  background-size: 8px;
-  color: var(--text-dim);
-  font-size: 12px;
-  font-weight: 400;
-  line-height: 1;
-  padding: 0 18px 0 7px;
-  cursor: pointer;
-  outline: none;
-}
-.panel-type-select:hover,
-.panel-type-select:focus-visible {
-  color: var(--text);
-  border-color: var(--accent);
-}
-/* The chevron is an SVG data URI, which can't read CSS vars — swap in the
-   light theme's --text-dim (#656d76) under [data-theme="light"]. */
-[data-theme="light"] .panel-type-select {
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 10 10'%3E%3Cpath d='M2 3.5L5 6.5L8 3.5' fill='none' stroke='%23656d76' stroke-width='1.4' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
 }
 .panel-header-right {
   margin-left: auto;

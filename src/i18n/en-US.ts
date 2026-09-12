@@ -87,6 +87,12 @@ export const enUS: Record<MessageKey, string> = {
   "terminal.exited": "—— shell exited ——",
   "terminal.restart": "Restart",
 
+  // Editor switcher categories
+  "editorCat.issues": "Issues",
+  "editorCat.pulls": "Pull Requests",
+  "editorCat.tools": "Tools",
+  "editorCat.general": "General",
+
   // Panel modes
   "mode.list": "List",
   "mode.milestone": "Milestones",
