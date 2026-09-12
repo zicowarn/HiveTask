@@ -6,7 +6,10 @@ mod gh;
 mod git;
 mod models;
 mod pty;
+mod source;
 mod storage;
+
+use source::{IssueStateFilter, Kind, MergeMethod, PullStateFilter};
 
 use std::path::PathBuf;
 
@@ -76,7 +79,8 @@ fn repo_info(repo_path: String) -> RepoInfo {
 #[tauri::command]
 fn refresh_issues(repo_path: String, state: String, limit: u32) -> Result<Vec<Issue>, String> {
     let repo = PathBuf::from(&repo_path);
-    let issues = gh::fetch_issues(&repo, &state, limit).map_err(|e| e.to_string())?;
+    let filter = IssueStateFilter::parse(&state).map_err(|e| e.to_string())?;
+    let issues = source::source_for(&repo).map_err(|e| e.to_string())?.fetch_issues(&repo, filter, limit).map_err(|e| e.to_string())?;
     let mut conn = storage::open(&repo).map_err(|e| e.to_string())?;
     storage::replace_issues(&mut conn, &state, &issues).map_err(|e| e.to_string())?;
     storage::stamp_synced(&conn, &format!("synced:issues:{state}")).map_err(|e| e.to_string())?;
@@ -103,7 +107,8 @@ fn cached_issue_count(repo_path: String, state: String) -> Result<i64, String> {
 #[tauri::command]
 fn refresh_pulls(repo_path: String, state: String, limit: u32) -> Result<Vec<Pull>, String> {
     let repo = PathBuf::from(&repo_path);
-    let pulls = gh::fetch_pulls(&repo, &state, limit).map_err(|e| e.to_string())?;
+    let filter = PullStateFilter::parse(&state).map_err(|e| e.to_string())?;
+    let pulls = source::source_for(&repo).map_err(|e| e.to_string())?.fetch_pulls(&repo, filter, limit).map_err(|e| e.to_string())?;
     let mut conn = storage::open(&repo).map_err(|e| e.to_string())?;
     storage::replace_pulls(&mut conn, &state, &pulls).map_err(|e| e.to_string())?;
     storage::stamp_synced(&conn, &format!("synced:pulls:{state}")).map_err(|e| e.to_string())?;
@@ -115,7 +120,7 @@ fn refresh_pulls(repo_path: String, state: String, limit: u32) -> Result<Vec<Pul
 #[tauri::command]
 fn refresh_pull_detail(repo_path: String, number: i64) -> Result<Pull, String> {
     let repo = PathBuf::from(&repo_path);
-    let pull = gh::fetch_pull_detail(&repo, number).map_err(|e| e.to_string())?;
+    let pull = source::source_for(&repo).map_err(|e| e.to_string())?.fetch_pull_detail(&repo, number).map_err(|e| e.to_string())?;
     let conn = storage::open(&repo).map_err(|e| e.to_string())?;
     storage::upsert_pull(&conn, &pull).map_err(|e| e.to_string())?;
     Ok(pull)
@@ -140,7 +145,8 @@ fn cached_pull_count(repo_path: String, state: String) -> Result<i64, String> {
 #[tauri::command]
 fn merge_pull(repo_path: String, number: i64, method: String) -> Result<Pull, String> {
     let repo = PathBuf::from(&repo_path);
-    let pull = gh::merge_pull(&repo, number, &method).map_err(|e| e.to_string())?;
+    let method = MergeMethod::parse(&method).map_err(|e| e.to_string())?;
+    let pull = source::source_for(&repo).map_err(|e| e.to_string())?.merge_pull(&repo, number, method).map_err(|e| e.to_string())?;
     let conn = storage::open(&repo).map_err(|e| e.to_string())?;
     storage::upsert_pull(&conn, &pull).map_err(|e| e.to_string())?;
     Ok(pull)
@@ -179,15 +185,6 @@ fn probe_network() -> Result<(), String> {
     gh::probe_network().map_err(|e| e.to_string())
 }
 
-/// Validate the entity kind shared by the comment commands ("issue" | "pull"
-/// — it becomes a gh subcommand, so it must never pass through unchecked).
-fn check_kind(kind: &str) -> Result<(), String> {
-    match kind {
-        "issue" | "pull" => Ok(()),
-        other => Err(format!("未知的实体类型: {other}")),
-    }
-}
-
 /// Read an entity's comments from the offline cache (cache-first rendering).
 #[tauri::command]
 fn list_cached_comments(
@@ -195,20 +192,20 @@ fn list_cached_comments(
     kind: String,
     number: i64,
 ) -> Result<Vec<Comment>, String> {
-    check_kind(&kind)?;
+    let kind = Kind::parse(&kind).map_err(|e| e.to_string())?;
     let repo = PathBuf::from(&repo_path);
     let conn = storage::open(&repo).map_err(|e| e.to_string())?;
-    storage::list_comments(&conn, &kind, number).map_err(|e| e.to_string())
+    storage::list_comments(&conn, kind.as_str(), number).map_err(|e| e.to_string())
 }
 
 /// Fetch an entity's comments via gh, replace the cache slice, return fresh.
 #[tauri::command]
 fn fetch_comments(repo_path: String, kind: String, number: i64) -> Result<Vec<Comment>, String> {
-    check_kind(&kind)?;
+    let kind = Kind::parse(&kind).map_err(|e| e.to_string())?;
     let repo = PathBuf::from(&repo_path);
-    let comments = gh::fetch_comments(&repo, &kind, number).map_err(|e| e.to_string())?;
+    let comments = source::source_for(&repo).map_err(|e| e.to_string())?.fetch_comments(&repo, kind, number).map_err(|e| e.to_string())?;
     let mut conn = storage::open(&repo).map_err(|e| e.to_string())?;
-    storage::replace_comments(&mut conn, &kind, number, &comments).map_err(|e| e.to_string())?;
+    storage::replace_comments(&mut conn, kind.as_str(), number, &comments).map_err(|e| e.to_string())?;
     Ok(comments)
 }
 
@@ -220,11 +217,11 @@ fn add_comment(
     number: i64,
     body: String,
 ) -> Result<Vec<Comment>, String> {
-    check_kind(&kind)?;
+    let kind = Kind::parse(&kind).map_err(|e| e.to_string())?;
     let repo = PathBuf::from(&repo_path);
-    let comments = gh::add_comment(&repo, &kind, number, &body).map_err(|e| e.to_string())?;
+    let comments = source::source_for(&repo).map_err(|e| e.to_string())?.add_comment(&repo, kind, number, &body).map_err(|e| e.to_string())?;
     let mut conn = storage::open(&repo).map_err(|e| e.to_string())?;
-    storage::replace_comments(&mut conn, &kind, number, &comments).map_err(|e| e.to_string())?;
+    storage::replace_comments(&mut conn, kind.as_str(), number, &comments).map_err(|e| e.to_string())?;
     Ok(comments)
 }
 
@@ -233,7 +230,7 @@ fn add_comment(
 #[tauri::command]
 fn set_issue_state(repo_path: String, number: i64, closed: bool) -> Result<Issue, String> {
     let repo = PathBuf::from(&repo_path);
-    let issue = gh::set_issue_state(&repo, number, closed).map_err(|e| e.to_string())?;
+    let issue = source::source_for(&repo).map_err(|e| e.to_string())?.set_issue_state(&repo, number, closed).map_err(|e| e.to_string())?;
     let conn = storage::open(&repo).map_err(|e| e.to_string())?;
     storage::update_issue_state(&conn, number, &issue.state).map_err(|e| e.to_string())?;
     Ok(issue)
@@ -243,7 +240,7 @@ fn set_issue_state(repo_path: String, number: i64, closed: bool) -> Result<Issue
 #[tauri::command]
 fn set_pull_state(repo_path: String, number: i64, closed: bool) -> Result<Pull, String> {
     let repo = PathBuf::from(&repo_path);
-    let pull = gh::set_pull_state(&repo, number, closed).map_err(|e| e.to_string())?;
+    let pull = source::source_for(&repo).map_err(|e| e.to_string())?.set_pull_state(&repo, number, closed).map_err(|e| e.to_string())?;
     let conn = storage::open(&repo).map_err(|e| e.to_string())?;
     storage::upsert_pull(&conn, &pull).map_err(|e| e.to_string())?;
     Ok(pull)

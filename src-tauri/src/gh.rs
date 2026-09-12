@@ -9,6 +9,7 @@ use anyhow::{anyhow, Context, Result};
 use serde_json::Value;
 
 use crate::models::{Comment, Issue, Pull};
+use crate::source::{IssueStateFilter, Kind, MergeMethod, PullStateFilter, Source};
 
 /// Fields requested from `gh issue list --json`.
 const ISSUE_LIST_FIELDS: &str = "number,title,state,body,author,labels,\
@@ -84,8 +85,63 @@ pub fn gh_version() -> Option<String> {
     text.lines().next().map(|line| line.to_string())
 }
 
+/// GitHub 来源实现：gh CLI 子进程 + 免费认证。所有 gh 方言
+/// （子命令 pr、旗标、状态大小写）都关在本 impl 与其辅助函数内。
+pub struct GhSource;
+
+impl Source for GhSource {
+    fn fetch_issues(&self, repo: &Path, state: IssueStateFilter, limit: u32) -> Result<Vec<Issue>> {
+        fetch_issues(repo, state.as_gh_str(), limit)
+    }
+    fn fetch_pulls(&self, repo: &Path, state: PullStateFilter, limit: u32) -> Result<Vec<Pull>> {
+        fetch_pulls(repo, state.as_gh_str(), limit)
+    }
+    fn fetch_pull_detail(&self, repo: &Path, number: i64) -> Result<Pull> {
+        fetch_pull_detail(repo, number)
+    }
+    fn fetch_comments(&self, repo: &Path, kind: Kind, number: i64) -> Result<Vec<Comment>> {
+        fetch_comments(repo, kind, number)
+    }
+    fn add_comment(&self, repo: &Path, kind: Kind, number: i64, body: &str) -> Result<Vec<Comment>> {
+        add_comment(repo, kind, number, body)
+    }
+    fn set_issue_state(&self, repo: &Path, number: i64, closed: bool) -> Result<Issue> {
+        set_issue_state(repo, number, closed)
+    }
+    fn set_pull_state(&self, repo: &Path, number: i64, closed: bool) -> Result<Pull> {
+        set_pull_state(repo, number, closed)
+    }
+    fn merge_pull(&self, repo: &Path, number: i64, method: MergeMethod) -> Result<Pull> {
+        merge_pull(repo, number, method)
+    }
+}
+
+/// 过滤器的 gh 方言（恰好与前端口径一致）。
+trait AsGhStr {
+    fn as_gh_str(self) -> &'static str;
+}
+impl AsGhStr for IssueStateFilter {
+    fn as_gh_str(self) -> &'static str {
+        match self {
+            IssueStateFilter::Open => "open",
+            IssueStateFilter::Closed => "closed",
+            IssueStateFilter::All => "all",
+        }
+    }
+}
+impl AsGhStr for PullStateFilter {
+    fn as_gh_str(self) -> &'static str {
+        match self {
+            PullStateFilter::Open => "open",
+            PullStateFilter::Closed => "closed",
+            PullStateFilter::Merged => "merged",
+            PullStateFilter::All => "all",
+        }
+    }
+}
+
 /// Fetch issues via `gh issue list`. `state` is "open" | "closed" | "all".
-pub fn fetch_issues(repo: &Path, state: &str, limit: u32) -> Result<Vec<Issue>> {
+fn fetch_issues(repo: &Path, state: &str, limit: u32) -> Result<Vec<Issue>> {
     let limit = limit.clamp(1, 1000).to_string();
     let args = [
         "issue",
@@ -175,7 +231,7 @@ commits,comments";
 /// PRs (gh folds MERGED into the "closed" query), so the closed case over-
 /// fetches and drops MERGED rows afterwards. The multiplier covers skewed
 /// histories like tauri's, where the most recent closed window is ~80% merges.
-pub fn fetch_pulls(repo: &Path, state: &str, limit: u32) -> Result<Vec<Pull>> {
+fn fetch_pulls(repo: &Path, state: &str, limit: u32) -> Result<Vec<Pull>> {
     let limit = limit.clamp(1, 1000);
     let unmerged_only = state == "closed";
     // Cheap scalar-only rows; asking for a wider window costs little.
@@ -210,7 +266,7 @@ fn without_merged(pulls: Vec<Pull>) -> Vec<Pull> {
 }
 
 /// Fetch one PR with full fields via `gh pr view <number> --json`.
-pub fn fetch_pull_detail(repo: &Path, number: i64) -> Result<Pull> {
+fn fetch_pull_detail(repo: &Path, number: i64) -> Result<Pull> {
     let fields = format!("{PR_LIST_FIELDS},{PR_DETAIL_FIELDS}");
     let number_str = number.to_string();
     let args = ["pr", "view", &number_str, "--json", &fields];
@@ -226,16 +282,16 @@ pub fn fetch_pull_detail(repo: &Path, number: i64) -> Result<Pull> {
 /// "issue" | "pull") to gh's subcommand — which is `pr`, NOT `pull`.
 /// Passing the kind through verbatim sent `gh pull view` to gh and failed
 /// with `unknown command "pull"`.
-fn gh_subcommand(kind: &str) -> &str {
+fn gh_subcommand(kind: Kind) -> &'static str {
     match kind {
-        "pull" => "pr",
-        other => other,
+        Kind::Issue => "issue",
+        Kind::Pull => "pr",
     }
 }
 
 /// Fetch an entity's conversation comments via `gh issue|pr view --json
 /// comments`. `kind` is the entity kind "issue" | "pull".
-pub fn fetch_comments(repo: &Path, kind: &str, number: i64) -> Result<Vec<Comment>> {
+fn fetch_comments(repo: &Path, kind: Kind, number: i64) -> Result<Vec<Comment>> {
     let sub = gh_subcommand(kind);
     let number_str = number.to_string();
     let args = [sub, "view", &number_str, "--json", "comments"];
@@ -264,7 +320,7 @@ fn parse_comment_value(v: &Value) -> Comment {
 /// Post a comment via `gh issue|pr comment`, then re-read the conversation.
 /// Returning the fresh list IS the write-through: one roundtrip leaves the
 /// cache and the UI consistent without a separate refresh call.
-pub fn add_comment(repo: &Path, kind: &str, number: i64, body: &str) -> Result<Vec<Comment>> {
+fn add_comment(repo: &Path, kind: Kind, number: i64, body: &str) -> Result<Vec<Comment>> {
     let sub = gh_subcommand(kind);
     let number_str = number.to_string();
     let args = [sub, "comment", &number_str, "--body", body];
@@ -274,19 +330,21 @@ pub fn add_comment(repo: &Path, kind: &str, number: i64, body: &str) -> Result<V
 
 /// Whitelist + translate the merge method into gh's flag. gh prompts
 /// interactively without one of these, which would hang the shell call.
-fn merge_method_flag(method: &str) -> Result<&'static str> {
-    Ok(match method {
-        "merge" => "--merge",
-        "squash" => "--squash",
-        "rebase" => "--rebase",
-        other => return Err(anyhow!("未知的合并方式: {other}")),
-    })
+/// Translate the merge method into gh's flag. gh prompts interactively
+/// without one of these, which would hang the shell call. 注入防护由
+/// source::MergeMethod::parse 的枚举白名单承担。
+fn merge_flag(method: MergeMethod) -> &'static str {
+    match method {
+        MergeMethod::Merge => "--merge",
+        MergeMethod::Squash => "--squash",
+        MergeMethod::Rebase => "--rebase",
+    }
 }
 
 /// Merge a pull request, then re-read the full record (write-through: the
 /// fresh MERGED state becomes the single source for store patching).
-pub fn merge_pull(repo: &Path, number: i64, method: &str) -> Result<Pull> {
-    let flag = merge_method_flag(method)?;
+fn merge_pull(repo: &Path, number: i64, method: MergeMethod) -> Result<Pull> {
+    let flag = merge_flag(method);
     let number_str = number.to_string();
     let args = ["pr", "merge", &number_str, flag];
     run_gh(repo, &args)?;
@@ -309,7 +367,7 @@ pub fn probe_network() -> Result<()> {
 }
 
 /// Close or reopen an issue; returns the fresh entity for store patching.
-pub fn set_issue_state(repo: &Path, number: i64, closed: bool) -> Result<Issue> {
+fn set_issue_state(repo: &Path, number: i64, closed: bool) -> Result<Issue> {
     let number_str = number.to_string();
     let verb = if closed { "close" } else { "reopen" };
     let args = ["issue", verb, &number_str];
@@ -323,7 +381,7 @@ pub fn set_issue_state(repo: &Path, number: i64, closed: bool) -> Result<Issue> 
 
 /// Close or reopen a pull request; returns the fresh full record so a close
 /// that raced a merge surfaces as MERGED, not CLOSED.
-pub fn set_pull_state(repo: &Path, number: i64, closed: bool) -> Result<Pull> {
+fn set_pull_state(repo: &Path, number: i64, closed: bool) -> Result<Pull> {
     let number_str = number.to_string();
     let verb = if closed { "close" } else { "reopen" };
     let args = ["pr", verb, &number_str];
@@ -594,21 +652,17 @@ mod tests {
     }
 
     #[test]
-    fn merge_method_whitelist() {
-        assert_eq!(merge_method_flag("merge").unwrap(), "--merge");
-        assert_eq!(merge_method_flag("squash").unwrap(), "--squash");
-        assert_eq!(merge_method_flag("rebase").unwrap(), "--rebase");
-        // The method string becomes a gh flag — anything else is refused.
-        assert!(merge_method_flag("--admin").is_err());
-        assert!(merge_method_flag("").is_err());
+    fn gh_subcommand_translates_kind() {
+        assert_eq!(gh_subcommand(Kind::Pull), "pr");
+        assert_eq!(gh_subcommand(Kind::Issue), "issue");
     }
 
     #[test]
     fn entity_kind_maps_to_gh_subcommand() {
         // The storage/frontend kind "pull" must translate to gh's `pr`;
         // passing it through verbatim produced `unknown command "pull"`.
-        assert_eq!(gh_subcommand("pull"), "pr");
-        assert_eq!(gh_subcommand("issue"), "issue");
+        assert_eq!(gh_subcommand(Kind::Pull), "pr");
+        assert_eq!(gh_subcommand(Kind::Issue), "issue");
     }
 
     #[test]
