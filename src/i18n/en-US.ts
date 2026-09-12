@@ -70,6 +70,14 @@ export const enUS: Record<MessageKey, string> = {
 
   // Git history panel
   "gitHistory.fetch": "Fetch",
+  "gitHistory.branches": "Branches",
+  "gitHistory.moreBranches": "{n} more branches",
+  "gitHistory.collapse": "Collapse",
+  "gitHistory.colGraph": "Graph",
+  "gitHistory.colDate": "Date",
+  "gitHistory.colAuthor": "Author",
+  "gitHistory.colCommit": "Commit",
+  "gitHistory.parents": "{n} parents",
   "gitHistory.noCommits": "No commits yet",
   "gitHistory.aheadBehind": "ahead {ahead} · behind {behind}",
   "gitHistory.clickToFilter": "Click to show only this branch's history",

@@ -71,6 +71,14 @@ export const zhCN = {
 
   // Git history panel
   "gitHistory.fetch": "抓取远端",
+  "gitHistory.branches": "分支",
+  "gitHistory.moreBranches": "还有 {n} 个分支",
+  "gitHistory.collapse": "收起",
+  "gitHistory.colGraph": "图",
+  "gitHistory.colDate": "日期",
+  "gitHistory.colAuthor": "作者",
+  "gitHistory.colCommit": "提交",
+  "gitHistory.parents": "{n} 个父提交",
   "gitHistory.noCommits": "仓库还没有提交",
   "gitHistory.aheadBehind": "领先 {ahead} · 落后 {behind}",
   "gitHistory.clickToFilter": "点击只看该分支的历史",
