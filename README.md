@@ -2,7 +2,7 @@
 
 **English** · [简体中文](./README.zh-CN.md)
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
+[![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](./LICENSE)
 [![Tauri](https://img.shields.io/badge/Tauri-2-blue)](https://tauri.app)
 [![Vue](https://img.shields.io/badge/Vue-3-42b883)](https://vuejs.org)
 [![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-lightgrey)]()
@@ -142,4 +142,10 @@ HiveTask/
 
 ## License
 
-[MIT](./LICENSE) © 2026 Barbossa
+[AGPL-3.0-only](./LICENSE) © 2026 Barbossa
+
+This program is free software: you may use, study, modify, and redistribute
+it under the terms of the GNU Affero General Public License v3.0. If you run
+a modified version as a network service, you must make the modified source
+code available under the same license (AGPL §13). For alternative licensing
+outside the AGPL, contact the author.
