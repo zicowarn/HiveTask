@@ -66,6 +66,9 @@ export const api = {
   ptyWrite: (id: string, data: string) => invoke<void>("pty_write", { id, data }),
   ptyResize: (id: string, rows: number, cols: number) => invoke<void>("pty_resize", { id, rows, cols }),
   ptyKill: (id: string) => invoke<void>("pty_kill", { id }),
+  sourceConfigGet: () => invoke<{ giteaHost?: string | null }>("source_config_get"),
+  sourceConfigSet: (config: { giteaHost?: string | null }) =>
+    invoke<void>("source_config_set", { config }),
   credentialSet: (platform: string, token: string) => invoke<void>("credential_set", { platform, token }),
   credentialGet: (platform: string) => invoke<string | null>("credential_get", { platform }),
   credentialDelete: (platform: string) => invoke<void>("credential_delete", { platform }),

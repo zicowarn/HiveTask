@@ -4,10 +4,12 @@
 
 mod credentials;
 mod gh;
+mod gitea;
 mod git;
 mod models;
 mod pty;
 mod source;
+mod source_config;
 mod storage;
 
 use source::{IssueStateFilter, Kind, MergeMethod, PullStateFilter};
@@ -293,7 +295,9 @@ pub fn run() {
             pty::pty_kill,
             credentials::credential_set,
             credentials::credential_get,
-            credentials::credential_delete
+            credentials::credential_delete,
+            source_config::source_config_get,
+            source_config::source_config_set
         ])
         .manage(pty::PtyMap(std::sync::Mutex::new(std::collections::HashMap::new())))
         .run(tauri::generate_context!())

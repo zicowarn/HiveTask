@@ -126,16 +126,34 @@ pub fn remote_host(repo: &Path) -> Option<String> {
 }
 
 /// 全项目唯一的来源解析点：读 git remote，按 host 选实现。
-/// 当前只有 GitHub 实现；未知 / 无 remote 暂回落 GitHub。
-/// Gitea（reqwest + token）与 LocalSource 接入时在此分叉，
-/// 自建 host 靠 API 指纹探测与设置兜底（见设计文档 Q4 推论 1）。
+/// 解析顺序：GitHub（域名匹配）→ 已配置的 Gitea host（精确匹配配置值，
+/// 自建 host 任意）→ 其余暂回落 GitHub（未来交 API 指纹探测 / 设置兜底，
+/// 见设计文档 Q4 推论 1）。token 属 GiteaSource 构造细节，从钥匙串取。
 pub fn source_for(repo: &Path) -> Result<Box<dyn Source>> {
-    Ok(match remote_host(repo).as_deref() {
-        Some(host) if host.contains("github") => Box::new(crate::gh::GhSource),
-        // 未来: Some(h) if h.contains("gitea") => Box::new(GiteaSource::new(h)?),
-        // 未来: None 或本地约定 => Box::new(LocalSource),
-        _ => Box::new(crate::gh::GhSource),
-    })
+    let Some(host) = remote_host(repo) else {
+        return Ok(Box::new(crate::gh::GhSource));
+    };
+    if host.contains("github") {
+        return Ok(Box::new(crate::gh::GhSource));
+    }
+    let config = crate::source_config::load();
+    if let Some(gitea_host) = config.gitea_host.filter(|h| !h.trim().is_empty()) {
+        let configured = gitea_host
+            .trim_start_matches("http://")
+            .trim_start_matches("https://")
+            .trim_end_matches('/')
+            .to_lowercase();
+        if host == configured {
+            let token = keyring_token("gitea");
+            return Ok(Box::new(crate::gitea::GiteaSource::new(gitea_host, token)));
+        }
+    }
+    Ok(Box::new(crate::gh::GhSource))
+}
+
+fn keyring_token(platform: &str) -> Option<String> {
+    let entry = keyring::Entry::new(&format!("hivetask.{platform}"), "token").ok()?;
+    entry.get_password().ok()
 }
 
 #[cfg(test)]

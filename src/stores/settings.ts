@@ -6,25 +6,18 @@
  * here.
  */
 import { defineStore } from "pinia";
+import { api, isTauri } from "../api";
 import { ref, watch } from "vue";
 
 const STATUSBAR_KEY = "hivetask.statusbar";
 const TERMINAL_SHELL_KEY = "hivetask.terminalShell";
-const GITEA_HOST_KEY = "hivetask.giteaHost";
+
 
 function loadStatusbarVisible(): boolean {
   try {
     return localStorage.getItem(STATUSBAR_KEY) !== "0";
   } catch {
     return true;
-  }
-}
-
-function loadGiteaHost(): string {
-  try {
-    return localStorage.getItem(GITEA_HOST_KEY) ?? "";
-  } catch {
-    return "";
   }
 }
 
@@ -40,8 +33,9 @@ export const useSettingsStore = defineStore("settings", () => {
   const statusbarVisible = ref(loadStatusbarVisible());
   /** "" = auto ($SHELL / COMSPEC); else an explicit shell path/name. */
   const terminalShell = ref(loadTerminalShell());
-  /** Gitea 实例地址（token 在 OS 钥匙串，见 credentials.rs）。 */
-  const giteaHost = ref(loadGiteaHost());
+  /** Gitea 实例地址（token 在 OS 钥匙串）。存 Rust 侧 source.json——
+   * source_for 在命令内同步读取，webview localStorage 它看不见。 */
+  const giteaHost = ref("");
 
   watch(statusbarVisible, (visible) => {
     try {
@@ -59,12 +53,23 @@ export const useSettingsStore = defineStore("settings", () => {
     }
   });
 
-  watch(giteaHost, (host) => {
+  // 首次从 Rust 配置加载；此后本地镜像，变化即回写（防抖由调用方天然稀疏）。
+  void (async () => {
+    if (!isTauri()) return;
     try {
-      localStorage.setItem(GITEA_HOST_KEY, host);
+      const config = await api.sourceConfigGet();
+      giteaHost.value = config.giteaHost ?? "";
     } catch {
-      // Storage unavailable — the choice still applies for this session.
+      // 设置读取失败不阻塞 UI，保持空值。
     }
+  })();
+
+  let giteaSaveTimer: ReturnType<typeof setTimeout> | null = null;
+  watch(giteaHost, (host) => {
+    if (giteaSaveTimer) clearTimeout(giteaSaveTimer);
+    giteaSaveTimer = setTimeout(() => {
+      void api.sourceConfigSet({ giteaHost: host || null }).catch(() => {});
+    }, 400);
   });
 
   function toggleStatusbar(): void {
