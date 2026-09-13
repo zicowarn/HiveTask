@@ -153,23 +153,32 @@ async function probe() {
         />
         {{ platformLabel }}
       </span>
+      <!-- 项目上下文（与库信息同构）：名称 + 私有锁（本地即私有）+
+           条目分布（仅在有条目时）。空板也显示，否则该格整段消失。 -->
       <button
-        v-if="projBoard && projTotal > 0"
+        v-if="projBoard"
         class="status-cell proj-cell"
-        :title="projDist.map((d) => `${d.name} ${d.count}`).join(' · ')"
+        :title="projTotal > 0
+          ? projDist.map((d) => `${d.name} ${d.count}`).join(' · ')
+          : t('project.visibilityTip')"
         @click="gotoProjects"
       >
         <span class="proj-mark">◫</span>
         {{ projBoard.displayName }}
-        <span class="proj-bar">
-          <span
-            v-for="d in projDist"
-            :key="d.id"
-            class="proj-seg"
-            :style="{ background: d.color, flexGrow: d.count }"
-          ></span>
+        <span class="proj-lock" :title="t('project.visibilityTip')">
+          <EditorIcon name="lock" />
         </span>
-        {{ projTotal }}
+        <template v-if="projTotal > 0">
+          <span class="proj-bar">
+            <span
+              v-for="d in projDist"
+              :key="d.id"
+              class="proj-seg"
+              :style="{ background: d.color, flexGrow: d.count }"
+            ></span>
+          </span>
+          {{ projTotal }}
+        </template>
       </button>
     </div>
 
@@ -272,6 +281,11 @@ button.status-cell {
 }
 .proj-mark {
   color: var(--accent);
+}
+.proj-lock {
+  display: inline-flex;
+  align-items: center;
+  color: var(--text-dim);
 }
 .proj-bar {
   display: inline-flex;
