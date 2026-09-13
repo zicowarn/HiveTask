@@ -269,8 +269,10 @@ fn fetch_pull_detail(slug: &str, number: &str) -> Result<Pull> {
 
 /// Repo visibility via `gh repo view --json visibility`. PUBLIC /
 /// PRIVATE / INTERNAL（GHE 企业可见，亦非公开）→ public/private。
+/// 注意：`repo view` 不接受 `-R`（本机 gh 2.92 实测 unknown shorthand
+/// flag），仓库用位置参数传；显式 <repository> 不依赖工作目录。
 fn repo_visibility(slug: &str) -> Result<&'static str> {
-    let stdout = run_gh(&["repo", "view", "-R", slug, "--json", "visibility", "-q", ".visibility"])?;
+    let stdout = run_gh(&["repo", "view", slug, "--json", "visibility", "-q", ".visibility"])?;
     Ok(match stdout.trim().to_ascii_uppercase().as_str() {
         "PUBLIC" => "public",
         "" => return Err(anyhow!("gh 未返回 visibility（仓库不存在或无权限）")),

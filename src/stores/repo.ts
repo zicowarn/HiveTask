@@ -89,8 +89,10 @@ export const useRepoStore = defineStore("repo", () => {
     try {
       const v = await api.repoVisibility(path);
       if (current.value === path) visibility.value = v ?? null;
-    } catch {
-      // 探测失败保持 null（不显示锁）——不打扰用户。
+    } catch (e) {
+      // 探测失败保持 null（不显示锁）——不打扰用户，仅落日志便于诊断
+      // （gh 语法错误曾在此静默：repo view 的 -R 不被支持，见 gh.rs）。
+      void api.logLine("debug", `repo_visibility probe failed: ${String(e)}`);
     }
   }
 
