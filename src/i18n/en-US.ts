@@ -59,6 +59,7 @@ export const enUS: Record<MessageKey, string> = {
 
   // Status bar
   "statusbar.noRepo": "No repository",
+  "statusbar.local": "Local",
   "statusbar.syncedAt": "Synced {time}",
   "statusbar.ghOk": "gh CLI available",
   "statusbar.ghMissing": "gh CLI not found",

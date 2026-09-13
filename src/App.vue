@@ -85,6 +85,12 @@ async function copyGithubUrl() {
 const aboutOpen = ref(false);
 const repoManagerOpen = ref(false);
 
+// RepoManager 的 select：本地路径 / 仅远端 URL 都在此切换当前仓库。
+function onRepoManagerSelect(target: string) {
+  repo.setCurrent(target);
+  repoManagerOpen.value = false;
+}
+
 // 打开即登记：启动时把 lastRepo/recentRepos 导入 app.db（幂等）。
 // 已不存在的路径（如 /tmp 清理）跳过——否则死路径每次启动都被重新登记。
 async function importLegacyRepos() {
@@ -261,7 +267,7 @@ onBeforeUnmount(() => {
           <span class="repo-panel-title">{{ t("app.repoSwitch") }}</span>
           <button class="repo-panel-close" @click="repoManagerOpen = false">✕</button>
         </div>
-        <RepoManager @select="repoManagerOpen = false" />
+        <RepoManager @select="onRepoManagerSelect" />
       </div>
     </div>
 

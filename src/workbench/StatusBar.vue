@@ -45,6 +45,19 @@ const repoName = computed(() => {
   return parts[parts.length - 1] ?? current.value;
 });
 
+/** 来源标签与运行时路由同源（repo.platform 来自 repo_info 的
+ * resolve_target 链）；无 platform = 本地/未知。 */
+const PLATFORM_LABELS: Record<string, string> = {
+  github: "GitHub",
+  gitee: "Gitee",
+  gitea: "Gitea",
+  gitlab: "GitLab",
+};
+const platformLabel = computed(() => {
+  const p = repo.platform;
+  return p ? (PLATFORM_LABELS[p] ?? p) : t("statusbar.local");
+});
+
 // Freshness is per filter bucket on the data workspaces; on other tabs
 // (and when the active bucket was never synced) the cell falls back to the
 // latest sync across all buckets — a cell that flickers out on tab
@@ -108,7 +121,7 @@ async function probe() {
         {{ repoName ?? t("statusbar.noRepo") }}
       </button>
       <span v-if="origin" class="status-cell" :title="origin">{{ shortOrigin(origin) }}</span>
-      <span class="status-cell source-cell">GitHub</span>
+      <span v-if="current" class="status-cell source-cell">{{ platformLabel }}</span>
     </div>
 
     <div class="status-right">

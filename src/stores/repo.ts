@@ -23,27 +23,36 @@ function loadRecent(): string[] {
  */
 export const useRepoStore = defineStore("repo", () => {
   const current = ref<string | null>(localStorage.getItem(LAST_KEY));
+  const origin = ref<string | null>(null);
+  // 当前仓库的来源路由口径（repo_info 与运行时同链解析）；null = 本地/未知。
+  const platform = ref<string | null>(null);
 
   // Startup guard: a persisted path may have rotted away (e.g. /tmp cleanup).
   // Clear it so the UI falls back to "未选择仓库" instead of dead reads.
   void (async () => {
     if (!current.value || !isTauri()) return;
     // 仅远端登记的 current 是 URL，不是磁盘路径，is_dir 必然 false——
-    // 交给使用时的 resolve_target 校验，这里跳过。
-    if (/^https?:\/\//i.test(current.value)) return;
+    // 不做失效检查（交给使用时的 resolve_target），只取来源口径。
+    if (/^https?:\/\//i.test(current.value)) {
+      try {
+        platform.value = (await api.repoInfo(current.value)).platform ?? null;
+      } catch {
+        // best-effort
+      }
+      return;
+    }
     try {
       const info = await api.repoInfo(current.value);
+      platform.value = info.platform ?? null;
       if (info.valid === false) {
         current.value = null;
+        platform.value = null;
         localStorage.removeItem(LAST_KEY);
       }
     } catch {
       // Probe is best-effort; keep the persisted path on failure.
     }
   })();
-  const origin = ref<string | null>(null);
-  // 当前仓库的来源路由口径（repo_info 与运行时同链解析）；null = 本地/未知。
-  const platform = ref<string | null>(null);
   const recent = ref<string[]>(loadRecent());
   // null = not checked yet (e.g. plain-browser preview skips the probe).
   const ghAvailable = ref<boolean | null>(null);

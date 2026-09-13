@@ -60,6 +60,7 @@ export const zhCN = {
 
   // Status bar
   "statusbar.noRepo": "未选择仓库",
+  "statusbar.local": "本地",
   "statusbar.syncedAt": "{time} 同步",
   "statusbar.ghOk": "gh CLI 可用",
   "statusbar.ghMissing": "未检测到 gh CLI",
