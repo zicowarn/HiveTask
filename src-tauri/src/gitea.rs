@@ -12,7 +12,6 @@
 
 use anyhow::{anyhow, Context, Result};
 use serde_json::Value;
-use std::path::Path;
 use std::time::Duration;
 
 use crate::models::{Comment, Issue, Pull};
@@ -89,24 +88,6 @@ impl GiteaSource {
             return Err(anyhow!("Gitea {} : {}", status, body.trim()));
         }
         Ok(serde_json::from_str(&body).unwrap_or(Value::Null))
-    }
-
-    fn slug(&self, repo: &Path) -> Result<RepoSlug> {
-        // origin 形如 https://host/owner/repo(.git) 或 git@host:owner/repo(.git)
-        let url = crate::gh::git_origin(repo).ok_or_else(|| anyhow!("未找到 origin remote"))?;
-        let s = url
-            .strip_prefix("https://")
-            .or_else(|| url.strip_prefix("http://"))
-            .unwrap_or(&url);
-        let s = s.split_once('@').map(|(_, rest)| rest).unwrap_or(s);
-        let path = s.trim_start_matches(|c| c == '/' || c == ':');
-        let path = path.trim_end_matches('/');
-        let path = path.strip_suffix(".git").unwrap_or(path);
-        let mut parts = path.split('/').filter(|p| !p.is_empty());
-        let (Some(owner), Some(repo_name)) = (parts.next(), parts.next()) else {
-            return Err(anyhow!("无法从 remote 解析 owner/repo: {url}"));
-        };
-        Ok(RepoSlug { owner: owner.to_string(), repo: repo_name.to_string() })
     }
 
     /// RepoRef → 常驻 slug（owner/repo 已在解析期确定，无需再读盘）。

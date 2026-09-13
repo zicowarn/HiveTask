@@ -11,6 +11,7 @@ import { useI18n } from "../i18n";
 import { reportError } from "../gh-errors";
 import { pushToast } from "../toast";
 
+defineProps<{ open: boolean }>();
 const emit = defineEmits<{ close: [] }>();
 
 const { t } = useI18n();
@@ -122,7 +123,7 @@ onBeforeUnmount(() => document.removeEventListener("keydown", onKeydown));
 </script>
 
 <template>
-  <div class="conn-overlay" @click.self="close">
+  <div v-if="open" class="conn-overlay" @click.self="close">
     <div class="conn-panel" role="dialog" :aria-label="t('conn.title')">
       <div class="conn-head">
         <span class="conn-title">{{ t("conn.title") }}</span>

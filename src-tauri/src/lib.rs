@@ -191,19 +191,22 @@ fn merge_pull(repo_path: String, number: i64, method: String) -> Result<Pull, St
 /// Commit history across all local + remote tips, for the graph renderer.
 #[tauri::command]
 fn git_history(repo_path: String, limit: Option<u32>) -> Result<models::GitHistoryPage, String> {
-    git::history(&repo_path, limit).map_err(|e| e.to_string())
+    let dir = local_dir_of(&repo_path)?;
+    git::history(&dir.to_string_lossy(), limit).map_err(|e| e.to_string())
 }
 
 /// Branch list with local/remote kind and ahead/behind vs upstream.
 #[tauri::command]
 fn git_branches(repo_path: String) -> Result<Vec<models::BranchRow>, String> {
-    git::branches(&repo_path).map_err(|e| e.to_string())
+    let dir = local_dir_of(&repo_path)?;
+    git::branches(&dir.to_string_lossy()).map_err(|e| e.to_string())
 }
 
 /// `git fetch --all` through the git CLI (reuses credential helpers).
 #[tauri::command]
 fn git_fetch(repo_path: String) -> Result<(), String> {
-    git::fetch(&repo_path).map_err(|e| e.to_string())
+    let dir = local_dir_of(&repo_path)?;
+    git::fetch(&dir.to_string_lossy()).map_err(|e| e.to_string())
 }
 
 /// All recorded sync timestamps for the status bar's "last updated" cell.
