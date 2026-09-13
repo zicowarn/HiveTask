@@ -26,6 +26,8 @@ interface RepoEntry {
 }
 
 const repos = ref<RepoEntry[]>([]);
+const remoteFormOpen = ref(false);
+const remoteUrl = ref("");
 const loading = ref(false);
 const activeTab = ref<string>("local");
 
@@ -95,6 +97,17 @@ async function pickLocal() {
   emit("select", path);
 }
 
+async function addRemote() {
+  const url = remoteUrl.value.trim();
+  if (!url) return;
+  await api.repoRegisterRemote(url);
+  remoteUrl.value = "";
+  remoteFormOpen.value = false;
+  await load();
+  // 仅远端登记的标识就是 URL 本身——切换过去（Issue/PR 走 API）。
+  emit("select", url);
+}
+
 async function remove(entry: RepoEntry) {
   await api.repoDelete(entry.id);
   await load();
@@ -115,7 +128,24 @@ async function remove(entry: RepoEntry) {
       </button>
       <span class="tabs-spacer"></span>
       <button class="add-btn" @click="pickLocal">{{ t("repo.addLocal") }}</button>
-      <button class="add-btn disabled" :title="t('repo.remoteLater')">{{ t("repo.addRemote") }}</button>
+      <button
+        class="add-btn"
+        :class="{ active: remoteFormOpen }"
+        @click="remoteFormOpen = !remoteFormOpen"
+      >{{ t("repo.addRemote") }}</button>
+    </div>
+
+    <div v-if="remoteFormOpen" class="remote-form">
+      <input
+        v-model.trim="remoteUrl"
+        class="remote-input"
+        :placeholder="t('repo.remotePlaceholder')"
+        spellcheck="false"
+        @keydown.enter="addRemote"
+      />
+      <button class="add-btn" :disabled="!remoteUrl" @click="addRemote">
+        {{ t("settings.save") }}
+      </button>
     </div>
 
     <p v-if="loading" class="note">{{ t("common.loadingFull") }}</p>
@@ -129,6 +159,7 @@ async function remove(entry: RepoEntry) {
         @click="pick(entry)"
       >
         <span class="repo-name">{{ nameOf(entry) }}</span>
+        <span v-if="!entry.path" class="repo-remote-flag">{{ t("repo.remoteOnly") }}</span>
         <span v-if="entry.path === repoStore.current" class="repo-current">{{ t("repo.current") }}</span>
         <span class="repo-meta">{{ entry.connectionLabel ?? entry.remoteUrl ?? entry.path }}</span>
         <button
@@ -191,9 +222,29 @@ async function remove(entry: RepoEntry) {
   border-color: var(--accent);
   color: var(--accent);
 }
-.add-btn.disabled {
-  opacity: 0.45;
-  cursor: not-allowed;
+.add-btn.active {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.remote-form {
+  display: flex;
+  gap: 6px;
+  padding: 6px 0;
+}
+.remote-input {
+  flex: 1;
+  box-sizing: border-box;
+  font-size: 12px;
+  color: var(--text);
+  background: var(--bg-app);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  height: 24px;
+  padding: 0 8px;
+  outline: none;
+}
+.remote-input:focus {
+  border-color: var(--accent);
 }
 .note {
   padding: 20px;
@@ -224,6 +275,13 @@ async function remove(entry: RepoEntry) {
 .repo-name {
   color: var(--text);
   font-weight: 500;
+}
+.repo-remote-flag {
+  font-size: 10px;
+  color: var(--text-dim);
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+  padding: 0 6px;
 }
 .repo-current {
   font-size: 10px;

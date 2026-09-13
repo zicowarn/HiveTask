@@ -73,6 +73,7 @@ export const api = {
   repoList: () =>
     invoke<Array<{ id: string; path?: string | null; remoteUrl?: string | null; displayName?: string | null; connectionId?: string | null; connectionLabel?: string | null; platform?: string | null; lastOpenedAt: string }>>("repo_list"),
   repoRegister: (path: string) => invoke<unknown>("repo_register", { path }),
+  repoRegisterRemote: (url: string) => invoke<unknown>("repo_register_remote", { url }),
   repoDelete: (id: string) => invoke<void>("repo_delete", { id }),
   sourceConfigGet: () => invoke<{ giteaHost?: string | null }>("source_config_get"),
   sourceConfigSet: (config: { giteaHost?: string | null }) =>
