@@ -153,6 +153,7 @@ export const enUS: Record<MessageKey, string> = {
   "mode.view": "View",
   "project.filterPlaceholder": "Filter by keyword or by field (status:, priority:)",
   "project.viewLayout": "Layout",
+  "project.viewColumnBy": "Column by",
   "project.viewSort": "Sort by",
   "project.sortManual": "Manual order",
   "project.sortPriority": "Priority",

@@ -154,6 +154,7 @@ export const zhCN = {
   "mode.view": "视图",
   "project.filterPlaceholder": "按关键词或字段筛选（status: 优先级:）",
   "project.viewLayout": "布局",
+  "project.viewColumnBy": "分列方式",
   "project.viewSort": "排序",
   "project.sortManual": "手动排序",
   "project.sortPriority": "优先级",
