@@ -2,6 +2,7 @@
 //! local core (gh CLI + SQLite cache). This same core will later back the
 //! headless MCP server from Phase 4.
 
+mod appdb;
 mod credentials;
 mod gh;
 mod gitea;
@@ -297,7 +298,13 @@ pub fn run() {
             credentials::credential_get,
             credentials::credential_delete,
             source_config::source_config_get,
-            source_config::source_config_set
+            source_config::source_config_set,
+            appdb::connection_list,
+            appdb::connection_save,
+            appdb::connection_delete,
+            appdb::repo_list,
+            appdb::repo_register,
+            appdb::repo_delete
         ])
         .manage(pty::PtyMap(std::sync::Mutex::new(std::collections::HashMap::new())))
         .run(tauri::generate_context!())

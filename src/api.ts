@@ -66,6 +66,14 @@ export const api = {
   ptyWrite: (id: string, data: string) => invoke<void>("pty_write", { id, data }),
   ptyResize: (id: string, rows: number, cols: number) => invoke<void>("pty_resize", { id, rows, cols }),
   ptyKill: (id: string) => invoke<void>("pty_kill", { id }),
+  connectionList: () => invoke<Array<{ id: string; platform: string; host: string; label: string; sourceState: string; createdAt: string }>>("connection_list"),
+  connectionSave: (args: { id?: string; platform: string; host: string; label: string }) =>
+    invoke<{ id: string }>("connection_save", args),
+  connectionDelete: (id: string) => invoke<void>("connection_delete", { id }),
+  repoList: () =>
+    invoke<Array<{ id: string; path?: string | null; remoteUrl?: string | null; displayName?: string | null; connectionId?: string | null; connectionLabel?: string | null; platform?: string | null; lastOpenedAt: string }>>("repo_list"),
+  repoRegister: (path: string) => invoke<unknown>("repo_register", { path }),
+  repoDelete: (id: string) => invoke<void>("repo_delete", { id }),
   sourceConfigGet: () => invoke<{ giteaHost?: string | null }>("source_config_get"),
   sourceConfigSet: (config: { giteaHost?: string | null }) =>
     invoke<void>("source_config_set", { config }),

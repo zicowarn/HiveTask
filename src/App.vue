@@ -5,6 +5,7 @@ import WorkbenchNode from "./workbench/WorkbenchNode.vue";
 import StatusBar from "./workbench/StatusBar.vue";
 import AppMenu from "./components/AppMenu.vue";
 import AboutDialog from "./components/AboutDialog.vue";
+import RepoManager from "./components/RepoManager.vue";
 import ToastHost from "./components/ToastHost.vue";
 import { workspaces } from "./workbench/registry";
 import { buildMenuDefs } from "./menu-defs";
@@ -82,6 +83,23 @@ async function copyGithubUrl() {
 }
 
 const aboutOpen = ref(false);
+const repoManagerOpen = ref(false);
+
+// 打开即登记：启动时把 lastRepo/recentRepos 导入 app.db（幂等）。
+async function importLegacyRepos() {
+  if (!isTauri()) return;
+  const legacy = [
+    current.value,
+    ...JSON.parse(localStorage.getItem("hivetask.recentRepos") ?? "[]") as string[],
+  ].filter((p): p is string => !!p);
+  for (const path of [...new Set(legacy)]) {
+    try {
+      await import("./api").then((m) => m.api.repoRegister(path));
+    } catch {
+      // 单条导入失败不阻塞启动。
+    }
+  }
+}
 
 // Computed (not constant) so label language, checkmarks and disabled
 // states stay live; every re-run is synced into the native menu inside
@@ -145,6 +163,7 @@ onMounted(async () => {
   if (!inTauri) window.addEventListener("keydown", onKeydown);
   if (!isTauri()) return;
   await repo.checkHealth();
+  void importLegacyRepos();
   void probeNow(); // seed the status bar's online/offline cell
   await repo.refreshInfo();
 
@@ -200,7 +219,7 @@ onBeforeUnmount(() => {
       </div>
 
       <div class="header-actions">
-        <button class="header-btn" @click="repo.pick()">
+        <button class="header-btn" @click="repoManagerOpen = true">
           {{ current ? t("app.repoSwitch") : t("app.repoPick") }}
         </button>
         <button class="header-btn theme-btn" :title="t('theme.switch')" @click="cycleTheme()">
@@ -232,10 +251,63 @@ onBeforeUnmount(() => {
 
     <ToastHost />
 
+    <div v-if="repoManagerOpen" class="repo-overlay" @click.self="repoManagerOpen = false">
+      <div class="repo-panel">
+        <div class="repo-panel-head">
+          <span class="repo-panel-title">{{ t("app.repoSwitch") }}</span>
+          <button class="repo-panel-close" @click="repoManagerOpen = false">✕</button>
+        </div>
+        <RepoManager @select="repoManagerOpen = false" />
+      </div>
+    </div>
+
     <AboutDialog :open="aboutOpen" @close="aboutOpen = false" />
   </div>
 </template>
 
+<style scoped>
+.repo-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 210;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.45);
+}
+.repo-panel {
+  width: 480px;
+  max-width: calc(100vw - 40px);
+  max-height: 70vh;
+  overflow: auto;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.35);
+  padding: 12px 14px;
+}
+.repo-panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-bottom: 8px;
+}
+.repo-panel-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text);
+}
+.repo-panel-close {
+  border: none;
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+  font-size: 12px;
+}
+.repo-panel-close:hover {
+  color: var(--text);
+}
+</style>
 <style scoped>
 .app-shell {
   display: flex;
