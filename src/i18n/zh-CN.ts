@@ -151,6 +151,15 @@ export const zhCN = {
   "project.colPriority": "优先级",
   "project.colSource": "来源",
   "project.noItems": "暂无条目——右下角 ＋ 添加",
+  "mode.view": "视图",
+  "project.filterPlaceholder": "按关键词或字段筛选（status: 优先级:）",
+  "project.viewLayout": "布局",
+  "project.viewSort": "排序",
+  "project.sortManual": "手动排序",
+  "project.sortPriority": "优先级",
+  "project.sortAdded": "添加时间",
+  "project.renameCol": "修改列名",
+  "project.addHere": "添加到这一列",
 
   // Issue/PR state (filter tabs + detail badges)
   "state.open": "开启中",

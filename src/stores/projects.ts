@@ -20,6 +20,91 @@ export const useProjectsStore = defineStore("projects", () => {
    * repoId = 登记表 id，App.vue 消费时解析成 path/URL target。 */
   const navRequest = ref<{ workspace: string; repoId?: string; number?: string } | null>(null);
 
+  // ---- 视图工具栏（对齐 GitHub Projects：左筛选 + ⚙ 视图设置）----
+  const VIEW_KEY = "hivetask.panel-view.project.board";
+  const filterText = ref(localStorage.getItem(`${VIEW_KEY}.filter`) ?? "");
+  type SortBy = "manual" | "priority" | "added";
+  const sortBy = ref<SortBy>(
+    (localStorage.getItem(`${VIEW_KEY}.sort`) as SortBy | null) ?? "manual",
+  );
+  function setSortBy(v: SortBy) {
+    sortBy.value = v;
+    localStorage.setItem(`${VIEW_KEY}.sort`, v);
+  }
+
+  interface FilterTokens {
+    text: string;
+    status: string[];
+    priority: string[];
+  }
+  /** 解析 `status:xxx priority:yyy 自由文本`（空格分隔，冒号后整段为一个值，
+   * 含空格的值用引号）。未识别的 aaa:bbb 按自由文本处理。 */
+  function parseFilter(raw: string, statusNames: string[], priorityNames: string[]): FilterTokens {
+    const tokens: FilterTokens = { text: "", status: [], priority: [] };
+    for (const part of raw.split(/\s+/).filter(Boolean)) {
+      const m = part.match(/^(status|priority):(.+)$/i);
+      if (!m) {
+        tokens.text += (tokens.text ? " " : "") + part;
+        continue;
+      }
+      const kind = m[1]!.toLowerCase();
+      const needle = m[2]!.replace(/^"|"$/g, "").toLowerCase();
+      const pool = kind === "status" ? statusNames : priorityNames;
+      if (pool.some((n) => n.toLowerCase().includes(needle))) {
+        (kind === "status" ? tokens.status : tokens.priority).push(needle);
+      } else {
+        tokens.text += (tokens.text ? " " : "") + part;
+      }
+    }
+    return tokens;
+  }
+
+  /** 过滤 + 排序后的条目（Board/Table 两种投影共用）。 */
+  const filteredItems = computed(() => {
+    const statusF = fields.value.find((f) => f.kind === "builtin_status") ?? null;
+    const prioF = fields.value.find((f) => f.name === "优先级") ?? null;
+    const tokens = parseFilter(
+      filterText.value,
+      statusF?.options.map((o) => o.name) ?? [],
+      prioF?.options.map((o) => o.name) ?? [],
+    );
+    const optionIndex = (field: ProjectField | null, item: ProjectItem): number => {
+      if (!field) return -1;
+      const v = item.fieldValues[field.id];
+      const idx = field.options.findIndex((o) => o.id === v);
+      return idx === -1 ? Number.MAX_SAFE_INTEGER : idx;
+    };
+    const matches = (i: ProjectItem): boolean => {
+      if (tokens.status.length) {
+        const name = statusF?.options.find((o) => o.id === i.fieldValues[statusF.id])?.name.toLowerCase() ?? "";
+        if (!tokens.status.some((s) => name.includes(s))) return false;
+      }
+      if (tokens.priority.length) {
+        const name = prioF?.options.find((o) => o.id === i.fieldValues[prioF.id])?.name.toLowerCase() ?? "";
+        if (!tokens.priority.some((p) => name.includes(p))) return false;
+      }
+      if (tokens.text) {
+        const hay = `${i.draftTitle ?? ""} ${i.number ?? ""} ${i.repoLabel ?? ""}`.toLowerCase();
+        if (!hay.includes(tokens.text.toLowerCase())) return false;
+      }
+      return true;
+    };
+    const sorted = [...items.value].filter(matches);
+    if (sortBy.value === "priority" && prioF) {
+      sorted.sort((a, b) => optionIndex(prioF, a) - optionIndex(prioF, b));
+    } else if (sortBy.value === "added") {
+      sorted.sort((a, b) => b.addedAt.localeCompare(a.addedAt));
+    } else {
+      sorted.sort((a, b) => Number(a.rank) - Number(b.rank));
+    }
+    return sorted;
+  });
+
+  function setFilterText(v: string) {
+    filterText.value = v;
+    localStorage.setItem(`${VIEW_KEY}.filter`, v);
+  }
+
   const selected = computed(() => projects.value.find((p) => p.id === selectedId.value) ?? null);
   /** 列定义真源：builtin_status 字段的 options（数组序即列序）。 */
   const statusField = computed(() => fields.value.find((f) => f.kind === "builtin_status") ?? null);
@@ -95,9 +180,20 @@ export const useProjectsStore = defineStore("projects", () => {
     await loadProjects();
   }
 
-  /** 添加条目并刷新当前板（后端已分配列与 rank）。 */
+  /** 添加条目并刷新当前板（后端已分配列与 rank）；返回新条目供列内快加
+   * 追加指定列。 */
   async function addItem(args: Parameters<typeof api.projectItemAdd>[0]) {
-    await api.projectItemAdd(args);
+    const item = await api.projectItemAdd(args);
+    await loadSelected();
+    return item;
+  }
+
+  /** 列改名：重写 builtin_status options（其余 option 原样保留）。 */
+  async function renameStatusOption(optionId: string, name: string) {
+    const field = statusField.value;
+    if (!field) return;
+    const options = field.options.map((o) => (o.id === optionId ? { ...o, name } : o));
+    await api.projectFieldSetOptions(field.id, options);
     await loadSelected();
   }
 
@@ -159,6 +255,11 @@ export const useProjectsStore = defineStore("projects", () => {
     navRequest,
     statusField,
     priorityField,
+    filterText,
+    sortBy,
+    filteredItems,
+    setFilterText,
+    setSortBy,
     loadProjects,
     loadAll,
     select,
@@ -174,6 +275,7 @@ export const useProjectsStore = defineStore("projects", () => {
     convertToIssue,
     bindRepo,
     unbindRepo,
+    renameStatusOption,
     statusOptions,
   };
 });

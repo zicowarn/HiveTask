@@ -150,6 +150,15 @@ export const enUS: Record<MessageKey, string> = {
   "project.colPriority": "Priority",
   "project.colSource": "Source",
   "project.noItems": "No items — use ＋ to add one",
+  "mode.view": "View",
+  "project.filterPlaceholder": "Filter by keyword or by field (status:, priority:)",
+  "project.viewLayout": "Layout",
+  "project.viewSort": "Sort by",
+  "project.sortManual": "Manual order",
+  "project.sortPriority": "Priority",
+  "project.sortAdded": "Recently added",
+  "project.renameCol": "Rename column",
+  "project.addHere": "Add to this column",
 
   // Issue/PR state (filter tabs + detail badges)
   "state.open": "Open",

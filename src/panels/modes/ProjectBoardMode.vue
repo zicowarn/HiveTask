@@ -9,51 +9,78 @@
 import { computed, ref } from "vue";
 import { storeToRefs } from "pinia";
 import { useProjectsStore } from "../../stores/projects";
-import { api } from "../../api";
+import { api, type ProjectItem } from "../../api";
 import { useI18n } from "../../i18n";
 
 const store = useProjectsStore();
-const { items, statusField, priorityField, selected } = storeToRefs(store);
+const { statusField, priorityField, selected, filteredItems } = storeToRefs(store);
 const { t } = useI18n();
 
 const columns = computed(() => store.statusOptions());
 
-/** 列 → 该列卡片（按 rank 升序；item_list 已排，这里按字段值分组）。 */
+/** 列 → 该列卡片（过滤+排序后的投影，按字段值分组）。 */
 function cardsOf(optionId: string) {
   if (!statusField.value) return [];
-  return items.value.filter((i) => i.fieldValues[statusField.value!.id] === optionId);
+  return filteredItems.value.filter((i) => i.fieldValues[statusField.value!.id] === optionId);
 }
 
-function priorityColor(item: (typeof items.value)[number]): string | null {
+function priorityColor(item: ProjectItem): string | null {
   if (!priorityField.value) return null;
   const optionId = item.fieldValues[priorityField.value.id];
   if (!optionId) return null;
   return priorityField.value.options.find((o) => o.id === optionId)?.color ?? null;
 }
 
-/** 卡片主标题：草稿显示草稿题，引用显示 #编号 + 仓库标签。 */
-function titleOf(item: (typeof items.value)[number]): string {
-  if (item.kind === "draft") return item.draftTitle ?? "";
-  return `#${item.number ?? "?"} ${item.draftTitle ?? ""}`.trim();
+function priorityName(item: ProjectItem): string {
+  if (!priorityField.value) return "";
+  const optionId = item.fieldValues[priorityField.value.id];
+  return priorityField.value.options.find((o) => o.id === optionId)?.name ?? "";
 }
 
-function tagOf(item: (typeof items.value)[number]): string {
+/** 卡片主标题：草稿显示草稿题；引用卡无缓存标题时回落 #编号。 */
+function titleOf(item: ProjectItem): string {
+  if (item.draftTitle) return item.draftTitle;
+  return item.number ? `#${item.number}` : "";
+}
+
+// ---- 卡片点击：引用卡跳线上 Issue（切仓库上下文 + 打开详情） ----
+function openCard(item: ProjectItem) {
+  if (item.kind === "draft" || item.ghost || !item.repoId || !item.number) return;
+  store.navRequest = { workspace: "issues", repoId: item.repoId, number: item.number };
+}
+
+/** 卡片第一行元信息：引用卡 = 仓库标签；草稿 = 草稿标记。 */
+function metaOf(item: ProjectItem): string {
   if (item.ghost) return t("project.ghost");
   if (item.kind === "draft") return t("project.draftTag");
   return item.repoLabel ?? "";
 }
 
-// ---- 卡片点击：引用卡跳线上 Issue（切仓库上下文 + 打开详情） ----
-function openCard(item: (typeof items.value)[number]) {
-  if (item.kind === "draft" || item.ghost || !item.repoId || !item.number) return;
-  store.navRequest = { workspace: "issues", repoId: item.repoId, number: item.number };
+// ---- 列内快加（＋ 直接展开底部表单并锁定目标列） ----
+const addColumn = ref<string | null>(null);
+function quickAdd(optionId: string) {
+  addColumn.value = optionId;
+  addOpen.value = true;
+}
+
+// ---- 列改名（⋯ 菜单，走 options 重写） ----
+const renamingCol = ref<string | null>(null);
+const renameColName = ref("");
+function startRenameCol(optionId: string, current: string) {
+  renamingCol.value = optionId;
+  renameColName.value = current;
+}
+async function submitRenameCol() {
+  if (!renamingCol.value || !renameColName.value.trim()) return;
+  await store.renameStatusOption(renamingCol.value, renameColName.value.trim());
+  renamingCol.value = null;
 }
 
 // ---- 拖拽：dragover 记录落点（列 + 参照卡），drop 一次性提交 ----
 const dragId = ref<string | null>(null);
 const dropTarget = ref<{ optionId: string; prevId: string | null } | null>(null);
 
-function onDragStart(item: (typeof items.value)[number], event: DragEvent) {
+function onDragStart(item: ProjectItem, event: DragEvent) {
   dragId.value = item.id;
   event.dataTransfer?.setData("text/plain", item.id);
 }
@@ -61,7 +88,7 @@ function onDragOverColumn(optionId: string, event: DragEvent) {
   event.preventDefault();
   dropTarget.value = { optionId, prevId: lastCardId(optionId) };
 }
-function onDragOverCard(optionId: string, item: (typeof items.value)[number], event: DragEvent) {
+function onDragOverCard(optionId: string, item: ProjectItem, event: DragEvent) {
   if (dragId.value === item.id) return;
   event.preventDefault();
   event.stopPropagation();
@@ -106,12 +133,17 @@ async function toggleAdd() {
 }
 async function submitAdd() {
   if (!selected.value) return;
+  let created = null;
   if (addKind.value === "draft") {
     if (!addTitle.value.trim()) return;
-    await store.addItem({ projectId: selected.value.id, kind: "draft", draftTitle: addTitle.value, draftBody: addBody.value || undefined });
+    created = await store.addItem({ projectId: selected.value.id, kind: "draft", draftTitle: addTitle.value, draftBody: addBody.value || undefined });
   } else {
     if (!addRepoId.value || !addNumber.value.trim()) return;
-    await store.addItem({ projectId: selected.value.id, kind: "issue", repoId: addRepoId.value, number: addNumber.value.trim() });
+    created = await store.addItem({ projectId: selected.value.id, kind: "issue", repoId: addRepoId.value, number: addNumber.value.trim() });
+  }
+  // 列内快加：落点锁定到触发的列
+  if (created && addColumn.value) {
+    await store.moveItem(created.id, addColumn.value);
   }
   addTitle.value = "";
   addBody.value = "";
@@ -121,7 +153,7 @@ async function submitAdd() {
 // ---- 草稿转 Issue ----
 const converting = ref<string | null>(null);
 const localRepos = ref<{ path: string; label: string }[]>([]);
-async function toggleConvert(item: (typeof items.value)[number]) {
+async function toggleConvert(item: ProjectItem) {
   converting.value = converting.value === item.id ? null : item.id;
   if (converting.value && localRepos.value.length === 0) {
     try {
@@ -134,7 +166,7 @@ async function toggleConvert(item: (typeof items.value)[number]) {
     }
   }
 }
-async function submitConvert(item: (typeof items.value)[number], path: string) {
+async function submitConvert(item: ProjectItem, path: string) {
   await store.convertToIssue(item.id, path);
   converting.value = null;
 }
@@ -150,8 +182,22 @@ async function submitConvert(item: (typeof items.value)[number], path: string) {
     >
       <p class="col-head">
         <span class="col-dot" :style="{ background: col.color }"></span>
-        {{ col.name }}
-        <span class="col-count">{{ cardsOf(col.id).length }}</span>
+        <template v-if="renamingCol === col.id">
+          <input
+            v-model="renameColName"
+            class="col-rename"
+            @keydown.enter="submitRenameCol"
+            @keydown.escape="renamingCol = null"
+          />
+          <button class="col-btn" @click="submitRenameCol">✓</button>
+        </template>
+        <template v-else>
+          {{ col.name }}
+          <span class="col-count">{{ cardsOf(col.id).length }}</span>
+          <span class="col-spacer"></span>
+          <button class="col-btn" :title="t('project.renameCol')" @click="startRenameCol(col.id, col.name)">⋯</button>
+          <button class="col-btn plus" :title="t('project.addHere')" @click="quickAdd(col.id)">＋</button>
+        </template>
       </p>
       <div
         v-for="card in cardsOf(col.id)"
@@ -163,16 +209,17 @@ async function submitConvert(item: (typeof items.value)[number], path: string) {
         @dragover="onDragOverCard(col.id, card, $event)"
         @click="openCard(card)"
       >
-        <p class="card-title">{{ titleOf(card) }}</p>
         <p class="card-meta">
+          <span class="card-src">{{ metaOf(card) }}</span>
           <span
             v-if="priorityColor(card)"
             class="prio-dot"
             :style="{ background: priorityColor(card) ?? '' }"
+            :title="priorityName(card)"
           ></span>
-          <span class="card-tag">{{ tagOf(card) }}</span>
           <button class="card-del" :title="t('project.removeItem')" @click.stop="store.removeItem(card.id)">✕</button>
         </p>
+        <p class="card-title">{{ titleOf(card) }}</p>
         <div v-if="card.kind === 'draft'" class="card-convert">
           <button class="card-link" @click="toggleConvert(card)">{{ t("project.convert") }}</button>
           <template v-if="converting === card.id">
@@ -254,6 +301,37 @@ async function submitConvert(item: (typeof items.value)[number], path: string) {
   font-weight: 600;
   color: var(--text);
 }
+.col-rename {
+  box-sizing: border-box;
+  width: 110px;
+  font-size: 12px;
+  font-family: inherit;
+  color: var(--text);
+  background: var(--bg-panel);
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  padding: 1px 5px;
+  outline: none;
+}
+.col-spacer {
+  flex: 1;
+}
+.col-btn {
+  border: none;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 12px;
+  cursor: pointer;
+  padding: 0 3px;
+  border-radius: 4px;
+}
+.col-btn:hover {
+  color: var(--text);
+  background: var(--bg-hover);
+}
+.col-btn.plus {
+  font-size: 13px;
+}
 .col-dot {
   width: 8px;
   height: 8px;
@@ -296,9 +374,15 @@ async function submitConvert(item: (typeof items.value)[number], path: string) {
   display: flex;
   align-items: center;
   gap: 6px;
-  margin: 0;
+  margin: 0 0 4px;
   font-size: 10px;
   color: var(--text-dim);
+}
+.card-src {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
 }
 .prio-dot {
   width: 8px;
@@ -306,18 +390,16 @@ async function submitConvert(item: (typeof items.value)[number], path: string) {
   border-radius: 50%;
   flex: none;
 }
-.card-tag {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
 .card-del {
-  margin-left: auto;
+  display: none;
   border: none;
   background: transparent;
   color: var(--text-dim);
   font-size: 10px;
   cursor: pointer;
+}
+.card:hover .card-del {
+  display: inline;
 }
 .card-del:hover {
   color: var(--danger);

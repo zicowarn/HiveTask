@@ -7,37 +7,39 @@
 import { computed } from "vue";
 import { storeToRefs } from "pinia";
 import { useProjectsStore } from "../../stores/projects";
+import type { ProjectItem } from "../../api";
 import { useI18n } from "../../i18n";
 
 const store = useProjectsStore();
-const { items, statusField, priorityField } = storeToRefs(store);
+const { statusField, priorityField } = storeToRefs(store);
+const { filteredItems } = storeToRefs(store);
 const { t } = useI18n();
 
-const rows = computed(() => items.value);
+const rows = computed(() => filteredItems.value);
 const priorityOptions = computed(() => priorityField.value?.options ?? []);
 
-function statusName(item: (typeof items.value)[number]): string {
+function statusName(item: ProjectItem): string {
   if (!statusField.value) return "";
   const optionId = item.fieldValues[statusField.value.id];
   return statusField.value.options.find((o) => o.id === optionId)?.name ?? "—";
 }
 
-function titleOf(item: (typeof items.value)[number]): string {
+function titleOf(item: ProjectItem): string {
   if (item.kind === "draft") return item.draftTitle ?? "";
   return `#${item.number ?? "?"} ${item.draftTitle ?? ""}`.trim();
 }
 
-function tagOf(item: (typeof items.value)[number]): string {
+function tagOf(item: ProjectItem): string {
   if (item.ghost) return t("project.ghost");
   if (item.kind === "draft") return t("project.draftTag");
   return item.repoLabel ?? "";
 }
 
-function priorityId(item: (typeof items.value)[number]): string {
+function priorityId(item: ProjectItem): string {
   return priorityField.value ? (item.fieldValues[priorityField.value.id] ?? "") : "";
 }
 
-function priorityName(item: (typeof items.value)[number]): string {
+function priorityName(item: ProjectItem): string {
   const id = priorityId(item);
   return priorityOptions.value.find((o) => o.id === id)?.name ?? "—";
 }
