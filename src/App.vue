@@ -7,6 +7,7 @@ import AppMenu from "./components/AppMenu.vue";
 import ProjectManager from "./components/ProjectManager.vue";
 import AboutDialog from "./components/AboutDialog.vue";
 import RepoManager from "./components/RepoManager.vue";
+import EditorIcon from "./components/EditorIcon.vue";
 import ToastHost from "./components/ToastHost.vue";
 import { workspaces } from "./workbench/registry";
 import { buildMenuDefs } from "./menu-defs";
@@ -32,7 +33,7 @@ const pulls = usePullsStore();
 const projectsStore = useProjectsStore();
 const settings = useSettingsStore();
 const workbench = useWorkbenchStore();
-const { current, origin } = storeToRefs(repo);
+const { current, origin, visibility } = storeToRefs(repo);
 const { t } = useI18n();
 const { theme, resolvedTheme, cycleTheme } = useTheme();
 
@@ -269,6 +270,11 @@ onBeforeUnmount(() => {
           <span v-if="projectsStore.selected.description" class="repo-origin">
             {{ projectsStore.selected.description }}
           </span>
+          <!-- 本地项目未发布到任何平台 = 等同私有；平台项目绑定落地后换真实值 -->
+          <span class="vis-badge" :title="t('project.visibilityTip')">
+            <EditorIcon name="lock" />
+            {{ t("visibility.private") }}
+          </span>
         </template>
         <span v-else class="repo-hint">{{ t("app.projectNone") }}</span>
       </div>
@@ -276,6 +282,14 @@ onBeforeUnmount(() => {
         <template v-if="current">
           <span class="repo-path" :title="current">{{ current }}</span>
           <span v-if="origin" class="repo-origin" :title="origin">{{ shortOrigin(origin) }}</span>
+          <span
+            v-if="visibility"
+            class="vis-badge"
+            :title="t(visibility === 'private' ? 'repo.visibilityPrivate' : 'repo.visibilityPublic')"
+          >
+            <EditorIcon :name="visibility === 'private' ? 'lock' : 'unlock'" />
+            {{ t(visibility === "private" ? "visibility.private" : "visibility.public") }}
+          </span>
         </template>
         <span v-else class="repo-hint">{{ t("app.repoNone") }}</span>
       </div>
@@ -475,6 +489,24 @@ onBeforeUnmount(() => {
 .repo-hint {
   font-size: 12px;
   color: var(--text-dim);
+}
+/* 头部可见性徽标：锁/开锁 + 短文字（状态栏与列表保持纯图标） */
+.vis-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10px;
+  line-height: 1;
+  padding: 3px 8px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--text-dim);
+  white-space: nowrap;
+  flex: none;
+}
+.vis-badge :deep(.editor-icon) {
+  width: 11px;
+  height: 11px;
 }
 .header-actions {
   display: flex;
