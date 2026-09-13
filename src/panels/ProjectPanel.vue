@@ -38,6 +38,9 @@ onMounted(() => {
 const viewOpen = ref(false);
 type ViewSub = null | "sort";
 const viewSub = ref<ViewSub>(null);
+const displayModes = computed(() =>
+  [...modes].sort((a, b) => (a.key === "table" ? -1 : 1) - (b.key === "table" ? -1 : 1)),
+);
 const sortOptions = computed(() => [
   { value: "manual" as const, label: t("project.sortManual") },
   { value: "priority" as const, label: t("project.sortPriority") },
@@ -92,6 +95,10 @@ function removeChip(chip: { kind: string; value: string }) {
     <div v-else class="pj-body">
       <div class="pj-topbar">
         <div class="filter-box">
+          <svg class="filter-icon" viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true">
+            <circle cx="7" cy="7" r="4.6" />
+            <path d="M10.5 10.5 14 14" />
+          </svg>
           <span
             v-for="chip in filterChips"
             :key="`${chip.kind}:${chip.value}`"
@@ -118,7 +125,7 @@ function removeChip(chip: { kind: string; value: string }) {
           <div v-if="viewOpen" class="view-pop">
             <div class="view-layout-seg">
               <button
-                v-for="m in modes"
+                v-for="m in displayModes"
                 :key="m.key"
                 class="view-seg-btn"
                 :class="{ active: modeKey === m.key }"
@@ -216,13 +223,17 @@ function removeChip(chip: { kind: string; value: string }) {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 4px;
+  gap: 5px;
   flex: 1;
-  min-height: 26px;
-  padding: 2px 8px;
+  min-height: 30px;
+  padding: 3px 10px;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: 8px;
   background: var(--bg-panel);
+}
+.filter-icon {
+  color: var(--text-dim);
+  flex: none;
 }
 .filter-box:focus-within {
   border-color: var(--accent);
@@ -273,9 +284,9 @@ function removeChip(chip: { kind: string; value: string }) {
   background: var(--bg-panel);
   color: var(--text);
   font-size: 12px;
-  height: 26px;
-  padding: 0 10px;
-  border-radius: 6px;
+  height: 30px;
+  padding: 0 12px;
+  border-radius: 8px;
   cursor: pointer;
   white-space: nowrap;
 }
@@ -308,11 +319,7 @@ function removeChip(chip: { kind: string; value: string }) {
 }
 .view-layout-seg {
   display: flex;
-  gap: 4px;
-  padding: 3px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--bg-app);
+  gap: 8px;
   margin-bottom: 6px;
 }
 .view-seg-btn {
@@ -321,20 +328,19 @@ function removeChip(chip: { kind: string; value: string }) {
   align-items: center;
   justify-content: center;
   gap: 5px;
-  border: 1px solid transparent;
-  background: transparent;
+  border: 1px solid var(--border);
+  background: var(--bg-panel);
   color: var(--text-dim);
   font-size: 12px;
-  padding: 5px 0;
-  border-radius: 6px;
+  padding: 6px 0;
+  border-radius: 8px;
   cursor: pointer;
 }
 .view-seg-btn:hover {
   color: var(--text);
 }
 .view-seg-btn.active {
-  background: var(--bg-panel);
-  border-color: var(--border);
+  border-color: var(--text);
   color: var(--text);
   font-weight: 600;
 }
