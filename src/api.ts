@@ -70,6 +70,14 @@ export interface BoundRepo {
   ghost: boolean;
 }
 
+/** 线上仓库清单条目（跨平台归一）。 */
+export interface RemoteRepoInfo {
+  fullName: string;
+  url: string;
+  description: string | null;
+  updatedAt: string | null;
+}
+
 export const isTauri = (): boolean => "__TAURI_INTERNALS__" in window;
 
 export const api = {
@@ -197,4 +205,7 @@ export const api = {
     invoke<void>("project_repo_unbind", { projectId, repoId }),
   projectRepoList: (projectId: string) =>
     invoke<BoundRepo[]>("project_repo_list", { projectId }),
+  /** 线上仓库清单（按接入凭据拉取，用于「刷新从线上查找」）。 */
+  remoteRepoList: (platform: string, host: string) =>
+    invoke<RemoteRepoInfo[]>("remote_repo_list", { platform, host }),
 };

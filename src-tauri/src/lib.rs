@@ -320,6 +320,20 @@ fn app_repo_id(target: &str) -> Option<String> {
         .ok()
 }
 
+/// 线上仓库清单（「刷新从线上查找」）：按接入的 platform 分派——
+/// GitHub 透传 gh 托管账户，Gitea/Gitee 用钥匙串 token 调 /user/repos。
+#[tauri::command]
+fn remote_repo_list(platform: String, host: String) -> Result<Vec<source::RemoteRepoInfo>, String> {
+    match platform.as_str() {
+        "github" => gh::list_user_repos(100).map_err(|e| e.to_string()),
+        "gitea" | "gitee" => {
+            let token = source::keyring_token(&platform);
+            gitea::list_user_repos(&platform, &host, token).map_err(|e| e.to_string())
+        }
+        other => Err(format!("平台 {other} 暂不支持线上清单")),
+    }
+}
+
 /// 草稿卡转本地 Issue：先走既有 create_issue 通道（目标仓库本地库），
 /// 再把条目改为 issue 关联。两步无跨库事务——第二步失败时 Issue 已建，
 /// 草稿保留为对账锚（按 uuid 重试不重复建）。
@@ -419,6 +433,7 @@ pub fn run() {
             projects::project_repo_bind,
             projects::project_repo_unbind,
             projects::project_repo_list,
+            remote_repo_list,
             convert_draft_to_issue,
             set_pull_state,
             list_synced_at,

@@ -40,16 +40,63 @@ const loading = ref(false);
 // Tab = 来源连接（第一分类），收尾「本地」收容未挂连接的仓库。
 const activeTab = ref<string>("local");
 const remoteConnectionId = ref("");
+// ---- 线上清单（⟳ 从线上查找）：Tab 行右侧刷新按钮拉取，勾选登记 ----
+interface OnlineRepo {
+  fullName: string;
+  url: string;
+  description: string | null;
+  updatedAt: string | null;
+}
+const onlineOpen = ref(false);
+const onlineLoading = ref(false);
+const onlineError = ref<string | null>(null);
+const onlineRepos = ref<OnlineRepo[]>([]);
+
+const activeConnection = computed(() => connections.value.find((c) => c.id === activeTab.value));
+
+async function toggleOnline() {
+  onlineOpen.value = !onlineOpen.value;
+  if (onlineOpen.value) await fetchOnline();
+}
+async function fetchOnline() {
+  const conn = activeConnection.value;
+  if (!conn) return;
+  onlineLoading.value = true;
+  onlineError.value = null;
+  try {
+    onlineRepos.value = await api.remoteRepoList(conn.platform, conn.host);
+  } catch (e) {
+    onlineError.value = String(e);
+    onlineRepos.value = [];
+  } finally {
+    onlineLoading.value = false;
+  }
+}
+/** 已登记（该连接下 remoteUrl 命中）→ 置灰不可重复登记。 */
+function isRegistered(url: string): boolean {
+  return repos.value.some((r) => r.remoteUrl && r.remoteUrl.replace(/\.git$/, "") === url.replace(/\.git$/, ""));
+}
+async function registerOnline(repo: OnlineRepo) {
+  const conn = activeConnection.value;
+  if (!conn) return;
+  await api.repoRegisterRemote(repo.url, conn.platform);
+  await load();
+}
 
 /** 远端 URL 挂到哪条连接——用户显式选择（知识库：运行时只认连接类型，
  * 自建 Gitea 域名等猜测不了的来源全靠它）。 */
 // 打开添加表单 → 预填当前 Tab 的连接；本地 Tab 维持上次选择。
+// 切 Tab 关闭线上清单（线上数据按连接拉取，不跨 Tab 复用）。
 watch([activeTab, remoteFormOpen], ([tab, open]) => {
   if (!open) return;
   if (tab !== "local") remoteConnectionId.value = tab;
   if (!remoteConnectionId.value && connections.value.length) {
     remoteConnectionId.value = connections.value[0]!.id;
   }
+});
+watch(activeTab, () => {
+  onlineOpen.value = false;
+  onlineRepos.value = [];
 });
 
 /** 仓库 → Tab：只认登记连接（显式绑定），无连接 → 本地。
@@ -146,6 +193,38 @@ async function remove(entry: RepoEntry) {
       >
         {{ tab.label }} <span class="tab-count">{{ tab.count }}</span>
       </button>
+      <span class="tabs-spacer"></span>
+      <button
+        v-if="activeTab !== 'local'"
+        class="online-toggle"
+        :class="{ open: onlineOpen }"
+        :title="t('repo.refreshOnline')"
+        :disabled="onlineLoading"
+        @click="toggleOnline"
+      >{{ onlineLoading ? "…" : "⟳" }}</button>
+    </div>
+
+    <div v-if="onlineOpen && activeTab !== 'local'" class="online-panel">
+      <p v-if="onlineError" class="online-error">{{ onlineError }}</p>
+      <p v-else-if="onlineRepos.length === 0 && !onlineLoading" class="note">
+        {{ t("repo.onlineEmpty") }}
+      </p>
+      <ul v-else class="online-list">
+        <li v-for="r in onlineRepos" :key="r.url" class="online-item">
+          <div class="online-main">
+            <span class="online-name">{{ r.fullName }}</span>
+            <span v-if="r.description" class="online-desc">{{ r.description }}</span>
+          </div>
+          <button
+            v-if="isRegistered(r.url)"
+            class="online-btn done"
+            disabled
+          >✓ {{ t("repo.registered") }}</button>
+          <button v-else class="online-btn" :disabled="onlineLoading" @click="registerOnline(r)">
+            {{ t("repo.register") }}
+          </button>
+        </li>
+      </ul>
     </div>
 
     <div v-if="remoteFormOpen" class="remote-form">
@@ -233,6 +312,92 @@ async function remove(entry: RepoEntry) {
 .tab-count {
   font-size: 10px;
   opacity: 0.75;
+}
+.tabs-spacer {
+  flex: 1;
+}
+.online-toggle {
+  border: 1px solid var(--border);
+  background: var(--bg-panel);
+  color: var(--text-dim);
+  font-size: 13px;
+  width: 24px;
+  height: 22px;
+  border-radius: 5px;
+  cursor: pointer;
+}
+.online-toggle:hover,
+.online-toggle.open {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.online-toggle:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.online-panel {
+  max-height: 220px;
+  overflow-y: auto;
+  margin: 6px 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 6px;
+}
+.online-error {
+  margin: 0;
+  padding: 6px;
+  font-size: 12px;
+  color: var(--danger);
+}
+.online-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.online-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 6px;
+  border-radius: 5px;
+  font-size: 12px;
+}
+.online-item:hover {
+  background: var(--bg-hover);
+}
+.online-main {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex: 1;
+}
+.online-name {
+  color: var(--text);
+  font-weight: 600;
+  white-space: nowrap;
+}
+.online-desc {
+  color: var(--text-dim);
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.online-btn {
+  flex: none;
+  border: 1px solid var(--border);
+  background: var(--bg-panel);
+  color: var(--accent);
+  font-size: 11px;
+  height: 20px;
+  padding: 0 8px;
+  border-radius: 5px;
+  cursor: pointer;
+}
+.online-btn.done {
+  color: var(--text-dim);
+  cursor: default;
 }
 .add-btn {
   border: 1px solid var(--border);

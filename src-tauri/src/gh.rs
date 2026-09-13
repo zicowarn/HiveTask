@@ -336,6 +336,36 @@ fn merge_pull(slug: &str, number: &str, method: MergeMethod) -> Result<Pull> {
     fetch_pull_detail(slug, number)
 }
 
+/// 线上仓库清单（gh 托管账户，`gh repo list`）——「刷新从线上查找」的
+/// GitHub 实现。url 即 https 仓库地址，可直接用于仅远端登记。
+pub fn list_user_repos(limit: u32) -> Result<Vec<crate::source::RemoteRepoInfo>> {
+    let limit = limit.clamp(1, 200).to_string();
+    let args = [
+        "repo",
+        "list",
+        "--limit",
+        &limit,
+        "--json",
+        "nameWithOwner,description,updatedAt,url",
+    ];
+    let stdout = run_gh(&args)?;
+    let values: Vec<Value> =
+        serde_json::from_str(&stdout).context("解析 gh repo list 的 JSON 输出失败")?;
+    Ok(values
+        .iter()
+        .map(|v| crate::source::RemoteRepoInfo {
+            full_name: v
+                .get("nameWithOwner")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_string(),
+            url: v.get("url").and_then(Value::as_str).unwrap_or_default().to_string(),
+            description: v.get("description").and_then(Value::as_str).map(str::to_string),
+            updated_at: v.get("updatedAt").and_then(Value::as_str).map(str::to_string),
+        })
+        .collect())
+}
+
 /// Cheap connectivity probe: `gh api user` is one free authenticated call
 /// (does not count against the rate limit... actually it does count; but a
 /// probe is user-initiated and rare). Ok => reachable; Err carries the raw

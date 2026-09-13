@@ -47,7 +47,7 @@ impl GiteaSource {
         }
     }
 
-    fn api(&self, path: &str) -> String {
+    pub(crate) fn api(&self, path: &str) -> String {
         format!("{}{}{}", self.host, self.api_prefix(), path)
     }
 
@@ -70,7 +70,7 @@ impl GiteaSource {
         }
     }
 
-    fn get(&self, url: &str) -> Result<Value> {
+    pub(crate) fn get(&self, url: &str) -> Result<Value> {
         let resp = self.attach_auth(self.client().get(url)).send().context("Gitea 请求失败")?;
         let status = resp.status();
         let body = resp.text().context("读取 Gitea 响应失败")?;
@@ -230,6 +230,33 @@ pub(crate) fn map_gitea_comment(v: &Value) -> Comment {
         created_at: v.get("created_at").and_then(Value::as_str).map(str::to_string),
         pending: false,
     }
+}
+
+/// 线上仓库清单条目映射（`/user/repos`：Gitea v1 与 Gitee v5 字段同形）。
+pub(crate) fn map_remote_repo(v: &Value) -> crate::source::RemoteRepoInfo {
+    crate::source::RemoteRepoInfo {
+        full_name: v.get("full_name").and_then(Value::as_str).unwrap_or_default().to_string(),
+        url: v
+            .get("clone_url")
+            .and_then(Value::as_str)
+            .or_else(|| v.get("html_url").and_then(Value::as_str))
+            .unwrap_or_default()
+            .to_string(),
+        description: v.get("description").and_then(Value::as_str).filter(|s| !s.is_empty()).map(str::to_string),
+        updated_at: v.get("updated_at").and_then(Value::as_str).map(str::to_string),
+    }
+}
+
+/// 该接入凭据下的线上仓库清单（「刷新从线上查找」的 Gitea/Gitee 实现）。
+pub fn list_user_repos(platform: &str, host: &str, token: Option<String>) -> Result<Vec<crate::source::RemoteRepoInfo>> {
+    let source = GiteaSource::new(platform.to_string(), host.to_string(), token);
+    // limit/per_page 并写：Gitea 认 limit，Gitee v5 认 per_page
+    let url = source.api("/user/repos?limit=100&per_page=100");
+    let value = source.get(&url)?;
+    Ok(value
+        .as_array()
+        .map(|arr| arr.iter().map(map_remote_repo).collect())
+        .unwrap_or_default())
 }
 
 impl GiteaSource {
@@ -413,5 +440,24 @@ mod tests {
         assert_eq!(c.author.as_deref(), Some("eve"));
         assert_eq!(c.body.as_deref(), Some("hi"));
         assert!(!c.pending);
+    }
+
+    #[test]
+    fn maps_remote_repo_list_entry() {
+        // Gitea v1 带 clone_url；Gitee v5 只有 html_url——都归一可用登记 URL
+        let gitea: Value = serde_json::from_str(
+            r#"{"full_name": "o/r", "clone_url": "https://gitea.lan/o/r.git",
+                "html_url": "https://gitea.lan/o/r", "description": "d",
+                "updated_at": "2026-09-01T00:00:00Z"}"#,
+        )
+        .unwrap();
+        let m = map_remote_repo(&gitea);
+        assert_eq!(m.full_name, "o/r");
+        assert_eq!(m.url, "https://gitea.lan/o/r.git");
+        let gitee: Value = serde_json::from_str(
+            r#"{"full_name": "o/r2", "html_url": "https://gitee.com/o/r2"}"#,
+        )
+        .unwrap();
+        assert_eq!(map_remote_repo(&gitee).url, "https://gitee.com/o/r2");
     }
 }

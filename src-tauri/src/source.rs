@@ -136,6 +136,23 @@ pub fn json_number_to_string(value: Option<&serde_json::Value>) -> String {
     }
 }
 
+/// 线上仓库清单条目（「刷新从线上查找」的数据形状，跨平台归一）。
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoteRepoInfo {
+    /// owner/repo 形态全名。
+    pub full_name: String,
+    /// 登记用 URL（https clone 地址优先，退回 html 页面地址）。
+    pub url: String,
+    pub description: Option<String>,
+    pub updated_at: Option<String>,
+}
+
+pub(crate) fn keyring_token(platform: &str) -> Option<String> {
+    let entry = keyring::Entry::new(&format!("hivetask.{platform}"), "token").ok()?;
+    entry.get_password().ok()
+}
+
 /// 解析 target（前端传入的仓库标识 = 本地路径 或 仅远端 remote_url）：
 /// 1. 登记表按 path 精确命中 → 用登记的 remote_url/host（快照）；
 /// 2. 登记表按 remote_url 命中 → 仅远端登记，workdir = None；
@@ -241,11 +258,6 @@ pub fn source_for_ref(platform: Option<&str>, host: &str) -> Box<dyn Source> {
         }
         _ => Box::new(crate::gh::GhSource),
     }
-}
-
-fn keyring_token(platform: &str) -> Option<String> {
-    let entry = keyring::Entry::new(&format!("hivetask.{platform}"), "token").ok()?;
-    entry.get_password().ok()
 }
 
 #[cfg(test)]
