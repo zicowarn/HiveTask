@@ -8,7 +8,7 @@
 //! `Box<dyn Source>` ≈ 多态指针。传输与认证属实现细节（gh = 子进程 + CLI 认证；
 //! Gitea = reqwest + token），不进 trait 签名。
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, Result};
 
@@ -100,16 +100,28 @@ impl PullStateFilter {
     }
 }
 
-/// 数据来源抽象。`repo` 是本地仓库路径（来源按其 remote 解析）。
+/// 仓库引用：来源解析的产物。owner/repo 是 API 口径；workdir 仅在
+/// 存在本地克隆时有值（gh 子进程容错用），仅远端登记为 None。
+#[derive(Debug, Clone)]
+pub struct RepoRef {
+    pub owner: String,
+    pub repo: String,
+    pub host: String,
+    /// 来源连接的 platform（用户显式选择，路由依据）；无连接 = None（按 host 推断）。
+    pub platform: Option<String>,
+    pub workdir: Option<PathBuf>,
+}
+
+/// 数据来源抽象。
 pub trait Source: Send + Sync {
-    fn fetch_issues(&self, repo: &Path, state: IssueStateFilter, limit: u32) -> Result<Vec<Issue>>;
-    fn fetch_pulls(&self, repo: &Path, state: PullStateFilter, limit: u32) -> Result<Vec<Pull>>;
-    fn fetch_pull_detail(&self, repo: &Path, number: i64) -> Result<Pull>;
-    fn fetch_comments(&self, repo: &Path, kind: Kind, number: i64) -> Result<Vec<Comment>>;
-    fn add_comment(&self, repo: &Path, kind: Kind, number: i64, body: &str) -> Result<Vec<Comment>>;
-    fn set_issue_state(&self, repo: &Path, number: i64, closed: bool) -> Result<Issue>;
-    fn set_pull_state(&self, repo: &Path, number: i64, closed: bool) -> Result<Pull>;
-    fn merge_pull(&self, repo: &Path, number: i64, method: MergeMethod) -> Result<Pull>;
+    fn fetch_issues(&self, repo: &RepoRef, state: IssueStateFilter, limit: u32) -> Result<Vec<Issue>>;
+    fn fetch_pulls(&self, repo: &RepoRef, state: PullStateFilter, limit: u32) -> Result<Vec<Pull>>;
+    fn fetch_pull_detail(&self, repo: &RepoRef, number: i64) -> Result<Pull>;
+    fn fetch_comments(&self, repo: &RepoRef, kind: Kind, number: i64) -> Result<Vec<Comment>>;
+    fn add_comment(&self, repo: &RepoRef, kind: Kind, number: i64, body: &str) -> Result<Vec<Comment>>;
+    fn set_issue_state(&self, repo: &RepoRef, number: i64, closed: bool) -> Result<Issue>;
+    fn set_pull_state(&self, repo: &RepoRef, number: i64, closed: bool) -> Result<Pull>;
+    fn merge_pull(&self, repo: &RepoRef, number: i64, method: MergeMethod) -> Result<Pull>;
 }
 
 /// 读 origin remote 的 host（https 与 scp 语法都覆盖），
@@ -125,30 +137,74 @@ pub fn remote_host(repo: &Path) -> Option<String> {
     (!host.is_empty()).then(|| host.to_lowercase())
 }
 
-/// 全项目唯一的来源解析点：读 git remote，按 host 选实现。
-/// 解析顺序：GitHub（域名匹配）→ 已配置的 Gitea host（精确匹配配置值，
-/// 自建 host 任意）→ 其余暂回落 GitHub（未来交 API 指纹探测 / 设置兜底，
-/// 见设计文档 Q4 推论 1）。token 属 GiteaSource 构造细节，从钥匙串取。
-pub fn source_for(repo: &Path) -> Result<Box<dyn Source>> {
-    let Some(host) = remote_host(repo) else {
-        return Ok(Box::new(crate::gh::GhSource));
-    };
-    if host.contains("github") {
-        return Ok(Box::new(crate::gh::GhSource));
+/// 解析 target（前端传入的仓库标识 = 本地路径 或 仅远端 remote_url）：
+/// 1. 登记表按 path 精确命中 → 用登记的 remote_url/host（快照）；
+/// 2. 登记表按 remote_url 命中 → 仅远端登记，workdir = None；
+/// 3. 都未命中 → 视为磁盘本地路径，现读 origin（git2 面板等仍传路径）。
+pub fn resolve_target(target: &str) -> Result<RepoRef> {
+    if let Some((remote_url, workdir, platform)) = crate::appdb::repo_find_by_target(target) {
+        let mut r = ref_from_url(&remote_url, workdir)?;
+        r.platform = platform;
+        return Ok(r);
     }
-    let config = crate::source_config::load();
-    if let Some(gitea_host) = config.gitea_host.filter(|h| !h.trim().is_empty()) {
-        let configured = gitea_host
-            .trim_start_matches("http://")
-            .trim_start_matches("https://")
-            .trim_end_matches('/')
-            .to_lowercase();
-        if host == configured {
-            let token = keyring_token("gitea");
-            return Ok(Box::new(crate::gitea::GiteaSource::new(gitea_host, token)));
+    ref_from_local(target)
+}
+
+/// 登记表/磁盘之外的第三条路：直接从 URL 构造（登记时即时预览用）。
+pub fn ref_from_url(url: &str, workdir: Option<std::path::PathBuf>) -> Result<RepoRef> {
+    let (host, slug_path) = split_host_slug(url)
+        .ok_or_else(|| anyhow!("无法从 remote 解析 host 与 owner/repo: {url}"))?;
+    let mut parts = slug_path.split('/');
+    let owner = parts.next().unwrap_or_default().to_string();
+    let repo = parts.next().unwrap_or_default().to_string();
+    if owner.is_empty() || repo.is_empty() {
+        return Err(anyhow!("无法从 remote 解析 owner/repo: {url}"));
+    }
+    Ok(RepoRef { owner, repo, host, platform: None, workdir })
+}
+
+/// 本地路径：现读 origin（git 命令），与旧口径一致。
+fn ref_from_local(path: &str) -> Result<RepoRef> {
+    let url = crate::gh::git_origin(std::path::Path::new(path))
+        .ok_or_else(|| anyhow!("未找到 origin remote: {path}"))?;
+    ref_from_url(&url, Some(std::path::PathBuf::from(path)))
+}
+
+/// URL → (host, owner/repo 路径)。host 保留端口（自建实例常见）。
+pub fn split_host_slug(url: &str) -> Option<(String, String)> {
+    let s = url
+        .strip_prefix("https://")
+        .or_else(|| url.strip_prefix("http://"))
+        .unwrap_or(url);
+    let s = s.split_once('@').map(|(_, rest)| rest).unwrap_or(s);
+    if s.contains('/') {
+        // URL 形态：host(/port)/owner/repo
+        let mut it = s.splitn(2, '/');
+        let host = it.next()?.to_lowercase();
+        let slug = it.next()?.trim_end_matches('/').trim_end_matches(".git").to_string();
+        Some((host, slug))
+    } else {
+        // scp 形态：host:owner/repo
+        let (host, rest) = s.split_once(':')?;
+        Some((host.to_lowercase(), rest.trim_end_matches(".git").to_string()))
+    }
+}
+
+/// 全项目唯一的来源实现选择：**按连接的 platform 路由**（用户添加连接时
+/// 显式选择 = user_set 最高优先级）；无连接时按 host 推断兜底（auto）。
+/// Gitea 与 Gitee（v1/v5 皆仿 GitHub）共用同一兼容实现，仅 API 前缀与
+/// 合并方言不同。GitHub 透传 gh 活动账户；gitlab/unknown 后续实现。
+pub fn source_for_ref(platform: Option<&str>, host: &str) -> Box<dyn Source> {
+    let kind = platform
+        .map(str::to_string)
+        .unwrap_or_else(|| crate::appdb::platform_for_host(host).unwrap_or_else(|| "github".into()));
+    match kind.as_str() {
+        "gitea" | "gitee" => {
+            let token = keyring_token(&kind);
+            Box::new(crate::gitea::GiteaSource::new(kind, host.to_string(), token))
         }
+        _ => Box::new(crate::gh::GhSource),
     }
-    Ok(Box::new(crate::gh::GhSource))
 }
 
 fn keyring_token(platform: &str) -> Option<String> {

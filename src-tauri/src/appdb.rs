@@ -38,7 +38,26 @@ pub fn open() -> anyhow::Result<Connection> {
     std::fs::create_dir_all(&dir).context("创建 app data 目录失败")?;
     let conn = Connection::open(dir.join("app.db")).context("打开 app.db 失败")?;
     migrate(&conn)?;
+    seed_github_connection(&conn);
     Ok(conn)
+}
+
+/// 首次启动播种 GitHub 连接（gh 托管凭据），保证来源列表非空。
+fn seed_github_connection(conn: &Connection) {
+    let has: Option<String> = conn
+        .query_row(
+            "SELECT id FROM connections WHERE platform = 'github' LIMIT 1",
+            [],
+            |row| row.get(0),
+        )
+        .ok();
+    if has.is_none() {
+        let _ = conn.execute(
+            "INSERT INTO connections (id, platform, host, label, source_state, created_at)
+             VALUES ('conn-github', 'github', 'github.com', 'GitHub', 'auto', ?1)",
+            (chrono_like_now(),),
+        );
+    }
 }
 
 fn migrate(conn: &Connection) -> anyhow::Result<()> {
@@ -105,7 +124,7 @@ fn chrono_like_now() -> String {
 
 /// host → 平台推断（自动解析口径）：github 直判，gitee.com 直判，
 /// 含 gitea 的自建域推断为 gitea；其余 None（unknown，不建连接）。
-pub(crate) fn platform_for_host(host: &str) -> Option<String> {
+pub fn platform_for_host(host: &str) -> Option<String> {
     let h = host.to_lowercase();
     if h.contains("github") {
         Some("github".into())
@@ -137,6 +156,12 @@ fn ensure_connection_for_host(conn: &Connection, host: &str) -> anyhow::Result<O
         (&id, platform.as_str(), host, host, now()),
     )?;
     Ok(Some(id))
+}
+
+/// 仅远端登记仓库的缓存目录（app data 下，按 owner/repo 隔离）。
+/// storage.rs 把它当普通仓库目录用（内部建 .hivetask/）。
+pub fn remote_cache_dir(owner: &str, repo: &str) -> Option<PathBuf> {
+    app_data_dir().map(|d| d.join("repos-cache").join(owner).join(repo))
 }
 
 pub(crate) fn uuid() -> String {
@@ -273,6 +298,48 @@ pub fn repo_register(path: String) -> Result<RepoEntry, String> {
     .map_err(|e| e.to_string())?;
 
     repo_list_in(&conn)?.into_iter().find(|r| r.path.as_deref() == Some(path.as_str())).ok_or_else(|| "登记后未找到条目".to_string())
+}
+
+/// 解析 target：按 path 命中 → (remote_url, Some(path))；按 remote_url
+/// 命中 → (remote_url, None)。未命中 → None（调用方回退磁盘读取）。
+pub fn repo_find_by_target(target: &str) -> Option<(String, Option<PathBuf>, Option<String>)> {
+    let conn = open().ok()?;
+    let row = conn
+        .query_row(
+            "SELECT r.remote_url, r.path, c.platform FROM repos r
+             LEFT JOIN connections c ON c.id = r.connection_id
+             WHERE r.path = ?1 OR r.remote_url = ?1",
+            (target,),
+            |row| {
+                Ok((
+                    row.get::<_, Option<String>>(0)?,
+                    row.get::<_, Option<String>>(1)?,
+                    row.get::<_, Option<String>>(2)?,
+                ))
+            },
+        )
+        .ok()?;
+    let (remote_url, path, platform) = row;
+    Some((remote_url?, path.map(PathBuf::from), platform))
+}
+
+/// 仅远端登记：URL 解析 host/owner/repo，自动建连接，path 为 NULL。
+#[tauri::command]
+pub fn repo_register_remote(url: String) -> Result<RepoEntry, String> {
+    let conn = open().map_err(|e| e.to_string())?;
+    let (host, slug) = crate::source::split_host_slug(&url)
+        .ok_or_else(|| format!("无法从 URL 解析 host: {url}"))?;
+    let connection_id =
+        ensure_connection_for_host(&conn, &host).map_err(|e| e.to_string())?;
+    let display = slug.split('/').last().unwrap_or(&slug).to_string();
+    let id = uuid();
+    conn.execute(
+        "INSERT INTO repos (id, remote_url, display_name, connection_id, created_at, last_opened_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?5)",
+        (&id, &url, &display, &connection_id, now()),
+    )
+    .map_err(|e| e.to_string())?;
+    repo_list_in(&conn)?.into_iter().find(|r| r.id == id).ok_or_else(|| "登记后未找到条目".to_string())
 }
 
 #[tauri::command]

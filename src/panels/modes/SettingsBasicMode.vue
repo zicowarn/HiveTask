@@ -1,63 +1,22 @@
 <script setup lang="ts">
 /**
  * Settings "basic" mode — the counterpart of QHiveFrame's General
- * preference panel: language and theme, plus the status bar toggle.
- * Controls write straight through to their owning modules (i18n / theme /
- * settings store); there is no separate save step.
+ * preference panel: language, theme, source connections, terminal shell
+ * and the status bar toggle. Controls write straight through to their
+ * owning modules (i18n / theme / settings store); there is no separate
+ * save step. 来源连接管理在独立对话框（SourceConnectionsDialog）。
  */
-import { onMounted, ref } from "vue";
+import { ref } from "vue";
 import { useI18n, type LocaleChoice } from "../../i18n";
 import { useTheme, type ThemeChoice } from "../../theme";
 import { useSettingsStore } from "../../stores/settings";
-import { api, isTauri } from "../../api";
-import { reportError } from "../../gh-errors";
-import { pushToast } from "../../toast";
+import SourceConnectionsDialog from "../../components/SourceConnectionsDialog.vue";
 
 const { t, localeChoice, setLocale } = useI18n();
 const { theme, setTheme } = useTheme();
 const settings = useSettingsStore();
 
-// ---- Gitea 连接（token 存 OS 钥匙串；UI 只见「已配置/未配置」状态） ----
-const giteaTokenInput = ref("");
-const giteaTokenSet = ref<boolean | null>(null); // null = 未查询（浏览器预览）
-
-async function probeToken() {
-  if (!isTauri()) return;
-  try {
-    giteaTokenSet.value = (await api.credentialGet("gitea")) !== null;
-  } catch (e) {
-    // 钥匙串被拒等情况：显示「未配置」并把原因弹出来，不静默。
-    giteaTokenSet.value = null;
-    reportError(String(e));
-  }
-}
-
-async function saveGiteaToken() {
-  const token = giteaTokenInput.value.trim();
-  if (!token) return;
-  try {
-    await api.credentialSet("gitea", token);
-    giteaTokenInput.value = "";
-    pushToast({ kind: "success", message: t("settings.giteaTokenSaved") });
-  } catch (e) {
-    // 典型：钥匙串授权弹窗被拒。原文进日志，翻译后弹 Toast。
-    reportError(String(e));
-  }
-  await probeToken();
-}
-
-async function clearGiteaToken() {
-  try {
-    await api.credentialDelete("gitea");
-    pushToast({ kind: "info", message: t("settings.giteaTokenCleared") });
-  } catch (e) {
-    reportError(String(e));
-  }
-  giteaTokenSet.value = null;
-  await probeToken();
-}
-
-onMounted(probeToken);
+const connectionsOpen = ref(false);
 
 const themeChoices: { value: ThemeChoice; labelKey: "settings.themeDark" | "settings.themeLight" | "settings.themeSystem" }[] = [
   { value: "dark", labelKey: "settings.themeDark" },
@@ -120,41 +79,12 @@ function onThemeChange(event: Event) {
 
     <div class="setting-row">
       <div class="setting-text">
-        <span class="setting-name">{{ t("settings.giteaHost") }}</span>
-        <span class="setting-desc">{{ t("settings.giteaHostDesc") }}</span>
+        <span class="setting-name">{{ t("settings.connections") }}</span>
+        <span class="setting-desc">{{ t("settings.connectionsDesc") }}</span>
       </div>
-      <input
-        v-model.trim="settings.giteaHost"
-        class="setting-input"
-        :placeholder="'https://gitea.example.com'"
-        spellcheck="false"
-      />
-    </div>
-
-    <div class="setting-row">
-      <div class="setting-text">
-        <span class="setting-name">{{ t("settings.giteaToken") }}</span>
-        <span class="setting-desc">
-          {{ giteaTokenSet ? t("settings.giteaTokenSet") : t("settings.giteaTokenUnset") }}
-        </span>
-      </div>
-      <div class="token-cell">
-        <input
-          v-model="giteaTokenInput"
-          class="setting-input"
-          type="password"
-          autocomplete="off"
-          :placeholder="t('settings.giteaTokenPlaceholder')"
-        />
-        <button class="token-btn" :disabled="!giteaTokenInput.trim()" @click="saveGiteaToken">
-          {{ t("settings.save") }}
-        </button>
-        <button
-          v-if="giteaTokenSet"
-          class="token-btn clear"
-          @click="clearGiteaToken"
-        >{{ t("settings.giteaTokenClear") }}</button>
-      </div>
+      <button class="setting-btn" @click="connectionsOpen = true">
+        {{ t("settings.connectionsManage") }}
+      </button>
     </div>
 
     <div class="setting-row">
@@ -178,6 +108,11 @@ function onThemeChange(event: Event) {
         type="checkbox"
       />
     </div>
+
+    <SourceConnectionsDialog
+      :open="connectionsOpen"
+      @close="connectionsOpen = false"
+    />
   </div>
 </template>
 
@@ -238,50 +173,19 @@ function onThemeChange(event: Event) {
 [data-theme="light"] .setting-select {
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 10 10'%3E%3Cpath d='M2 3.5L5 6.5L8 3.5' fill='none' stroke='%23656d76' stroke-width='1.4' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
 }
-.setting-input {
-  width: 240px;
-  max-width: 55vw;
-  box-sizing: border-box;
-  font-size: 12px;
-  color: var(--text);
-  background: var(--bg-app);
-  border: 1px solid var(--border);
-  border-radius: 5px;
-  height: 24px;
-  padding: 0 8px;
-  outline: none;
-}
-.setting-input:focus {
-  border-color: var(--accent);
-}
-.token-cell {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-.token-btn {
-  flex: none;
+.setting-btn {
   border: 1px solid var(--border);
   background: var(--bg-panel);
   color: var(--text);
-  font-size: 11px;
+  font-size: 12px;
   height: 24px;
-  padding: 0 10px;
+  padding: 0 12px;
   border-radius: 5px;
   cursor: pointer;
-  white-space: nowrap;
 }
-.token-btn:hover:not(:disabled) {
+.setting-btn:hover {
   border-color: var(--accent);
   color: var(--accent);
-}
-.token-btn:disabled {
-  opacity: 0.5;
-  cursor: default;
-}
-.token-btn.clear:hover {
-  border-color: var(--danger);
-  color: var(--danger);
 }
 .setting-check {
   width: 15px;

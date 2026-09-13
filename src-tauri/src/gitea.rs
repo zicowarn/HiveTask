@@ -16,9 +16,11 @@ use std::path::Path;
 use std::time::Duration;
 
 use crate::models::{Comment, Issue, Pull};
-use crate::source::{IssueStateFilter, Kind, MergeMethod, PullStateFilter, Source};
+use crate::source::{IssueStateFilter, Kind, MergeMethod, PullStateFilter, RepoRef, Source};
 
 pub struct GiteaSource {
+    /// gitea | gitee（决定 API 前缀 v1/v5、认证头与合并方言）。
+    platform: String,
     /// 实例地址，如 "https://gitea.example.com"（不带尾斜杠）。
     host: String,
     token: Option<String>,
@@ -30,12 +32,24 @@ struct RepoSlug {
 }
 
 impl GiteaSource {
-    pub fn new(host: String, token: Option<String>) -> Self {
-        Self { host: host.trim_end_matches('/').to_string(), token }
+    pub fn new(platform: String, host: String, token: Option<String>) -> Self {
+        Self {
+            platform,
+            host: host.trim_end_matches('/').to_string(),
+            token,
+        }
+    }
+
+    /// API 前缀：Gitea /api/v1，Gitee /api/v5。
+    fn api_prefix(&self) -> &'static str {
+        match self.platform.as_str() {
+            "gitee" => "/api/v5",
+            _ => "/api/v1",
+        }
     }
 
     fn api(&self, path: &str) -> String {
-        format!("{}/api/v1{}", self.host, path)
+        format!("{}{}{}", self.host, self.api_prefix(), path)
     }
 
     fn client(&self) -> reqwest::blocking::Client {
@@ -48,7 +62,11 @@ impl GiteaSource {
 
     fn attach_auth(&self, req: reqwest::blocking::RequestBuilder) -> reqwest::blocking::RequestBuilder {
         match &self.token {
-            Some(token) => req.header("Authorization", format!("token {token}")),
+            // Gitea 惯用 `token` 前缀；Gitee v5 两者皆收，统一 Bearer。
+            Some(token) if self.platform == "gitea" => {
+                req.header("Authorization", format!("token {token}"))
+            }
+            Some(token) => req.bearer_auth(token),
             None => req,
         }
     }
@@ -89,6 +107,11 @@ impl GiteaSource {
             return Err(anyhow!("无法从 remote 解析 owner/repo: {url}"));
         };
         Ok(RepoSlug { owner: owner.to_string(), repo: repo_name.to_string() })
+    }
+
+    /// RepoRef → 常驻 slug（owner/repo 已在解析期确定，无需再读盘）。
+    fn slug_ref(&self, repo: &RepoRef) -> RepoSlug {
+        RepoSlug { owner: repo.owner.clone(), repo: repo.repo.clone() }
     }
 
     fn issues_url(&self, slug: &RepoSlug, filter: IssueStateFilter, limit: u32) -> String {
@@ -206,6 +229,14 @@ pub(crate) fn map_gitea_pull(v: &Value) -> Pull {
     }
 }
 
+pub(crate) fn merge_do(method: MergeMethod) -> &'static str {
+    match method {
+        MergeMethod::Merge => "merge",
+        MergeMethod::Squash => "squash",
+        MergeMethod::Rebase => "rebase",
+    }
+}
+
 pub(crate) fn map_gitea_comment(v: &Value) -> Comment {
     Comment {
         author: v
@@ -225,8 +256,8 @@ impl GiteaSource {
 }
 
 impl Source for GiteaSource {
-    fn fetch_issues(&self, repo: &Path, filter: IssueStateFilter, limit: u32) -> Result<Vec<Issue>> {
-        let slug = self.slug(repo)?;
+    fn fetch_issues(&self, repo: &RepoRef, filter: IssueStateFilter, limit: u32) -> Result<Vec<Issue>> {
+        let slug = self.slug_ref(repo);
         let url = self.issues_url(&slug, filter, limit);
         let value = self.get(&url)?;
         Ok(value
@@ -235,8 +266,8 @@ impl Source for GiteaSource {
             .unwrap_or_default())
     }
 
-    fn fetch_pulls(&self, repo: &Path, filter: PullStateFilter, limit: u32) -> Result<Vec<Pull>> {
-        let slug = self.slug(repo)?;
+    fn fetch_pulls(&self, repo: &RepoRef, filter: PullStateFilter, limit: u32) -> Result<Vec<Pull>> {
+        let slug = self.slug_ref(repo);
         let url = self.pulls_url(&slug, filter, limit);
         let value = self.get(&url)?;
         let mut pulls: Vec<Pull> = value
@@ -250,33 +281,32 @@ impl Source for GiteaSource {
         Ok(pulls)
     }
 
-    fn fetch_pull_detail(&self, repo: &Path, number: i64) -> Result<Pull> {
-        let slug = self.slug(repo)?;
+    fn fetch_pull_detail(&self, repo: &RepoRef, number: i64) -> Result<Pull> {
+        let slug = self.slug_ref(repo);
         let url = self.api(&format!("/repos/{}/{}/pulls/{number}", slug.owner, slug.repo));
         let value = self.get(&url)?;
         Ok(map_gitea_pull(&value))
     }
 
-    fn fetch_comments(&self, repo: &Path, kind: Kind, number: i64) -> Result<Vec<Comment>> {
-        let slug = self.slug(repo)?;
-        // Gitea 的 PR 评论走 issue 评论端点（PR 即带 index 的 issue）。
+    fn fetch_comments(&self, repo: &RepoRef, kind: Kind, number: i64) -> Result<Vec<Comment>> {
+        // Gitee/Gitea 的 PR 评论走 issue 评论端点（PR 即带编号的 issue）。
         let _ = kind;
-        let value = self.get(&self.comments_url(&slug, number))?;
+        let value = self.get(&self.comments_url(&self.slug_ref(repo), number))?;
         Ok(value
             .as_array()
             .map(|arr| arr.iter().map(map_gitea_comment).collect())
             .unwrap_or_default())
     }
 
-    fn add_comment(&self, repo: &Path, kind: Kind, number: i64, body: &str) -> Result<Vec<Comment>> {
-        let slug = self.slug(repo)?;
+    fn add_comment(&self, repo: &RepoRef, kind: Kind, number: i64, body: &str) -> Result<Vec<Comment>> {
+        let slug = self.slug_ref(repo);
         let url = self.comments_url(&slug, number);
         self.send_json(reqwest::Method::POST, &url, serde_json::json!({ "body": body }))?;
         self.fetch_comments(repo, kind, number)
     }
 
-    fn set_issue_state(&self, repo: &Path, number: i64, closed: bool) -> Result<Issue> {
-        let slug = self.slug(repo)?;
+    fn set_issue_state(&self, repo: &RepoRef, number: i64, closed: bool) -> Result<Issue> {
+        let slug = self.slug_ref(repo);
         let url = self.api(&format!("/repos/{}/{}/issues/{number}", slug.owner, slug.repo));
         let state = if closed { "closed" } else { "open" };
         let value =
@@ -284,8 +314,8 @@ impl Source for GiteaSource {
         Ok(map_gitea_issue(&value))
     }
 
-    fn set_pull_state(&self, repo: &Path, number: i64, closed: bool) -> Result<Pull> {
-        let slug = self.slug(repo)?;
+    fn set_pull_state(&self, repo: &RepoRef, number: i64, closed: bool) -> Result<Pull> {
+        let slug = self.slug_ref(repo);
         let url = self.api(&format!("/repos/{}/{}/pulls/{number}", slug.owner, slug.repo));
         let state = if closed { "closed" } else { "open" };
         let value =
@@ -293,19 +323,15 @@ impl Source for GiteaSource {
         Ok(map_gitea_pull(&value))
     }
 
-    fn merge_pull(&self, repo: &Path, number: i64, method: MergeMethod) -> Result<Pull> {
-        let slug = self.slug(repo)?;
+    fn merge_pull(&self, repo: &RepoRef, number: i64, method: MergeMethod) -> Result<Pull> {
+        let slug = self.slug_ref(repo);
         let url = self.api(&format!("/repos/{}/{}/pulls/{number}/merge", slug.owner, slug.repo));
-        let do_value = match method {
-            MergeMethod::Merge => "merge",
-            MergeMethod::Squash => "squash",
-            MergeMethod::Rebase => "rebase",
+        // 方言：Gitea 用 Do 字段；Gitee v5 用 merge_method 字段。
+        let body = match self.platform.as_str() {
+            "gitee" => serde_json::json!({ "merge_method": merge_do(method) }),
+            _ => serde_json::json!({ "Do": merge_do(method) }),
         };
-        self.send_json(
-            reqwest::Method::POST,
-            &url,
-            serde_json::json!({ "Do": do_value }),
-        )?;
+        self.send_json(reqwest::Method::POST, &url, body)?;
         self.fetch_pull_detail(repo, number)
     }
 }

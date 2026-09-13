@@ -10,10 +10,46 @@ mod git;
 mod models;
 mod pty;
 mod source;
-mod source_config;
 mod storage;
 
 use source::{IssueStateFilter, Kind, MergeMethod, PullStateFilter};
+
+/// Issue/PR 类命令的目标解析（阶段 B+C）：登记表 → 磁盘。
+fn resolve(target: &str) -> Result<source::RepoRef, String> {
+    source::resolve_target(target).map_err(|e| e.to_string())
+}
+
+/// Git 面板命令需要真实本地路径（git2）；仅远端登记明确报错。
+/// hivetask.db 所在目录：本地克隆 → <repo>/.hivetask/；仅远端 →
+/// app data 的 repos-cache/<owner>/<repo>/（storage.rs 零改动）。
+/// 缓存命令的容错版：target 无法解析（非 git 目录）时退到 temp 隔离目录，
+/// 让缓存读写降级为空集而不是报错。
+fn storage_dir_for_target(target: &str) -> PathBuf {
+    source::resolve_target(target)
+        .map(|r| storage_dir_of(&r))
+        .unwrap_or_else(|_| std::env::temp_dir().join("hivetask-orphan").join(target.replace('/', "_")))
+}
+
+fn storage_dir_of(repo: &source::RepoRef) -> PathBuf {
+    if let Some(workdir) = &repo.workdir {
+        return workdir.join(".hivetask");
+    }
+    appdb::remote_cache_dir(&repo.owner, &repo.repo)
+        .unwrap_or_else(|| std::env::temp_dir().join(format!("hivetask-{}-{}", repo.owner, repo.repo)))
+}
+
+fn local_dir_of(target: &str) -> Result<PathBuf, String> {
+    if let Some((_, Some(path), _)) = appdb::repo_find_by_target(target) {
+        if path.is_dir() {
+            return Ok(path);
+        }
+    }
+    let p = PathBuf::from(target);
+    if p.is_dir() {
+        return Ok(p);
+    }
+    Err("仅远端登记的仓库没有本地克隆，Git 面板不可用".to_string())
+}
 
 use std::path::PathBuf;
 
@@ -82,10 +118,10 @@ fn repo_info(repo_path: String) -> RepoInfo {
 /// Fetch issues from GitHub via gh, replace the local cache, return fresh data.
 #[tauri::command]
 fn refresh_issues(repo_path: String, state: String, limit: u32) -> Result<Vec<Issue>, String> {
-    let repo = PathBuf::from(&repo_path);
+    let repo = resolve(&repo_path)?;
     let filter = IssueStateFilter::parse(&state).map_err(|e| e.to_string())?;
-    let issues = source::source_for(&repo).map_err(|e| e.to_string())?.fetch_issues(&repo, filter, limit).map_err(|e| e.to_string())?;
-    let mut conn = storage::open(&repo).map_err(|e| e.to_string())?;
+    let issues = source::source_for_ref(repo.platform.as_deref(), &repo.host).fetch_issues(&repo, filter, limit).map_err(|e| e.to_string())?;
+    let mut conn = storage::open(&storage_dir_of(&repo)).map_err(|e| e.to_string())?;
     storage::replace_issues(&mut conn, &state, &issues).map_err(|e| e.to_string())?;
     storage::stamp_synced(&conn, &format!("synced:issues:{state}")).map_err(|e| e.to_string())?;
     Ok(issues)
@@ -94,15 +130,13 @@ fn refresh_issues(repo_path: String, state: String, limit: u32) -> Result<Vec<Is
 /// Read issues from the offline cache without touching the network.
 #[tauri::command]
 fn list_cached_issues(repo_path: String, state: String) -> Result<Vec<Issue>, String> {
-    let repo = PathBuf::from(&repo_path);
-    let conn = storage::open(&repo).map_err(|e| e.to_string())?;
+    let conn = storage::open(&storage_dir_for_target(&repo_path)).map_err(|e| e.to_string())?;
     storage::list_issues(&conn, &state).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 fn cached_issue_count(repo_path: String, state: String) -> Result<i64, String> {
-    let repo = PathBuf::from(&repo_path);
-    let conn = storage::open(&repo).map_err(|e| e.to_string())?;
+    let conn = storage::open(&storage_dir_for_target(&repo_path)).map_err(|e| e.to_string())?;
     storage::cached_issue_count(&conn, &state).map_err(|e| e.to_string())
 }
 
@@ -110,10 +144,10 @@ fn cached_issue_count(repo_path: String, state: String) -> Result<i64, String> {
 /// `state` is "open" | "closed" | "merged" | "all".
 #[tauri::command]
 fn refresh_pulls(repo_path: String, state: String, limit: u32) -> Result<Vec<Pull>, String> {
-    let repo = PathBuf::from(&repo_path);
+    let repo = resolve(&repo_path)?;
     let filter = PullStateFilter::parse(&state).map_err(|e| e.to_string())?;
-    let pulls = source::source_for(&repo).map_err(|e| e.to_string())?.fetch_pulls(&repo, filter, limit).map_err(|e| e.to_string())?;
-    let mut conn = storage::open(&repo).map_err(|e| e.to_string())?;
+    let pulls = source::source_for_ref(repo.platform.as_deref(), &repo.host).fetch_pulls(&repo, filter, limit).map_err(|e| e.to_string())?;
+    let mut conn = storage::open(&storage_dir_of(&repo)).map_err(|e| e.to_string())?;
     storage::replace_pulls(&mut conn, &state, &pulls).map_err(|e| e.to_string())?;
     storage::stamp_synced(&conn, &format!("synced:pulls:{state}")).map_err(|e| e.to_string())?;
     Ok(pulls)
@@ -123,9 +157,9 @@ fn refresh_pulls(repo_path: String, state: String, limit: u32) -> Result<Vec<Pul
 /// part of the list query), upsert it into the cache, and return it.
 #[tauri::command]
 fn refresh_pull_detail(repo_path: String, number: i64) -> Result<Pull, String> {
-    let repo = PathBuf::from(&repo_path);
-    let pull = source::source_for(&repo).map_err(|e| e.to_string())?.fetch_pull_detail(&repo, number).map_err(|e| e.to_string())?;
-    let conn = storage::open(&repo).map_err(|e| e.to_string())?;
+    let repo = resolve(&repo_path)?;
+    let pull = source::source_for_ref(repo.platform.as_deref(), &repo.host).fetch_pull_detail(&repo, number).map_err(|e| e.to_string())?;
+    let conn = storage::open(&storage_dir_of(&repo)).map_err(|e| e.to_string())?;
     storage::upsert_pull(&conn, &pull).map_err(|e| e.to_string())?;
     Ok(pull)
 }
@@ -133,25 +167,23 @@ fn refresh_pull_detail(repo_path: String, number: i64) -> Result<Pull, String> {
 /// Read PRs from the offline cache without touching the network.
 #[tauri::command]
 fn list_cached_pulls(repo_path: String, state: String) -> Result<Vec<Pull>, String> {
-    let repo = PathBuf::from(&repo_path);
-    let conn = storage::open(&repo).map_err(|e| e.to_string())?;
+    let conn = storage::open(&storage_dir_for_target(&repo_path)).map_err(|e| e.to_string())?;
     storage::list_pulls(&conn, &state).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 fn cached_pull_count(repo_path: String, state: String) -> Result<i64, String> {
-    let repo = PathBuf::from(&repo_path);
-    let conn = storage::open(&repo).map_err(|e| e.to_string())?;
+    let conn = storage::open(&storage_dir_for_target(&repo_path)).map_err(|e| e.to_string())?;
     storage::cached_pull_count(&conn, &state).map_err(|e| e.to_string())
 }
 
 /// Merge a pull request; upserts the fresh full record and returns it.
 #[tauri::command]
 fn merge_pull(repo_path: String, number: i64, method: String) -> Result<Pull, String> {
-    let repo = PathBuf::from(&repo_path);
     let method = MergeMethod::parse(&method).map_err(|e| e.to_string())?;
-    let pull = source::source_for(&repo).map_err(|e| e.to_string())?.merge_pull(&repo, number, method).map_err(|e| e.to_string())?;
-    let conn = storage::open(&repo).map_err(|e| e.to_string())?;
+    let repo = resolve(&repo_path)?;
+    let pull = source::source_for_ref(repo.platform.as_deref(), &repo.host).merge_pull(&repo, number, method).map_err(|e| e.to_string())?;
+    let conn = storage::open(&storage_dir_of(&repo)).map_err(|e| e.to_string())?;
     storage::upsert_pull(&conn, &pull).map_err(|e| e.to_string())?;
     Ok(pull)
 }
@@ -177,8 +209,7 @@ fn git_fetch(repo_path: String) -> Result<(), String> {
 /// All recorded sync timestamps for the status bar's "last updated" cell.
 #[tauri::command]
 fn list_synced_at(repo_path: String) -> Result<Vec<(String, String)>, String> {
-    let repo = PathBuf::from(&repo_path);
-    let conn = storage::open(&repo).map_err(|e| e.to_string())?;
+    let conn = storage::open(&storage_dir_for_target(&repo_path)).map_err(|e| e.to_string())?;
     storage::list_synced(&conn).map_err(|e| e.to_string())
 }
 
@@ -197,8 +228,7 @@ fn list_cached_comments(
     number: i64,
 ) -> Result<Vec<Comment>, String> {
     let kind = Kind::parse(&kind).map_err(|e| e.to_string())?;
-    let repo = PathBuf::from(&repo_path);
-    let conn = storage::open(&repo).map_err(|e| e.to_string())?;
+    let conn = storage::open(&storage_dir_for_target(&repo_path)).map_err(|e| e.to_string())?;
     storage::list_comments(&conn, kind.as_str(), number).map_err(|e| e.to_string())
 }
 
@@ -206,9 +236,9 @@ fn list_cached_comments(
 #[tauri::command]
 fn fetch_comments(repo_path: String, kind: String, number: i64) -> Result<Vec<Comment>, String> {
     let kind = Kind::parse(&kind).map_err(|e| e.to_string())?;
-    let repo = PathBuf::from(&repo_path);
-    let comments = source::source_for(&repo).map_err(|e| e.to_string())?.fetch_comments(&repo, kind, number).map_err(|e| e.to_string())?;
-    let mut conn = storage::open(&repo).map_err(|e| e.to_string())?;
+    let repo = resolve(&repo_path)?;
+    let comments = source::source_for_ref(repo.platform.as_deref(), &repo.host).fetch_comments(&repo, kind, number).map_err(|e| e.to_string())?;
+    let mut conn = storage::open(&storage_dir_of(&repo)).map_err(|e| e.to_string())?;
     storage::replace_comments(&mut conn, kind.as_str(), number, &comments).map_err(|e| e.to_string())?;
     Ok(comments)
 }
@@ -222,9 +252,9 @@ fn add_comment(
     body: String,
 ) -> Result<Vec<Comment>, String> {
     let kind = Kind::parse(&kind).map_err(|e| e.to_string())?;
-    let repo = PathBuf::from(&repo_path);
-    let comments = source::source_for(&repo).map_err(|e| e.to_string())?.add_comment(&repo, kind, number, &body).map_err(|e| e.to_string())?;
-    let mut conn = storage::open(&repo).map_err(|e| e.to_string())?;
+    let repo = resolve(&repo_path)?;
+    let comments = source::source_for_ref(repo.platform.as_deref(), &repo.host).add_comment(&repo, kind, number, &body).map_err(|e| e.to_string())?;
+    let mut conn = storage::open(&storage_dir_of(&repo)).map_err(|e| e.to_string())?;
     storage::replace_comments(&mut conn, kind.as_str(), number, &comments).map_err(|e| e.to_string())?;
     Ok(comments)
 }
@@ -233,9 +263,9 @@ fn add_comment(
 /// entity so the frontend can patch both stores from one source of truth.
 #[tauri::command]
 fn set_issue_state(repo_path: String, number: i64, closed: bool) -> Result<Issue, String> {
-    let repo = PathBuf::from(&repo_path);
-    let issue = source::source_for(&repo).map_err(|e| e.to_string())?.set_issue_state(&repo, number, closed).map_err(|e| e.to_string())?;
-    let conn = storage::open(&repo).map_err(|e| e.to_string())?;
+    let repo = resolve(&repo_path)?;
+    let issue = source::source_for_ref(repo.platform.as_deref(), &repo.host).set_issue_state(&repo, number, closed).map_err(|e| e.to_string())?;
+    let conn = storage::open(&storage_dir_of(&repo)).map_err(|e| e.to_string())?;
     storage::update_issue_state(&conn, number, &issue.state).map_err(|e| e.to_string())?;
     Ok(issue)
 }
@@ -243,9 +273,9 @@ fn set_issue_state(repo_path: String, number: i64, closed: bool) -> Result<Issue
 /// Close or reopen a pull request; upserts the fresh full record.
 #[tauri::command]
 fn set_pull_state(repo_path: String, number: i64, closed: bool) -> Result<Pull, String> {
-    let repo = PathBuf::from(&repo_path);
-    let pull = source::source_for(&repo).map_err(|e| e.to_string())?.set_pull_state(&repo, number, closed).map_err(|e| e.to_string())?;
-    let conn = storage::open(&repo).map_err(|e| e.to_string())?;
+    let repo = resolve(&repo_path)?;
+    let pull = source::source_for_ref(repo.platform.as_deref(), &repo.host).set_pull_state(&repo, number, closed).map_err(|e| e.to_string())?;
+    let conn = storage::open(&storage_dir_of(&repo)).map_err(|e| e.to_string())?;
     storage::upsert_pull(&conn, &pull).map_err(|e| e.to_string())?;
     Ok(pull)
 }
@@ -297,13 +327,12 @@ pub fn run() {
             credentials::credential_set,
             credentials::credential_get,
             credentials::credential_delete,
-            source_config::source_config_get,
-            source_config::source_config_set,
             appdb::connection_list,
             appdb::connection_save,
             appdb::connection_delete,
             appdb::repo_list,
             appdb::repo_register,
+            appdb::repo_register_remote,
             appdb::repo_delete
         ])
         .manage(pty::PtyMap(std::sync::Mutex::new(std::collections::HashMap::new())))
