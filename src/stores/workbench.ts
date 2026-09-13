@@ -51,6 +51,8 @@ function makeLeaf(panel: string): LeafNode {
 }
 
 function defaultLayout(ws: (typeof workspaces)[number]): LayoutNode {
+  // 单面板工作区（如 projects 的看板）默认整区一叶，不强拆两栏。
+  if (ws.listPanel === ws.detailPanel) return makeLeaf(ws.listPanel);
   return {
     id: uid(),
     type: "split",

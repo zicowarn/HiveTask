@@ -34,6 +34,7 @@ export interface MenuActions {
   openPreferences(): void;
   gotoIssues(): void;
   gotoPulls(): void;
+  gotoProjects(): void;
   gotoTools(): void;
   statusbarVisible(): boolean;
   toggleStatusbar(): void;
@@ -64,6 +65,7 @@ export function buildMenuDefs(a: MenuActions): MenuDef[] {
       items: [
         { label: t("menu.issues"), shortcut: "⌘1", action: a.gotoIssues },
         { label: t("menu.pulls"), shortcut: "⌘2", action: a.gotoPulls },
+        { label: t("workspace.projects"), shortcut: "⌘4", action: a.gotoProjects },
         { label: t("workspace.tools"), shortcut: "⌘3", action: a.gotoTools },
         { separator: true },
         {

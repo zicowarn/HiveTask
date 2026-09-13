@@ -19,5 +19,6 @@ export interface WorkspaceDefinition {
 export const workspaces: WorkspaceDefinition[] = [
   { key: "issues", labelKey: "workspace.issues", listPanel: "issue.list", detailPanel: "issue.detail" },
   { key: "pulls", labelKey: "workspace.pulls", listPanel: "pull.list", detailPanel: "pull.detail" },
+  { key: "projects", labelKey: "workspace.projects", listPanel: "project.board", detailPanel: "project.board" },
   { key: "tools", labelKey: "workspace.tools", listPanel: "git.history", detailPanel: "terminal" },
 ];

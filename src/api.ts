@@ -17,6 +17,48 @@ import type {
   RepoInfo,
 } from "./types";
 
+// ---- Projects 看板（应用级，P4）----
+
+export interface FieldOption {
+  id: string;
+  name: string;
+  color: string;
+}
+
+export interface Project {
+  id: string;
+  displayName: string;
+  description: string | null;
+  groupTag: string | null;
+  archived: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ProjectField {
+  id: string;
+  projectId: string;
+  kind: "builtin_status" | "single_select" | "text" | "number" | "date";
+  name: string;
+  options: FieldOption[];
+  position: number;
+}
+
+export interface ProjectItem {
+  id: string;
+  projectId: string;
+  kind: "issue" | "pull" | "draft";
+  repoId: string | null;
+  number: string | null;
+  draftTitle: string | null;
+  draftBody: string | null;
+  rank: string;
+  addedAt: string;
+  repoLabel: string | null;
+  ghost: boolean;
+  fieldValues: Record<string, string>;
+}
+
 export const isTauri = (): boolean => "__TAURI_INTERNALS__" in window;
 
 export const api = {
@@ -91,4 +133,51 @@ export const api = {
   listSyncedAt: (repoPath: string) =>
     invoke<[string, string][]>("list_synced_at", { repoPath }),
   probeNetwork: () => invoke<void>("probe_network"),
+
+  // ---- Projects 看板 ----
+  projectCreate: (name: string, description?: string) =>
+    invoke<Project>("project_create", { name, description: description ?? null }),
+  projectList: (includeArchived = false) =>
+    invoke<Project[]>("project_list", { includeArchived }),
+  projectUpdate: (id: string, name: string, description?: string) =>
+    invoke<Project>("project_update", { id, name, description: description ?? null }),
+  projectArchive: (id: string, archived: boolean) =>
+    invoke<void>("project_archive", { id, archived }),
+  projectDelete: (id: string) => invoke<void>("project_delete", { id }),
+  projectFields: (projectId: string) =>
+    invoke<ProjectField[]>("project_fields", { projectId }),
+  projectFieldSetOptions: (fieldId: string, options: FieldOption[]) =>
+    invoke<void>("project_field_set_options", { fieldId, options }),
+  projectItemAdd: (args: {
+    projectId: string;
+    kind: "issue" | "pull" | "draft";
+    repoId?: string;
+    number?: string;
+    draftTitle?: string;
+    draftBody?: string;
+  }) =>
+    invoke<ProjectItem>("project_item_add", {
+      projectId: args.projectId,
+      kind: args.kind,
+      repoId: args.repoId ?? null,
+      number: args.number ?? null,
+      draftTitle: args.draftTitle ?? null,
+      draftBody: args.draftBody ?? null,
+    }),
+  projectItemList: (projectId: string) =>
+    invoke<ProjectItem[]>("project_item_list", { projectId }),
+  projectItemMove: (itemId: string, statusOptionId?: string, prevId?: string, nextId?: string) =>
+    invoke<ProjectItem>("project_item_move", {
+      itemId,
+      statusOptionId: statusOptionId ?? null,
+      prevId: prevId ?? null,
+      nextId: nextId ?? null,
+    }),
+  projectItemRemove: (itemId: string) => invoke<void>("project_item_remove", { itemId }),
+  projectItemUpdateDraft: (itemId: string, title: string, body?: string) =>
+    invoke<ProjectItem>("project_item_update_draft", { itemId, title, body: body ?? null }),
+  projectFieldValueSet: (itemId: string, fieldId: string, value?: string) =>
+    invoke<void>("project_field_value_set", { itemId, fieldId, value: value ?? null }),
+  convertDraftToIssue: (itemId: string, repoPath: string) =>
+    invoke<ProjectItem>("convert_draft_to_issue", { itemId, repoPath }),
 };

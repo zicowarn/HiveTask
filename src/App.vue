@@ -15,6 +15,7 @@ import { isTauri } from "./api";
 import { useRepoStore } from "./stores/repo";
 import { useIssuesStore } from "./stores/issues";
 import { usePullsStore } from "./stores/pulls";
+import { useProjectsStore } from "./stores/projects";
 import { useSettingsStore } from "./stores/settings";
 import { useWorkbenchStore } from "./stores/workbench";
 import { useI18n } from "./i18n";
@@ -27,6 +28,7 @@ const WORKSPACE_KEY = "hivetask.workspace";
 const repo = useRepoStore();
 const issues = useIssuesStore();
 const pulls = usePullsStore();
+const projectsStore = useProjectsStore();
 const settings = useSettingsStore();
 const workbench = useWorkbenchStore();
 const { current, origin } = storeToRefs(repo);
@@ -53,6 +55,7 @@ function switchWorkspace(key: string) {
 function refreshActive() {
   if (activeKey.value === "issues") void issues.refresh();
   else if (activeKey.value === "pulls") void pulls.refresh();
+  else if (activeKey.value === "projects") void projectsStore.loadAll();
 }
 
 /**
@@ -118,10 +121,11 @@ const menus = computed(() =>
   buildMenuDefs({
     pickRepo: () => void repo.pick(),
     refresh: refreshActive,
-    refreshDisabled: () => activeKey.value !== "issues" && activeKey.value !== "pulls",
+    refreshDisabled: () => activeKey.value === "tools",
     openPreferences,
     gotoIssues: () => switchWorkspace("issues"),
     gotoPulls: () => switchWorkspace("pulls"),
+    gotoProjects: () => switchWorkspace("projects"),
     gotoTools: () => switchWorkspace("tools"),
     statusbarVisible: () => settings.statusbarVisible,
     toggleStatusbar: () => settings.toggleStatusbar(),
@@ -146,6 +150,7 @@ function onKeydown(event: KeyboardEvent) {
     r: refreshActive,
     "1": () => switchWorkspace("issues"),
     "2": () => switchWorkspace("pulls"),
+    "4": () => switchWorkspace("projects"),
     "3": () => switchWorkspace("tools"),
     ",": openPreferences,
   };

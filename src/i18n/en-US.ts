@@ -36,6 +36,7 @@ export const enUS: Record<MessageKey, string> = {
   // Workspaces (header tabs)
   "workspace.issues": "Issues",
   "workspace.pulls": "Pull Requests",
+  "workspace.projects": "Projects",
   "workspace.tools": "Tools",
 
   "menu.issues": "Issues",
@@ -79,6 +80,7 @@ export const enUS: Record<MessageKey, string> = {
   "panelTitle.issue.detail": "Issue detail",
   "panelTitle.pull.list": "Pull requests",
   "panelTitle.pull.detail": "Pull request detail",
+  "panelTitle.project.board": "Project board",
   "panelTitle.settings": "Settings",
   "panelTitle.git.history": "Git history",
   "panelTitle.terminal": "Terminal",
@@ -104,13 +106,39 @@ export const enUS: Record<MessageKey, string> = {
   // Editor switcher categories
   "editorCat.issues": "Issues",
   "editorCat.pulls": "Pull Requests",
+  "editorCat.projects": "Projects",
   "editorCat.tools": "Tools",
   "editorCat.general": "General",
 
   // Panel modes
   "mode.list": "List",
   "mode.milestone": "Milestones",
+  "mode.board": "Board",
+  "mode.table": "Table",
   "mode.settings.basic": "Basic settings",
+
+  // Projects board (P4)
+  "project.newBtn": "＋ New project",
+  "project.namePlaceholder": "Project name",
+  "project.descPlaceholder": "Description (optional)",
+  "project.empty": "No projects yet — create a board to start",
+  "project.rename": "Rename",
+  "project.delete": "Delete project",
+  "project.deleteConfirm": "Deleting removes all items and field values. Continue?",
+  "project.ghost": "Source removed",
+  "project.draftTag": "Draft",
+  "project.convert": "Convert to Issue",
+  "project.pickLocalRepo": "Pick a local repository…",
+  "project.removeItem": "Remove item",
+  "project.addDraft": "Draft card",
+  "project.addRef": "Reference issue",
+  "project.pickRepo": "Pick a repository…",
+  "project.numberPlaceholder": "Issue number (e.g. 42)",
+  "project.colTitle": "Title",
+  "project.colStatus": "Status",
+  "project.colPriority": "Priority",
+  "project.colSource": "Source",
+  "project.noItems": "No items — use ＋ to add one",
 
   // Issue/PR state (filter tabs + detail badges)
   "state.open": "Open",

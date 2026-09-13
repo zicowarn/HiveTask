@@ -37,6 +37,7 @@ export const zhCN = {
   // Workspaces (header tabs)
   "workspace.issues": "Issues",
   "workspace.pulls": "Pull Requests",
+  "workspace.projects": "项目",
   "workspace.tools": "工具",
 
   "menu.issues": "Issues",
@@ -80,6 +81,7 @@ export const zhCN = {
   "panelTitle.issue.detail": "Issue 详情",
   "panelTitle.pull.list": "PR 列表",
   "panelTitle.pull.detail": "PR 详情",
+  "panelTitle.project.board": "项目看板",
   "panelTitle.settings": "设置",
   "panelTitle.git.history": "Git 历史",
   "panelTitle.terminal": "终端",
@@ -105,13 +107,39 @@ export const zhCN = {
   // Editor 切换弹层分类
   "editorCat.issues": "Issues",
   "editorCat.pulls": "Pull Requests",
+  "editorCat.projects": "项目",
   "editorCat.tools": "工具",
   "editorCat.general": "通用",
 
   // Panel modes
   "mode.list": "列表",
   "mode.milestone": "里程碑",
+  "mode.board": "看板",
+  "mode.table": "表格",
   "mode.settings.basic": "基础设置",
+
+  // Projects board (P4)
+  "project.newBtn": "＋ 新建项目",
+  "project.namePlaceholder": "项目名",
+  "project.descPlaceholder": "描述（可选）",
+  "project.empty": "还没有项目——创建一个看板开始",
+  "project.rename": "重命名",
+  "project.delete": "删除项目",
+  "project.deleteConfirm": "删除项目将同时删除其全部条目与字段值，确定？",
+  "project.ghost": "来源已移除",
+  "project.draftTag": "草稿",
+  "project.convert": "转为 Issue",
+  "project.pickLocalRepo": "选择本地仓库…",
+  "project.removeItem": "移除条目",
+  "project.addDraft": "草稿卡",
+  "project.addRef": "引用 Issue",
+  "project.pickRepo": "选择仓库…",
+  "project.numberPlaceholder": "Issue 编号（如 42）",
+  "project.colTitle": "标题",
+  "project.colStatus": "状态",
+  "project.colPriority": "优先级",
+  "project.colSource": "来源",
+  "project.noItems": "暂无条目——右下角 ＋ 添加",
 
   // Issue/PR state (filter tabs + detail badges)
   "state.open": "开启中",

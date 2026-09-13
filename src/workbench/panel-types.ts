@@ -18,13 +18,14 @@ export interface PanelTypeInfo {
   /** 切换弹层里的分类标题（i18n key）——排序归类的唯一事实源。 */
   category: MessageKey;
   /** EditorIcon 的图形名（14px 内联 SVG，currentColor）。 */
-  icon: "issue.list" | "issue.detail" | "pull" | "pull.detail" | "git.history" | "terminal" | "settings";
+  icon: "issue.list" | "issue.detail" | "pull" | "pull.detail" | "project.board" | "git.history" | "terminal" | "settings";
 }
 
-/** 分类展示顺序：对齐工作区叙事（Issues → Pull Requests → 工具 → 通用）。 */
+/** 分类展示顺序：对齐工作区叙事（Issues → Pull Requests → 项目 → 工具 → 通用）。 */
 export const editorCategories: MessageKey[] = [
   "editorCat.issues",
   "editorCat.pulls",
+  "editorCat.projects",
   "editorCat.tools",
   "editorCat.general",
 ];
@@ -34,6 +35,7 @@ export const panelTypes: PanelTypeInfo[] = [
   { type: "issue.detail", titleKey: "panelTitle.issue.detail", category: "editorCat.issues", icon: "issue.detail" },
   { type: "pull.list", titleKey: "panelTitle.pull.list", category: "editorCat.pulls", icon: "pull" },
   { type: "pull.detail", titleKey: "panelTitle.pull.detail", category: "editorCat.pulls", icon: "pull.detail" },
+  { type: "project.board", titleKey: "panelTitle.project.board", category: "editorCat.projects", icon: "project.board" },
   { type: "git.history", titleKey: "panelTitle.git.history", category: "editorCat.tools", icon: "git.history" },
   { type: "terminal", titleKey: "panelTitle.terminal", category: "editorCat.tools", icon: "terminal" },
   { type: "settings", titleKey: "panelTitle.settings", category: "editorCat.general", icon: "settings" },
