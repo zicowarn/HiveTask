@@ -28,6 +28,9 @@ export const useRepoStore = defineStore("repo", () => {
   // Clear it so the UI falls back to "未选择仓库" instead of dead reads.
   void (async () => {
     if (!current.value || !isTauri()) return;
+    // 仅远端登记的 current 是 URL，不是磁盘路径，is_dir 必然 false——
+    // 交给使用时的 resolve_target 校验，这里跳过。
+    if (/^https?:\/\//i.test(current.value)) return;
     try {
       const info = await api.repoInfo(current.value);
       if (info.valid === false) {

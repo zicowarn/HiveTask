@@ -34,10 +34,14 @@ export const useIssuesStore = defineStore("issues", () => {
 
   async function loadCache() {
     const repo = useRepoStore();
-    if (!repo.current || !isTauri()) return;
+    // 启动探针会在 await 间隙把失效的 current 清成 null（如 /tmp 腐掉的
+    // 登记），这里必须快照，否则第二次调用把 null 传进 invoke。
+    const path = repo.current;
+    if (!path || !isTauri()) return;
     try {
-      issues.value = await api.listCachedIssues(repo.current, state.value);
-      cachedCount.value = await api.cachedIssueCount(repo.current, state.value);
+      issues.value = await api.listCachedIssues(path, state.value);
+      if (repo.current !== path) return; // 已切换仓库，旧结果不落地
+      cachedCount.value = await api.cachedIssueCount(path, state.value);
     } catch (e) {
       error.value = translateError(String(e));
     }
@@ -80,12 +84,13 @@ export const useIssuesStore = defineStore("issues", () => {
    * only the currently selected issue may land in `comments`. */
   async function loadComments(number: number) {
     const repo = useRepoStore();
-    if (!repo.current || !isTauri()) return;
+    const path = repo.current; // 同 loadCache：await 后 current 可能已被探针清空
+    if (!path || !isTauri()) return;
     commentsLoading.value = true;
     try {
-      const cached = await api.listCachedComments(repo.current, "issue", number);
+      const cached = await api.listCachedComments(path, "issue", number);
       if (selectedNumber.value === number) comments.value = cached;
-      const fresh = await api.fetchComments(repo.current, "issue", number);
+      const fresh = await api.fetchComments(path, "issue", number);
       if (selectedNumber.value === number) comments.value = fresh;
     } catch (e) {
       error.value = translateError(String(e));
