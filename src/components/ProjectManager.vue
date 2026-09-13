@@ -24,6 +24,21 @@ function pick(id: string) {
   store.select(id);
 }
 
+// ---- 行内改名 / 删除（两击确认，级联由后端承担） ----
+const renaming = ref<string | null>(null);
+const renameName = ref("");
+async function submitRename() {
+  if (!renaming.value || !renameName.value.trim()) return;
+  await store.rename(renaming.value, renameName.value);
+  renaming.value = null;
+}
+const confirmingDelete = ref<string | null>(null);
+async function confirmDelete() {
+  if (!confirmingDelete.value) return;
+  await store.remove(confirmingDelete.value);
+  confirmingDelete.value = null;
+}
+
 // ---- 新建（名称 + 描述 + 绑定仓库：按接入 Tab 浏览 + ⟳ 线上拉取绑定） ----
 const createOpen = ref(false);
 const createName = ref("");
@@ -160,8 +175,35 @@ async function submitCreate() {
         :class="{ active: p.id === selectedId }"
         @click="pick(p.id)"
       >
-        <span class="pjmgr-name">{{ p.displayName }}</span>
-        <span v-if="p.description" class="pjmgr-desc">{{ p.description }}</span>
+        <template v-if="renaming === p.id">
+          <input
+            v-model="renameName"
+            class="pjmgr-input"
+            @keydown.enter="submitRename"
+            @keydown.escape="renaming = null"
+            @click.stop
+          />
+          <button class="pjmgr-rowbtn" @click.stop="submitRename">✓</button>
+        </template>
+        <template v-else-if="confirmingDelete === p.id">
+          <span class="pjmgr-confirm-text">{{ t("project.deleteConfirm") }}</span>
+          <button class="pjmgr-rowbtn danger" @click.stop="confirmDelete">✓</button>
+          <button class="pjmgr-rowbtn" @click.stop="confirmingDelete = null">×</button>
+        </template>
+        <template v-else>
+          <span class="pjmgr-name">{{ p.displayName }}</span>
+          <span v-if="p.description" class="pjmgr-desc">{{ p.description }}</span>
+          <button
+            class="pjmgr-rowbtn"
+            :title="t('project.rename')"
+            @click.stop="((renaming = p.id), (renameName = p.displayName))"
+          >✎</button>
+          <button
+            class="pjmgr-rowbtn danger"
+            :title="t('project.delete')"
+            @click.stop="confirmingDelete = p.id"
+          >✕</button>
+        </template>
       </li>
     </ul>
 
@@ -280,6 +322,7 @@ async function submitCreate() {
 }
 .pjmgr-name {
   font-weight: 600;
+  white-space: nowrap;
 }
 .pjmgr-desc {
   color: var(--text-dim);
@@ -287,6 +330,31 @@ async function submitCreate() {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  flex: 1;
+}
+.pjmgr-rowbtn {
+  flex: none;
+  border: none;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 11px;
+  cursor: pointer;
+  padding: 0 3px;
+}
+.pjmgr-rowbtn:hover {
+  color: var(--text);
+}
+.pjmgr-rowbtn.danger:hover {
+  color: var(--danger);
+}
+.pjmgr-confirm-text {
+  font-size: 11px;
+  color: var(--danger);
+  flex: 1;
+}
+.pjmgr-item input.pjmgr-input {
+  padding: 1px 6px;
+  height: 20px;
 }
 .pjmgr-new {
   width: 100%;

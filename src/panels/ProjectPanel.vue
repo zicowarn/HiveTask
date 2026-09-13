@@ -1,10 +1,9 @@
 <script setup lang="ts">
 /**
  * Projects panel — the P4 board workspace (registered as "project.board").
- * Chrome hosts the project tab strip (select/rename/delete); creation lives
- * in the header's 切换项目 dialog (ProjectManager, mirroring the repo side).
- * The mode components render the selected project's items from the projects
- * store. Application-level: nothing here follows repository switches.
+ * 顶部一行 = 筛选条 + ⚙ 视图（项目的选择/新建/改名/删除全部在头部
+ * 「切换项目」对话框 ProjectManager）。模式组件渲染选中项目的条目，
+ * 应用级：不随仓库切换。
  */
 import { computed, onMounted, ref } from "vue";
 import { storeToRefs } from "pinia";
@@ -23,7 +22,7 @@ const modes = def.modes ?? [];
 
 const store = useProjectsStore();
 const { t } = useI18n();
-const { projects, selectedId, loading, error, filterText } = storeToRefs(store);
+const { projects, loading, error, filterText } = storeToRefs(store);
 const { setSortBy } = store;
 
 const storedMode =
@@ -62,18 +61,6 @@ function removeChip(chip: { kind: string; value: string }) {
     .join(" ")
     .trim();
 }
-
-// ---- 重命名 ----
-const renaming = ref<string | null>(null);
-const renameName = ref("");
-async function submitRename() {
-  if (!renaming.value || !renameName.value.trim()) return;
-  await store.rename(renaming.value, renameName.value);
-  renaming.value = null;
-}
-
-// ---- 删除（两击确认） ----
-const confirmingDelete = ref<string | null>(null);
 </script>
 
 <template>
@@ -86,101 +73,53 @@ const confirmingDelete = ref<string | null>(null);
 
     <div v-else class="pj-body">
       <div class="pj-topbar">
-        <ul class="pj-list">
-          <li
-            v-for="p in projects"
-            :key="p.id"
-            class="pj-item"
-            :class="{ active: p.id === selectedId }"
-            @click="store.select(p.id)"
+        <div class="filter-box">
+          <span
+            v-for="chip in filterChips"
+            :key="`${chip.kind}:${chip.value}`"
+            class="filter-chip"
           >
-            <template v-if="renaming === p.id">
-              <input
-                v-model="renameName"
-                class="pj-input"
-                @keydown.enter="submitRename"
-                @click.stop
-              />
-              <button class="pj-mini" @click.stop="submitRename">✓</button>
-            </template>
-            <template v-else>
-              <span class="pj-name">{{ p.displayName }}</span>
-              <button
-                class="pj-mini"
-                :title="t('project.rename')"
-                @click.stop="((renaming = p.id), (renameName = p.displayName))"
-              >✎</button>
-              <button
-                class="pj-mini danger"
-                :title="t('project.delete')"
-                @click.stop="((confirmingDelete = p.id))"
-              >✕</button>
-            </template>
-          </li>
-        </ul>
-
-        <div class="view-toolbar">
-          <div class="filter-box">
-            <span
-              v-for="chip in filterChips"
-              :key="`${chip.kind}:${chip.value}`"
-              class="filter-chip"
-            >
-              <span class="filter-chip-kind">{{ chip.kind === "status" ? t("project.colStatus") : t("project.colPriority") }}</span>
-              {{ chip.value }}
-              <button class="filter-chip-x" @click="removeChip(chip)">×</button>
-            </span>
-            <input
-              v-model="filterText"
-              class="filter-input"
-              :placeholder="t('project.filterPlaceholder')"
-              spellcheck="false"
-            />
-          </div>
-          <div class="view-menu-wrap">
-            <button class="view-btn" :class="{ open: viewOpen }" @click="viewOpen = !viewOpen">
-              ⚙ {{ t("mode.view") }}
-            </button>
-            <div v-if="viewOpen" class="view-pop">
-              <div class="view-row">
-                <span class="view-row-label">{{ t("project.viewLayout") }}</span>
-                <div class="view-seg">
-                  <button
-                    v-for="m in modes"
-                    :key="m.key"
-                    class="view-seg-btn"
-                    :class="{ active: modeKey === m.key }"
-                    @click="modeKey = m.key"
-                  >{{ t(m.labelKey) }}</button>
-                </div>
-              </div>
-              <div class="view-row">
-                <span class="view-row-label">{{ t("project.viewSort") }}</span>
-                <select
-                  class="view-select"
-                  :value="store.sortBy"
-                  @change="setSortBy(($event.target as HTMLSelectElement).value as 'manual' | 'priority' | 'added')"
-                >
-                  <option value="manual">{{ t("project.sortManual") }}</option>
-                  <option value="priority">{{ t("project.sortPriority") }}</option>
-                  <option value="added">{{ t("project.sortAdded") }}</option>
-                </select>
+            <span class="filter-chip-kind">{{ chip.kind === "status" ? t("project.colStatus") : t("project.colPriority") }}</span>
+            {{ chip.value }}
+            <button class="filter-chip-x" @click="removeChip(chip)">×</button>
+          </span>
+          <input
+            v-model="filterText"
+            class="filter-input"
+            :placeholder="t('project.filterPlaceholder')"
+            spellcheck="false"
+          />
+        </div>
+        <div class="view-menu-wrap">
+          <button class="view-btn" :class="{ open: viewOpen }" @click="viewOpen = !viewOpen">
+            ⚙ {{ t("mode.view") }}
+          </button>
+          <div v-if="viewOpen" class="view-pop">
+            <div class="view-row">
+              <span class="view-row-label">{{ t("project.viewLayout") }}</span>
+              <div class="view-seg">
+                <button
+                  v-for="m in modes"
+                  :key="m.key"
+                  class="view-seg-btn"
+                  :class="{ active: modeKey === m.key }"
+                  @click="modeKey = m.key"
+                >{{ t(m.labelKey) }}</button>
               </div>
             </div>
+            <div class="view-row">
+              <span class="view-row-label">{{ t("project.viewSort") }}</span>
+              <select
+                class="view-select"
+                :value="store.sortBy"
+                @change="setSortBy(($event.target as HTMLSelectElement).value as 'manual' | 'priority' | 'added')"
+              >
+                <option value="manual">{{ t("project.sortManual") }}</option>
+                <option value="priority">{{ t("project.sortPriority") }}</option>
+                <option value="added">{{ t("project.sortAdded") }}</option>
+              </select>
+            </div>
           </div>
-        </div>
-      </div>
-
-      <div v-if="confirmingDelete" class="pj-confirm">
-        <p>{{ t("project.deleteConfirm") }}</p>
-        <div class="pj-form-actions">
-          <button class="pj-btn" @click="confirmingDelete = null">{{ t("conn.cancel") }}</button>
-          <button
-            class="pj-btn danger"
-            @click="((store.remove(confirmingDelete)), (confirmingDelete = null))"
-          >
-            {{ t("project.delete") }}
-          </button>
         </div>
       </div>
 
@@ -201,49 +140,6 @@ const confirmingDelete = ref<string | null>(null);
   border: 1px solid var(--danger-banner-border);
   border-radius: 6px;
 }
-.pj-input {
-  box-sizing: border-box;
-  width: 100%;
-  font-size: 12px;
-  font-family: inherit;
-  color: var(--text);
-  background: var(--bg-panel);
-  border: 1px solid var(--border);
-  border-radius: 5px;
-  padding: 5px 8px;
-  outline: none;
-}
-.pj-input:focus {
-  border-color: var(--accent);
-}
-.pj-form-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
-}
-.pj-btn {
-  border: 1px solid var(--border);
-  background: var(--bg-panel);
-  color: var(--text);
-  font-size: 12px;
-  height: 24px;
-  padding: 0 12px;
-  border-radius: 5px;
-  cursor: pointer;
-}
-.pj-btn.primary {
-  color: var(--accent);
-  border-color: var(--accent);
-  font-weight: 600;
-}
-.pj-btn.danger {
-  color: var(--danger);
-  border-color: var(--danger);
-}
-.pj-btn:disabled {
-  opacity: 0.5;
-  cursor: default;
-}
 .pj-empty {
   flex: 1;
   display: grid;
@@ -257,7 +153,7 @@ const confirmingDelete = ref<string | null>(null);
   flex: 1;
   min-height: 0;
 }
-/* 顶栏：项目 chips 在左，筛选条 + ⚙视图 在右（同一行） */
+/* 顶栏：筛选条 + ⚙视图（项目选择在头部切换对话框） */
 .pj-topbar {
   display: flex;
   align-items: center;
@@ -265,82 +161,18 @@ const confirmingDelete = ref<string | null>(null);
   padding: 8px 10px 6px;
   border-bottom: 1px solid var(--border);
 }
-.pj-list {
-  list-style: none;
-  display: flex;
-  gap: 4px;
-  margin: 0;
-  padding: 0;
-  flex-wrap: wrap;
-  min-width: 0;
-}
-.pj-item {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 4px 9px;
-  border-radius: 5px;
-  font-size: 12px;
-  color: var(--text-dim);
-  cursor: pointer;
-}
-.pj-item:hover {
-  background: var(--bg-hover);
-  color: var(--text);
-}
-.pj-item.active {
-  background: var(--bg-selected);
-  color: var(--accent);
-  font-weight: 600;
-}
-.pj-name {
-  white-space: nowrap;
-}
-.pj-mini {
-  border: none;
-  background: transparent;
-  color: var(--text-dim);
-  font-size: 11px;
-  cursor: pointer;
-  padding: 0 2px;
-}
-.pj-mini:hover {
-  color: var(--text);
-}
-.pj-mini.danger:hover {
-  color: var(--danger);
-}
-.pj-confirm {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  margin: 8px 12px 0;
-  padding: 8px 10px;
-  font-size: 12px;
-  color: var(--danger);
-  background: var(--danger-banner);
-  border: 1px solid var(--danger-banner-border);
-  border-radius: 6px;
-}
-.pj-confirm p {
-  margin: 0;
-}
 .pj-view {
   display: flex;
   flex-direction: column;
   flex: 1;
   min-height: 0;
 }
-/* 视图工具栏：贴项目 chips 行右缘（筛选条 + ⚙ View） */
+/* 视图工具栏：整行（筛选条弹性 + ⚙ View） */
 .view-toolbar {
   display: flex;
   align-items: center;
   gap: 8px;
-  margin-left: auto;
   flex: 1;
-  max-width: 460px;
-  min-width: 220px;
   position: relative;
 }
 .filter-box {
