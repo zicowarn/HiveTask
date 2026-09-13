@@ -22,7 +22,7 @@ const { t } = useI18n();
     </li>
     <IssueRow v-for="issue in issues" :key="issue.number" :issue="issue" />
     <li v-if="!loading && issues.length === 0" class="empty-row">
-      {{ t(repoStore.current ? "common.empty" : "common.noRepo") }}
+      {{ t(repoStore.current ? "common.empty" : "issue.emptyRepo") }}
     </li>
   </ul>
 </template>

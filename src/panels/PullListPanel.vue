@@ -91,7 +91,7 @@ function timeLabel(iso?: string | null): string {
         </div>
       </li>
       <li v-if="!loading && pulls.length === 0" class="empty-row">
-        {{ t(repoStore.current ? "common.empty" : "common.noRepo") }}
+        {{ t(repoStore.current ? "common.empty" : "pull.emptyRepo") }}
       </li>
     </ul>
   </PanelShell>

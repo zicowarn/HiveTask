@@ -51,7 +51,7 @@ const allUnassigned = computed(
 
 <template>
   <div v-if="!loading && issues.length === 0" class="empty-row">
-    {{ t(repoStore.current ? "common.empty" : "common.noRepo") }}
+    {{ t(repoStore.current ? "common.empty" : "issue.emptyRepo") }}
   </div>
   <div v-else class="milestone-scroll">
     <p v-if="allUnassigned" class="unassigned-note">{{ t("milestone.noneInUse") }}</p>

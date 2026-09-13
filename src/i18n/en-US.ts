@@ -165,7 +165,6 @@ export const enUS: Record<MessageKey, string> = {
   "common.refresh": "Refresh",
   "common.syncing": "Syncing…",
   "common.empty": "No data yet — hit Refresh to fetch from the remote",
-  "common.noRepo": "Select a repository first",
   "common.noBody": "(No description)",
   "common.openInGithub": "Open on GitHub",
   "common.loadingFull": "Loading full details from GitHub…",
