@@ -25,50 +25,56 @@ interface RepoEntry {
   lastOpenedAt: string;
 }
 
+interface ConnectionInfo {
+  id: string;
+  platform: string;
+  host: string;
+  label: string;
+}
+
 const repos = ref<RepoEntry[]>([]);
+const connections = ref<ConnectionInfo[]>([]);
 const remoteFormOpen = ref(false);
 const remoteUrl = ref("");
 const loading = ref(false);
+// Tab = 来源连接（第一分类），收尾「本地」收容未挂连接的仓库。
 const activeTab = ref<string>("local");
+const remoteConnectionId = ref("");
 
-/** 远端 URL 登记的平台——用户显式选择（知识库：运行时只认连接类型，
+/** 远端 URL 挂到哪条连接——用户显式选择（知识库：运行时只认连接类型，
  * 自建 Gitea 域名等猜测不了的来源全靠它）。 */
-const REMOTE_PLATFORMS: { value: "github" | "gitee" | "gitea"; labelKey: "repoTab.github" | "repoTab.gitee" | "repoTab.gitea" }[] = [
-  { value: "github", labelKey: "repoTab.github" },
-  { value: "gitee", labelKey: "repoTab.gitee" },
-  { value: "gitea", labelKey: "repoTab.gitea" },
-];
-const remotePlatform = ref<"github" | "gitee" | "gitea">("github");
-
-// 在平台 Tab 下打开添加表单 → 预填该平台；本地 Tab 维持上次选择。
+// 打开添加表单 → 预填当前 Tab 的连接；本地 Tab 维持上次选择。
 watch([activeTab, remoteFormOpen], ([tab, open]) => {
-  if (open && tab !== "local") remotePlatform.value = tab as typeof remotePlatform.value;
+  if (!open) return;
+  if (tab !== "local") remoteConnectionId.value = tab;
+  if (!remoteConnectionId.value && connections.value.length) {
+    remoteConnectionId.value = connections.value[0]!.id;
+  }
 });
 
-const TAB_ORDER: { key: string; labelKey: "repoTab.github" | "repoTab.gitee" | "repoTab.gitea" | "repoTab.local" }[] = [
-  { key: "github", labelKey: "repoTab.github" },
-  { key: "gitee", labelKey: "repoTab.gitee" },
-  { key: "gitea", labelKey: "repoTab.gitea" },
-  { key: "local", labelKey: "repoTab.local" },
-];
-
-/** 仓库 → 平台 Tab：只认登记连接的 platform（显式/auto），无连接 → 本地。
+/** 仓库 → Tab：只认登记连接（显式绑定），无连接 → 本地。
  * 前端不做域名猜测（自建域名猜不出，猜错更糟——知识库连接篇定案）。 */
-function platformOf(entry: RepoEntry): string {
-  return entry.platform ?? "local";
+function tabOf(entry: RepoEntry): string {
+  return entry.connectionId ?? "local";
 }
 
 const tabs = computed(() => {
-  const present = new Set(repos.value.map(platformOf));
-  return TAB_ORDER.filter((t) => present.has(t.key) || t.key === "local").map((t) => ({
-    ...t,
-    count: repos.value.filter((r) => platformOf(r) === t.key).length,
+  const connTabs = connections.value.map((c) => ({
+    key: c.id,
+    label: c.label || c.host,
+    count: repos.value.filter((r) => r.connectionId === c.id).length,
   }));
+  connTabs.push({
+    key: "local",
+    label: t("repoTab.local"),
+    count: repos.value.filter((r) => !r.connectionId).length,
+  });
+  return connTabs;
 });
 
 const visibleRepos = computed(() =>
   repos.value
-    .filter((r) => platformOf(r) === activeTab.value)
+    .filter((r) => tabOf(r) === activeTab.value)
     .sort((a, b) => b.lastOpenedAt.localeCompare(a.lastOpenedAt)),
 );
 
@@ -77,6 +83,11 @@ async function load() {
   loading.value = true;
   try {
     repos.value = (await api.repoList()) as RepoEntry[];
+    connections.value = await api.connectionList();
+    // 当前 Tab 失效（连接被删等）→ 回到第一个 Tab
+    if (!tabs.value.some((tb) => tb.key === activeTab.value)) {
+      activeTab.value = tabs.value[0]?.key ?? "local";
+    }
   } finally {
     loading.value = false;
   }
@@ -106,11 +117,13 @@ async function pickLocal() {
 async function addRemote() {
   const url = remoteUrl.value.trim();
   if (!url) return;
-  await api.repoRegisterRemote(url, remotePlatform.value);
+  const conn = connections.value.find((c) => c.id === remoteConnectionId.value);
+  if (!conn) return;
+  await api.repoRegisterRemote(url, conn.platform);
   remoteUrl.value = "";
   remoteFormOpen.value = false;
   await load();
-  activeTab.value = remotePlatform.value;
+  activeTab.value = conn.id;
   // 仅远端登记的标识就是 URL 本身——切换过去（Issue/PR 走 API）。
   emit("select", url);
 }
@@ -131,7 +144,7 @@ async function remove(entry: RepoEntry) {
         :class="{ active: activeTab === tab.key }"
         @click="activeTab = tab.key"
       >
-        {{ t(tab.labelKey) }} <span class="tab-count">{{ tab.count }}</span>
+        {{ tab.label }} <span class="tab-count">{{ tab.count }}</span>
       </button>
       <span class="tabs-spacer"></span>
       <button class="add-btn" @click="pickLocal">{{ t("repo.addLocal") }}</button>
@@ -144,10 +157,10 @@ async function remove(entry: RepoEntry) {
 
     <div v-if="remoteFormOpen" class="remote-form">
       <label class="remote-platform">
-        <span class="remote-platform-label">{{ t("repo.remotePlatform") }}</span>
-        <select v-model="remotePlatform" class="remote-select">
-          <option v-for="p in REMOTE_PLATFORMS" :key="p.value" :value="p.value">
-            {{ t(p.labelKey) }}
+        <span class="remote-platform-label">{{ t("repo.remoteConnection") }}</span>
+        <select v-model="remoteConnectionId" class="remote-select">
+          <option v-for="c in connections" :key="c.id" :value="c.id">
+            {{ c.label || c.host }}
           </option>
         </select>
       </label>

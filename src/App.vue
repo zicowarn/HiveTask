@@ -86,15 +86,19 @@ const aboutOpen = ref(false);
 const repoManagerOpen = ref(false);
 
 // 打开即登记：启动时把 lastRepo/recentRepos 导入 app.db（幂等）。
+// 已不存在的路径（如 /tmp 清理）跳过——否则死路径每次启动都被重新登记。
 async function importLegacyRepos() {
   if (!isTauri()) return;
   const legacy = [
     current.value,
     ...JSON.parse(localStorage.getItem("hivetask.recentRepos") ?? "[]") as string[],
   ].filter((p): p is string => !!p);
+  const m = await import("./api");
   for (const path of [...new Set(legacy)]) {
     try {
-      await import("./api").then((m) => m.api.repoRegister(path));
+      const info = await m.api.repoInfo(path);
+      if (info.valid === false) continue;
+      await m.api.repoRegister(path);
     } catch {
       // 单条导入失败不阻塞启动。
     }

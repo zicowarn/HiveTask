@@ -19,7 +19,7 @@ export const zhCN = {
   "repo.addRemote": "远端 URL…",
   "repo.remoteLater": "通过 URL 登记仅远端仓库",
   "repo.remotePlaceholder": "https://gitee.com/owner/repo",
-  "repo.remotePlatform": "平台",
+  "repo.remoteConnection": "所属连接",
   "repo.remoteOnly": "仅远端",
   "repo.tabEmpty": "该来源暂无登记仓库",
   "repo.current": "当前",
