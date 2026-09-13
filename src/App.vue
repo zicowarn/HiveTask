@@ -4,6 +4,7 @@ import { storeToRefs } from "pinia";
 import WorkbenchNode from "./workbench/WorkbenchNode.vue";
 import StatusBar from "./workbench/StatusBar.vue";
 import AppMenu from "./components/AppMenu.vue";
+import ProjectManager from "./components/ProjectManager.vue";
 import AboutDialog from "./components/AboutDialog.vue";
 import RepoManager from "./components/RepoManager.vue";
 import ToastHost from "./components/ToastHost.vue";
@@ -260,7 +261,18 @@ onBeforeUnmount(() => {
 
       <div class="header-spacer"></div>
 
-      <div class="repo-box">
+      <div v-if="activeKey === 'projects'" class="repo-box">
+        <template v-if="projectsStore.selected">
+          <span class="repo-path" :title="projectsStore.selected.displayName">
+            {{ projectsStore.selected.displayName }}
+          </span>
+          <span v-if="projectsStore.selected.description" class="repo-origin">
+            {{ projectsStore.selected.description }}
+          </span>
+        </template>
+        <span v-else class="repo-hint">{{ t("app.projectNone") }}</span>
+      </div>
+      <div v-else class="repo-box">
         <template v-if="current">
           <span class="repo-path" :title="current">{{ current }}</span>
           <span v-if="origin" class="repo-origin" :title="origin">{{ shortOrigin(origin) }}</span>
@@ -269,16 +281,16 @@ onBeforeUnmount(() => {
       </div>
 
       <div class="header-actions">
-        <template v-if="activeKey === 'projects'">
-          <button class="header-btn" @click="projectPickerOpen = true">
-            {{ projectsStore.selected ? projectsStore.selected.displayName : t("app.projectNone") }}
-          </button>
-        </template>
-        <template v-else>
-          <button class="header-btn" @click="repoManagerOpen = true">
-            {{ current ? t("app.repoSwitch") : t("app.repoPick") }}
-          </button>
-        </template>
+        <button
+          v-if="activeKey === 'projects'"
+          class="header-btn"
+          @click="projectPickerOpen = true"
+        >
+          {{ t("app.projectSwitch") }}
+        </button>
+        <button v-else class="header-btn" @click="repoManagerOpen = true">
+          {{ current ? t("app.repoSwitch") : t("app.repoPick") }}
+        </button>
         <button class="header-btn theme-btn" :title="t('theme.switch')" @click="cycleTheme()">
           {{ theme === "system" ? "◐" : resolvedTheme === "dark" ? "☾" : "☀" }}
         </button>
@@ -324,24 +336,7 @@ onBeforeUnmount(() => {
           <span class="repo-panel-title">{{ t("app.projectSwitch") }}</span>
           <button class="repo-panel-close" @click="projectPickerOpen = false">✕</button>
         </div>
-        <ul class="pj-picker">
-          <li
-            v-for="p in projectsStore.projects"
-            :key="p.id"
-            class="pj-picker-item"
-            :class="{ active: p.id === projectsStore.selectedId }"
-            @click="((projectsStore.select(p.id)), (projectPickerOpen = false))"
-          >
-            <span>{{ p.displayName }}</span>
-            <span class="pj-picker-desc">{{ p.description }}</span>
-          </li>
-        </ul>
-        <p v-if="projectsStore.projects.length === 0" class="pj-picker-empty">
-          {{ t("project.empty") }}
-        </p>
-        <button class="pj-picker-new" @click="((projectPickerOpen = false), switchWorkspace('projects'))">
-          {{ t("project.gotoBoard") }}
-        </button>
+        <ProjectManager />
       </div>
     </div>
 
@@ -390,60 +385,6 @@ onBeforeUnmount(() => {
 }
 .repo-panel-close:hover {
   color: var(--text);
-}
-.pj-picker {
-  list-style: none;
-  margin: 0;
-  padding: 8px;
-  max-height: 50vh;
-  overflow-y: auto;
-}
-.pj-picker-item {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  padding: 7px 10px;
-  border-radius: 6px;
-  font-size: 12px;
-  color: var(--text);
-  cursor: pointer;
-}
-.pj-picker-item:hover {
-  background: var(--bg-hover);
-}
-.pj-picker-item.active {
-  background: var(--bg-selected);
-  color: var(--accent);
-  font-weight: 600;
-}
-.pj-picker-desc {
-  font-size: 11px;
-  color: var(--text-dim);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.pj-picker-empty {
-  text-align: center;
-  color: var(--text-dim);
-  font-size: 12px;
-  padding: 12px 0;
-}
-.pj-picker-new {
-  width: calc(100% - 16px);
-  margin: 0 8px 10px;
-  border: 1px dashed var(--border);
-  background: transparent;
-  color: var(--text-dim);
-  font-size: 12px;
-  height: 28px;
-  border-radius: 6px;
-  cursor: pointer;
-}
-.pj-picker-new:hover {
-  border-color: var(--accent);
-  color: var(--accent);
 }
 </style>
 <style scoped>
