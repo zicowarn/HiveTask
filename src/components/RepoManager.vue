@@ -146,13 +146,6 @@ async function remove(entry: RepoEntry) {
       >
         {{ tab.label }} <span class="tab-count">{{ tab.count }}</span>
       </button>
-      <span class="tabs-spacer"></span>
-      <button class="add-btn" @click="pickLocal">{{ t("repo.addLocal") }}</button>
-      <button
-        class="add-btn"
-        :class="{ active: remoteFormOpen }"
-        @click="remoteFormOpen = !remoteFormOpen"
-      >{{ t("repo.addRemote") }}</button>
     </div>
 
     <div v-if="remoteFormOpen" class="remote-form">
@@ -197,6 +190,15 @@ async function remove(entry: RepoEntry) {
         >✕</button>
       </li>
     </ul>
+
+    <div class="add-area">
+      <button class="panel-add" @click="pickLocal">{{ t("repo.addLocal") }}</button>
+      <button
+        class="panel-add"
+        :class="{ active: remoteFormOpen }"
+        @click="remoteFormOpen = !remoteFormOpen"
+      >{{ t("repo.addRemote") }}</button>
+    </div>
   </div>
 </template>
 
@@ -232,9 +234,6 @@ async function remove(entry: RepoEntry) {
   font-size: 10px;
   opacity: 0.75;
 }
-.tabs-spacer {
-  flex: 1;
-}
 .add-btn {
   border: 1px solid var(--border);
   background: var(--bg-app);
@@ -259,6 +258,29 @@ async function remove(entry: RepoEntry) {
   align-items: center;
   gap: 6px;
   padding: 6px 0;
+}
+/* 添加区：列表底部虚线双钮，与来源连接对话框「+ 添加连接」同配方——
+   动作与分类分离，标签行只做浏览。 */
+.add-area {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: 8px;
+}
+.panel-add {
+  width: 100%;
+  border: 1px dashed var(--border);
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 12px;
+  height: 28px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.panel-add:hover,
+.panel-add.active {
+  border-color: var(--accent);
+  color: var(--accent);
 }
 .remote-platform {
   display: flex;
