@@ -239,10 +239,9 @@ async function submitCreate() {
         <button
           v-if="bindTabConnection"
           class="pjmgr-bind-refresh"
-          :title="t('repo.refreshOnline')"
           :disabled="onlineLoading"
           @click="toggleOnline"
-        >{{ onlineLoading ? "…" : "⟳" }}</button>
+        >{{ onlineLoading ? t("list.loading") : t("common.refresh") }}</button>
       </div>
 
       <div v-if="tabRepoChoices.length === 0 && !onlineOpen" class="pjmgr-bind-empty">
@@ -429,10 +428,10 @@ async function submitCreate() {
 .pjmgr-bind-refresh {
   border: 1px solid var(--border);
   background: var(--bg-panel);
-  color: var(--text-dim);
-  font-size: 13px;
-  width: 22px;
+  color: var(--text);
+  font-size: 11px;
   height: 20px;
+  padding: 0 8px;
   border-radius: 5px;
   cursor: pointer;
 }

@@ -217,10 +217,9 @@ async function remove(entry: RepoEntry) {
         v-if="activeTab !== 'local'"
         class="online-toggle"
         :class="{ open: onlineOpen }"
-        :title="t('repo.refreshOnline')"
         :disabled="onlineLoading"
         @click="toggleOnline"
-      >{{ onlineLoading ? "…" : "⟳" }}</button>
+      >{{ onlineLoading ? t("list.loading") : t("common.refresh") }}</button>
     </div>
 
     <div v-if="onlineOpen && activeTab !== 'local'" class="online-panel">
@@ -343,12 +342,13 @@ async function remove(entry: RepoEntry) {
 .online-toggle {
   border: 1px solid var(--border);
   background: var(--bg-panel);
-  color: var(--text-dim);
-  font-size: 13px;
-  width: 24px;
+  color: var(--text);
+  font-size: 12px;
   height: 22px;
+  padding: 0 10px;
   border-radius: 5px;
   cursor: pointer;
+  white-space: nowrap;
 }
 .online-toggle:hover,
 .online-toggle.open {
