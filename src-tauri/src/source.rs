@@ -157,24 +157,36 @@ fn ref_from_local(path: &str) -> Result<RepoRef> {
     ref_from_url(&url, Some(std::path::PathBuf::from(path)))
 }
 
-/// URL → (host, owner/repo 路径)。host 保留端口（自建实例常见）。
+/// URL → (host, owner/repo 路径)。URL 带端口时 host 保留端口（自建实例常见）。
 pub fn split_host_slug(url: &str) -> Option<(String, String)> {
     let s = url
         .strip_prefix("https://")
         .or_else(|| url.strip_prefix("http://"))
         .unwrap_or(url);
     let s = s.split_once('@').map(|(_, rest)| rest).unwrap_or(s);
-    if s.contains('/') {
-        // URL 形态：host(/port)/owner/repo
-        let mut it = s.splitn(2, '/');
-        let host = it.next()?.to_lowercase();
-        let slug = it.next()?.trim_end_matches('/').trim_end_matches(".git").to_string();
-        Some((host, slug))
-    } else {
-        // scp 形态：host:owner/repo
-        let (host, rest) = s.split_once(':')?;
-        Some((host.to_lowercase(), rest.trim_end_matches(".git").to_string()))
+    // scp 形态（host:owner/repo）：冒号在首个斜杠前，且冒号后不是纯数字端口
+    // （host:3000/o/r 是带端口的 URL，仍走 URL 分支）。
+    if let Some(colon) = s.find(':') {
+        if s.find('/').map_or(true, |slash| colon < slash) {
+            let after_colon = &s[colon + 1..];
+            let port_like = after_colon
+                .split('/')
+                .next()
+                .map_or(false, |p| !p.is_empty() && p.chars().all(|c| c.is_ascii_digit()));
+            if !port_like {
+                return Some((
+                    s[..colon].to_lowercase(),
+                    after_colon.trim_end_matches(".git").to_string(),
+                ));
+            }
+        }
     }
+    // URL 形态：host(/port)/owner/repo
+    let (host, slug) = s.split_once('/')?;
+    Some((
+        host.to_lowercase(),
+        slug.trim_end_matches('/').trim_end_matches(".git").to_string(),
+    ))
 }
 
 /// 全项目唯一的来源实现选择：**按连接的 platform 路由**（用户添加连接时
@@ -229,6 +241,11 @@ mod tests {
         assert_eq!(
             split_host_slug("git@github.com:o/r.git"),
             Some(("github.com".into(), "o/r".into()))
+        );
+        // URL 带端口：host 保留端口，不得误判为 scp
+        assert_eq!(
+            split_host_slug("https://gitea.example.com:3000/o/r.git"),
+            Some(("gitea.example.com:3000".into(), "o/r".into()))
         );
         // 自建 host 原样返回（未来交 API 指纹探测 / 设置兜底）
         assert_eq!(
