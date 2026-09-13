@@ -73,6 +73,30 @@ fn log_line(level: String, message: String) {
     }
 }
 
+/// Device Flow 第一步：申请设备码与用户码。
+#[tauri::command]
+fn gh_device_flow_start() -> Result<gh::DeviceFlowStart, String> {
+    gh::device_flow_start().map_err(|e| e.to_string())
+}
+
+/// Device Flow 第二步：阻塞轮询令牌（超时 180s，前端挂等待态即可）。
+#[tauri::command]
+fn gh_device_flow_poll(device_code: String, interval_secs: u64) -> Result<String, String> {
+    gh::device_flow_poll(&device_code, interval_secs).map_err(|e| e.to_string())
+}
+
+/// token 喂入 gh 凭据库并校验登录态，返回登录名。
+#[tauri::command]
+fn gh_auth_with_token(token: String) -> Result<String, String> {
+    gh::auth_with_token(&token).map_err(|e| e.to_string())
+}
+
+/// 当前 gh 登录名（未登录 → null）。
+#[tauri::command]
+fn gh_auth_user() -> Option<String> {
+    gh::auth_user()
+}
+
 #[tauri::command]
 fn health_check() -> HealthInfo {
     HealthInfo {
@@ -436,6 +460,10 @@ pub fn run() {
         .plugin(tauri_plugin_store::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
             health_check,
+            gh_device_flow_start,
+            gh_device_flow_poll,
+            gh_auth_with_token,
+            gh_auth_user,
             pick_repo,
             repo_info,
             refresh_issues,

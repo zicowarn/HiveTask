@@ -6,17 +6,45 @@
  * owning modules (i18n / theme / settings store); there is no separate
  * save step. 来源连接管理在独立对话框（SourceConnectionsDialog）。
  */
-import { ref } from "vue";
+import { computed, onMounted, ref } from "vue";
 import { useI18n, type LocaleChoice } from "../../i18n";
 import { useTheme, type ThemeChoice } from "../../theme";
 import { useSettingsStore } from "../../stores/settings";
 import SourceConnectionsDialog from "../../components/SourceConnectionsDialog.vue";
+import GitHubAuthDialog from "../../components/GitHubAuthDialog.vue";
+import { api, isTauri } from "../../api";
 
 const { t, localeChoice, setLocale } = useI18n();
 const { theme, setTheme } = useTheme();
 const settings = useSettingsStore();
 
 const connectionsOpen = ref(false);
+
+// ---- GitHub 账户（Device Flow 登录；凭据归 gh 托管）----
+const ghLogin = ref<string | null>(null);
+const ghAuthOpen = ref(false);
+const ghLoginResolved = ref(false);
+const ghLoginLabel = computed(() => {
+  if (ghLoginResolved.value && ghLogin.value) return ghLogin.value;
+  if (ghLoginResolved.value) return t("githubAuth.notLoggedIn");
+  return t("list.loading");
+});
+async function refreshGhLogin() {
+  if (!isTauri()) return;
+  try {
+    ghLogin.value = await api.ghAuthUser();
+  } catch {
+    ghLogin.value = null;
+  } finally {
+    ghLoginResolved.value = true;
+  }
+}
+function onAuthSuccess(login: string) {
+  ghLogin.value = login;
+}
+onMounted(() => {
+  void refreshGhLogin();
+});
 
 const themeChoices: { value: ThemeChoice; labelKey: "settings.themeDark" | "settings.themeLight" | "settings.themeSystem" }[] = [
   { value: "dark", labelKey: "settings.themeDark" },
@@ -89,6 +117,16 @@ function onThemeChange(event: Event) {
 
     <div class="setting-row">
       <div class="setting-text">
+        <span class="setting-name">{{ t("githubAuth.row") }}</span>
+        <span class="setting-desc">{{ ghLoginLabel }}</span>
+      </div>
+      <button class="setting-btn" @click="((ghAuthOpen = true))">
+        {{ t("githubAuth.loginBtn") }}
+      </button>
+    </div>
+
+    <div class="setting-row">
+      <div class="setting-text">
         <span class="setting-name">{{ t("settings.terminalShell") }}</span>
         <span class="setting-desc">{{ t("settings.terminalShellDesc") }}</span>
       </div>
@@ -113,6 +151,8 @@ function onThemeChange(event: Event) {
       :open="connectionsOpen"
       @close="connectionsOpen = false"
     />
+
+    <GitHubAuthDialog :open="ghAuthOpen" @close="((ghAuthOpen = false), refreshGhLogin())" @success="onAuthSuccess" />
   </div>
 </template>
 

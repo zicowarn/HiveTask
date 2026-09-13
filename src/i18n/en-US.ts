@@ -179,6 +179,19 @@ export const enUS: Record<MessageKey, string> = {
   "branchReview.files": "Files ({n})",
   "branchReview.noFiles": "No file changes",
   "branchReview.truncated": "patch truncated",
+  "githubAuth.row": "GitHub account",
+  "githubAuth.notLoggedIn": "Not signed in (credentials stay with gh)",
+  "githubAuth.loginBtn": "Sign in to GitHub",
+  "githubAuth.title": "Sign in to GitHub",
+  "githubAuth.desc": "Copy the code below, open the GitHub authorization page, paste it and approve — this window finishes the sign-in automatically.",
+  "githubAuth.copy": "Copy",
+  "githubAuth.copied": "Code copied",
+  "githubAuth.openPage": "Open GitHub authorization page",
+  "githubAuth.waiting": "Waiting for authorization… continues automatically once approved",
+  "githubAuth.successAs": "Signed in as {name}",
+  "githubAuth.successToast": "GitHub signed in: {name}",
+  "githubAuth.failed": "Sign-in failed",
+  "githubAuth.retry": "Retry",
 
 
   // Issue/PR state (filter tabs + detail badges)

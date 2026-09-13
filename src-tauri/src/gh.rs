@@ -763,3 +763,130 @@ mod tests {
         assert!(p.review_decision.is_none());
     }
 }
+
+// ---- GitHub OAuth Device Flow（分发期认证 GUI；凭据仍归 gh 托管）----
+// 知识库《从只读到读写》L20 定案：自实现 Device Flow 拿 token，
+// `gh auth login --with-token` 喂入 gh 自己的凭据库，本应用不存。
+// client_id 用 cli/cli 的公开 id（喂入 gh 后其签发的凭据对 gh 全兼容）。
+
+const GH_DEVICE_CLIENT_ID: &str = "178c6fc778ccc68e1d6a";
+const GH_DEVICE_SCOPES: &str = "repo,read:org,gist,workflow";
+const GH_DEVICE_TIMEOUT_SECS: u64 = 180;
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeviceFlowStart {
+    pub user_code: String,
+    pub verification_uri: String,
+    pub device_code: String,
+    pub interval_secs: u64,
+}
+
+fn device_http_client() -> Result<reqwest::blocking::Client> {
+    reqwest::blocking::Client::builder()
+        .timeout(std::time::Duration::from_secs(20))
+        .user_agent("HiveTask")
+        .build()
+        .context("构建 HTTP 客户端失败")
+}
+
+/// 第一步：申请设备码 + 用户码。
+pub fn device_flow_start() -> Result<DeviceFlowStart> {
+    let client = device_http_client()?;
+    let resp: Value = client
+        .post("https://github.com/login/device/code")
+        .header("Accept", "application/json")
+        .form(&[
+            ("client_id", GH_DEVICE_CLIENT_ID),
+            ("scope", GH_DEVICE_SCOPES),
+        ])
+        .send()?
+        .error_for_status()?
+        .json()?;
+    Ok(DeviceFlowStart {
+        user_code: resp.get("user_code").and_then(Value::as_str).ok_or_else(|| anyhow!("GitHub 响应缺少 user_code"))?.to_string(),
+        verification_uri: resp.get("verification_uri").and_then(Value::as_str).unwrap_or("https://github.com/login/device").to_string(),
+        device_code: resp.get("device_code").and_then(Value::as_str).ok_or_else(|| anyhow!("GitHub 响应缺少 device_code"))?.to_string(),
+        interval_secs: resp.get("interval").and_then(Value::as_u64).unwrap_or(5).max(3),
+    })
+}
+
+/// 第二步：阻塞轮询令牌（authorization_pending 静默重试、slow_down +5s、
+/// 其余 error 诚实失败；总超时后明确报错）。
+pub fn device_flow_poll(device_code: &str, interval_secs: u64) -> Result<String> {
+    let client = device_http_client()?;
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(GH_DEVICE_TIMEOUT_SECS);
+    let mut interval = interval_secs.max(1);
+    loop {
+        std::thread::sleep(std::time::Duration::from_secs(interval));
+        if std::time::Instant::now() > deadline {
+            return Err(anyhow!("授权等待超时，请重新发起登录"));
+        }
+        let resp: Value = client
+            .post("https://github.com/login/oauth/access_token")
+            .header("Accept", "application/json")
+            .form(&[
+                ("client_id", GH_DEVICE_CLIENT_ID),
+                ("device_code", device_code),
+                (
+                    "grant_type",
+                    "urn:ietf:params:oauth:grant-type:device_code",
+                ),
+            ])
+            .send()?
+            .error_for_status()?
+            .json()?;
+        if let Some(token) = resp.get("access_token").and_then(Value::as_str) {
+            return Ok(token.to_string());
+        }
+        match resp.get("error").and_then(Value::as_str) {
+            Some("authorization_pending") => {}
+            Some("slow_down") => interval += 5,
+            Some(other) => return Err(anyhow!("GitHub 授权失败: {other}")),
+            None => return Err(anyhow!("GitHub 授权响应异常")),
+        }
+    }
+}
+
+/// 把 token 喂进 gh 自己的凭据库（`gh auth login --with-token`），并
+/// 以 `gh api user` 校验登录态；凭据后续由 gh 托管，本应用不经手。
+pub fn auth_with_token(token: &str) -> Result<String> {
+    let gh = find_gh().ok_or_else(|| anyhow!("找不到 gh CLI"))?;
+    use std::io::Write as _;
+    let mut child = Command::new(gh)
+        .args(["auth", "login", "--with-token"])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .context("启动 gh 失败")?;
+    child
+        .stdin
+        .take()
+        .ok_or_else(|| anyhow!("无法写入 gh 标准输入"))?
+        .write_all(token.as_bytes())
+        .context("写入 token 失败")?;
+    let out = child.wait_with_output().context("等待 gh 退出失败")?;
+    if !out.status.success() {
+        return Err(anyhow!(
+            "{}",
+            String::from_utf8_lossy(&out.stderr).trim().to_string()
+        ));
+    }
+    auth_user().ok_or_else(|| anyhow!("token 已写入但登录校验失败"))
+}
+
+/// 当前 gh 登录名（未登录 / gh 缺失 → None）。
+pub fn auth_user() -> Option<String> {
+    let gh = find_gh()?;
+    let output = Command::new(gh)
+        .args(["api", "user", "--jq", ".login"])
+        .output()
+        .ok()?;
+    if output.status.success() {
+        let login = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        if login.is_empty() { None } else { Some(login) }
+    } else {
+        None
+    }
+}

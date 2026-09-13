@@ -245,6 +245,16 @@ export const api = {
   remoteRepoList: (platform: string, host: string) =>
     invoke<RemoteRepoInfo[]>("remote_repo_list", { platform, host }),
 
+  // ---- GitHub 认证（Device Flow；凭据归 gh 托管）----
+  ghDeviceFlowStart: () =>
+    invoke<{ userCode: string; verificationUri: string; deviceCode: string; intervalSecs: number }>(
+      "gh_device_flow_start",
+    ),
+  ghDeviceFlowPoll: (deviceCode: string, intervalSecs: number) =>
+    invoke<string>("gh_device_flow_poll", { deviceCode, intervalSecs }),
+  ghAuthWithToken: (token: string) => invoke<string>("gh_auth_with_token", { token }),
+  ghAuthUser: () => invoke<string | null>("gh_auth_user"),
+
   // ---- 本地分支 review（PR 工作区本地形态）----
   branchReviewList: (repoPath: string, base: string) =>
     invoke<ReviewBranch[]>("branch_review_list", { repoPath, base }),

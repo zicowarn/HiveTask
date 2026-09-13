@@ -180,6 +180,19 @@ export const zhCN = {
   "branchReview.files": "文件（{n}）",
   "branchReview.noFiles": "无文件变更",
   "branchReview.truncated": "patch 过长已截断",
+  "githubAuth.row": "GitHub 账户",
+  "githubAuth.notLoggedIn": "未登录（登录后 gh 托管凭据）",
+  "githubAuth.loginBtn": "登录 GitHub",
+  "githubAuth.title": "登录 GitHub",
+  "githubAuth.desc": "复制下方用户码，打开 GitHub 授权页粘贴并授权，本窗口会自动完成登录。",
+  "githubAuth.copy": "复制",
+  "githubAuth.copied": "用户码已复制",
+  "githubAuth.openPage": "打开 GitHub 授权页",
+  "githubAuth.waiting": "等待授权中……授权完成后自动继续",
+  "githubAuth.successAs": "已登录为 {name}",
+  "githubAuth.successToast": "GitHub 已登录：{name}",
+  "githubAuth.failed": "登录失败",
+  "githubAuth.retry": "重试",
 
 
   // Issue/PR state (filter tabs + detail badges)
