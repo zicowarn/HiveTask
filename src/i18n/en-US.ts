@@ -18,6 +18,7 @@ export const enUS: Record<MessageKey, string> = {
   "repo.addRemote": "Remote URL…",
   "repo.remoteLater": "Register a remote-only repo by URL",
   "repo.remotePlaceholder": "https://gitee.com/owner/repo",
+  "repo.remotePlatform": "Platform",
   "repo.remoteOnly": "Remote-only",
   "repo.tabEmpty": "No repositories registered for this source",
   "repo.current": "Current",

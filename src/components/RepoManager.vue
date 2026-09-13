@@ -4,7 +4,7 @@
  * 支持删除（只删登记指针）与新增（本地文件夹；仅远端 URL 为阶段 B）。
  * 数据来自 app.db 登记表（appdb.rs），选择仓库仍走 repo.setCurrent。
  */
-import { computed, onMounted, ref } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 import { api, isTauri } from "../api";
 import { useI18n } from "../i18n";
 import { useRepoStore } from "../stores/repo";
@@ -31,6 +31,20 @@ const remoteUrl = ref("");
 const loading = ref(false);
 const activeTab = ref<string>("local");
 
+/** 远端 URL 登记的平台——用户显式选择（知识库：运行时只认连接类型，
+ * 自建 Gitea 域名等猜测不了的来源全靠它）。 */
+const REMOTE_PLATFORMS: { value: "github" | "gitee" | "gitea"; labelKey: "repoTab.github" | "repoTab.gitee" | "repoTab.gitea" }[] = [
+  { value: "github", labelKey: "repoTab.github" },
+  { value: "gitee", labelKey: "repoTab.gitee" },
+  { value: "gitea", labelKey: "repoTab.gitea" },
+];
+const remotePlatform = ref<"github" | "gitee" | "gitea">("github");
+
+// 在平台 Tab 下打开添加表单 → 预填该平台；本地 Tab 维持上次选择。
+watch([activeTab, remoteFormOpen], ([tab, open]) => {
+  if (open && tab !== "local") remotePlatform.value = tab as typeof remotePlatform.value;
+});
+
 const TAB_ORDER: { key: string; labelKey: "repoTab.github" | "repoTab.gitee" | "repoTab.gitea" | "repoTab.local" }[] = [
   { key: "github", labelKey: "repoTab.github" },
   { key: "gitee", labelKey: "repoTab.gitee" },
@@ -38,18 +52,10 @@ const TAB_ORDER: { key: string; labelKey: "repoTab.github" | "repoTab.gitee" | "
   { key: "local", labelKey: "repoTab.local" },
 ];
 
-/** 仓库 → 平台 Tab（connection 派生优先，否则 host 推断，无 remote → local）。 */
+/** 仓库 → 平台 Tab：只认登记连接的 platform（显式/auto），无连接 → 本地。
+ * 前端不做域名猜测（自建域名猜不出，猜错更糟——知识库连接篇定案）。 */
 function platformOf(entry: RepoEntry): string {
-  if (entry.platform) return entry.platform;
-  const url = entry.remoteUrl;
-  if (url) {
-    const s = url.replace(/^https?:\/\//, "").replace(/^[^@]*@/, "");
-    const host = (s.split("/")[0] ?? "").split(":")[0].toLowerCase();
-    if (host.includes("github")) return "github";
-    if (host === "gitee.com" || host.endsWith(".gitee.com")) return "gitee";
-    if (host.includes("gitea")) return "gitea";
-  }
-  return "local";
+  return entry.platform ?? "local";
 }
 
 const tabs = computed(() => {
@@ -100,10 +106,11 @@ async function pickLocal() {
 async function addRemote() {
   const url = remoteUrl.value.trim();
   if (!url) return;
-  await api.repoRegisterRemote(url);
+  await api.repoRegisterRemote(url, remotePlatform.value);
   remoteUrl.value = "";
   remoteFormOpen.value = false;
   await load();
+  activeTab.value = remotePlatform.value;
   // 仅远端登记的标识就是 URL 本身——切换过去（Issue/PR 走 API）。
   emit("select", url);
 }
@@ -136,6 +143,14 @@ async function remove(entry: RepoEntry) {
     </div>
 
     <div v-if="remoteFormOpen" class="remote-form">
+      <label class="remote-platform">
+        <span class="remote-platform-label">{{ t("repo.remotePlatform") }}</span>
+        <select v-model="remotePlatform" class="remote-select">
+          <option v-for="p in REMOTE_PLATFORMS" :key="p.value" :value="p.value">
+            {{ t(p.labelKey) }}
+          </option>
+        </select>
+      </label>
       <input
         v-model.trim="remoteUrl"
         class="remote-input"
@@ -228,8 +243,41 @@ async function remove(entry: RepoEntry) {
 }
 .remote-form {
   display: flex;
+  align-items: center;
   gap: 6px;
   padding: 6px 0;
+}
+.remote-platform {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+}
+.remote-platform-label {
+  font-size: 11px;
+  color: var(--text-dim);
+}
+/* 下拉与输入框同款扁平样式；select 必须 appearance:none，
+   否则 macOS 画原生渐变/立体外观（此前踩过）。 */
+.remote-select {
+  appearance: none;
+  -webkit-appearance: none;
+  box-sizing: border-box;
+  font-size: 12px;
+  color: var(--text);
+  background-color: var(--bg-app);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  height: 24px;
+  padding: 0 22px 0 8px;
+  outline: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 10 10'%3E%3Cpath d='M2 3.5L5 6.5L8 3.5' fill='none' stroke='%239aa0a8' stroke-width='1.4' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 7px center;
+  background-size: 8px;
+}
+.remote-select:focus {
+  border-color: var(--accent);
 }
 .remote-input {
   flex: 1;

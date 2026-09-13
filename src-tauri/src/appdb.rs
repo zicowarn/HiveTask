@@ -137,8 +137,23 @@ pub fn platform_for_host(host: &str) -> Option<String> {
     }
 }
 
-fn ensure_connection_for_host(conn: &Connection, host: &str) -> anyhow::Result<Option<String>> {
-    let Some(platform) = platform_for_host(host) else { return Ok(None) };
+/// host → 连接（找/建）。explicit_platform 为 Some 时按 (显式平台, host)
+/// 走 user_set 路径——URL 登记时用户自选平台，自建域名（如公司 Gitea）
+/// 靠它可用；None 时按 platform_for_host 推断，仅已知域名 auto 建连接
+/// （未知 → Ok(None)，不猜）。路由后续只认连接的 platform（知识库
+/// 《来源连接与多账户》：运行时只认连接类型，猜测仅作预填）。
+fn ensure_connection_for_host(
+    conn: &Connection,
+    host: &str,
+    explicit_platform: Option<&str>,
+) -> anyhow::Result<Option<String>> {
+    let Some(platform) = explicit_platform
+        .map(str::to_string)
+        .or_else(|| platform_for_host(host))
+    else {
+        return Ok(None);
+    };
+    let state = if explicit_platform.is_some() { "user_set" } else { "auto" };
     if let Some(id) = conn
         .query_row(
             "SELECT id FROM connections WHERE platform = ?1 AND host = ?2",
@@ -152,8 +167,8 @@ fn ensure_connection_for_host(conn: &Connection, host: &str) -> anyhow::Result<O
     let id = uuid();
     conn.execute(
         "INSERT INTO connections (id, platform, host, label, source_state, created_at)
-         VALUES (?1, ?2, ?3, ?4, 'auto', ?5)",
-        (&id, platform.as_str(), host, host, now()),
+         VALUES (?1, ?2, ?3, ?3, ?4, ?5)",
+        (&id, platform.as_str(), host, state, now()),
     )?;
     Ok(Some(id))
 }
@@ -258,46 +273,48 @@ fn repo_list_in(conn: &Connection) -> Result<Vec<RepoEntry>, String> {
     rows.collect::<std::result::Result<Vec<_>, _>>().map_err(|e| e.to_string())
 }
 
-/// 按 path upsert（打开即登记）：读 origin、解析 host、自动建/关联连接、
-/// 刷新 last_opened_at。幂等——切换仓库时重复调用即视为"打开"。
 #[tauri::command]
 pub fn repo_list() -> Result<Vec<RepoEntry>, String> {
     let conn = open().map_err(|e| e.to_string())?;
     repo_list_in(&conn)
 }
 
-#[tauri::command]
-pub fn repo_register(path: String) -> Result<RepoEntry, String> {
-    let conn = open().map_err(|e| e.to_string())?;
-    let repo = PathBuf::from(&path);
-    let remote_url = crate::gh::git_origin(&repo);
-    let host = remote_url.as_deref().and_then(|u| {
-        let s = u
-            .strip_prefix("https://")
-            .or_else(|| u.strip_prefix("http://"))
-            .unwrap_or(u);
-        let s = s.split_once('@').map(|(_, rest)| rest).unwrap_or(s);
-        s.split('/').next()?.split(':').next()?.to_lowercase().into()
-    });
+/// 打开即登记核心：读 origin、解析 host、自动建/关联连接、按 path upsert。
+/// 幂等——切换仓库时重复调用即视为"打开"。重开时若行尚无连接则补挂
+/// （COALESCE：先建连接再重开仓库即自动归类），已有连接绝不覆盖。
+fn repo_register_in(conn: &Connection, path: &str) -> Result<RepoEntry, String> {
+    let remote_url = crate::gh::git_origin(std::path::Path::new(path));
+    // 与仅远端登记共用 split_host_slug（顺带获得 scp 形态支持）。
+    let host = remote_url
+        .as_deref()
+        .and_then(|u| crate::source::split_host_slug(u).map(|(h, _)| h));
     let connection_id = match host.as_deref() {
-        Some(h) => ensure_connection_for_host(&conn, h).map_err(|e| e.to_string())?,
+        Some(h) => ensure_connection_for_host(conn, h, None).map_err(|e| e.to_string())?,
         None => None,
     };
-    let display = path.split('/').filter(|p| !p.is_empty()).last().unwrap_or(&path).to_string();
+    let display = path.split('/').filter(|p| !p.is_empty()).last().unwrap_or(path).to_string();
 
     let existing: Option<String> = conn
-        .query_row("SELECT id FROM repos WHERE path = ?1", (&path,), |row| row.get(0))
+        .query_row("SELECT id FROM repos WHERE path = ?1", (path,), |row| row.get(0))
         .ok();
     let id = existing.unwrap_or_else(uuid);
     conn.execute(
         "INSERT INTO repos (id, path, display_name, connection_id, created_at, last_opened_at)
          VALUES (?1, ?2, ?3, ?4, ?5, ?5)
-         ON CONFLICT(path) DO UPDATE SET last_opened_at=excluded.last_opened_at",
-        (&id, &path, &display, &connection_id, now()),
+         ON CONFLICT(path) DO UPDATE SET
+            connection_id=COALESCE(repos.connection_id, excluded.connection_id),
+            last_opened_at=excluded.last_opened_at",
+        (&id, path, &display, &connection_id, now()),
     )
     .map_err(|e| e.to_string())?;
 
-    repo_list_in(&conn)?.into_iter().find(|r| r.path.as_deref() == Some(path.as_str())).ok_or_else(|| "登记后未找到条目".to_string())
+    repo_list_in(conn)?.into_iter().find(|r| r.path.as_deref() == Some(path)).ok_or_else(|| "登记后未找到条目".to_string())
+}
+
+#[tauri::command]
+pub fn repo_register(path: String) -> Result<RepoEntry, String> {
+    let conn = open().map_err(|e| e.to_string())?;
+    repo_register_in(&conn, &path)
 }
 
 /// 解析 target：按 path 命中 → (remote_url, Some(path))；按 remote_url
@@ -323,23 +340,34 @@ pub fn repo_find_by_target(target: &str) -> Option<(String, Option<PathBuf>, Opt
     Some((remote_url?, path.map(PathBuf::from), platform))
 }
 
-/// 仅远端登记：URL 解析 host/owner/repo，自动建连接，path 为 NULL。
-#[tauri::command]
-pub fn repo_register_remote(url: String) -> Result<RepoEntry, String> {
-    let conn = open().map_err(|e| e.to_string())?;
-    let (host, slug) = crate::source::split_host_slug(&url)
+/// 仅远端登记核心：URL 解析 host/owner/repo，按用户显式选择的 platform
+/// 找/建连接，path 为 NULL。platform 是路由开关，必须来自前端下拉
+/// （GitHub/Gitee/Gitea），不接受后端猜测。
+fn repo_register_remote_in(conn: &Connection, url: &str, platform: &str) -> Result<RepoEntry, String> {
+    match platform {
+        "github" | "gitea" | "gitee" => {}
+        other => return Err(format!("未知平台: {other}")),
+    }
+    let (host, slug) = crate::source::split_host_slug(url)
         .ok_or_else(|| format!("无法从 URL 解析 host: {url}"))?;
     let connection_id =
-        ensure_connection_for_host(&conn, &host).map_err(|e| e.to_string())?;
+        ensure_connection_for_host(conn, &host, Some(platform)).map_err(|e| e.to_string())?;
     let display = slug.split('/').last().unwrap_or(&slug).to_string();
     let id = uuid();
     conn.execute(
         "INSERT INTO repos (id, remote_url, display_name, connection_id, created_at, last_opened_at)
          VALUES (?1, ?2, ?3, ?4, ?5, ?5)",
-        (&id, &url, &display, &connection_id, now()),
+        (&id, url, &display, &connection_id, now()),
     )
     .map_err(|e| e.to_string())?;
-    repo_list_in(&conn)?.into_iter().find(|r| r.id == id).ok_or_else(|| "登记后未找到条目".to_string())
+    repo_list_in(conn)?.into_iter().find(|r| r.id == id).ok_or_else(|| "登记后未找到条目".to_string())
+}
+
+/// 仅远端登记：URL 解析 host/owner/repo，自动建连接，path 为 NULL。
+#[tauri::command]
+pub fn repo_register_remote(url: String, platform: String) -> Result<RepoEntry, String> {
+    let conn = open().map_err(|e| e.to_string())?;
+    repo_register_remote_in(&conn, &url, &platform)
 }
 
 #[tauri::command]
@@ -347,4 +375,97 @@ pub fn repo_delete(id: String) -> Result<(), String> {
     let conn = open().map_err(|e| e.to_string())?;
     conn.execute("DELETE FROM repos WHERE id = ?1", (&id,)).map_err(|e| e.to_string())?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 内存库 + 迁移 + 播种，不经 open()（那会碰真实 app data 目录）。
+    fn test_conn() -> Connection {
+        let conn = Connection::open_in_memory().unwrap();
+        migrate(&conn).unwrap();
+        seed_github_connection(&conn);
+        conn
+    }
+
+    /// 最小 git 仓库：init + origin（git_origin 只读 config，无需提交）。
+    fn make_git_repo(dir: &std::path::Path, origin: &str) {
+        std::fs::create_dir_all(dir).unwrap();
+        let run = |args: &[&str]| {
+            let out = std::process::Command::new("git")
+                .args(args)
+                .current_dir(dir)
+                .output()
+                .expect("git 可执行");
+            assert!(out.status.success(), "git {args:?} 失败");
+        };
+        run(&["init", "-q"]);
+        run(&["remote", "add", "origin", origin]);
+    }
+
+    #[test]
+    fn remote_register_with_explicit_platform_works_for_custom_domain() {
+        let conn = test_conn();
+        let entry = repo_register_remote_in(
+            &conn,
+            "https://git.mycompany.com/team/repo.git",
+            "gitea",
+        )
+        .unwrap();
+        // 自建域名靠显式平台落 gitea，连接记 user_set
+        assert_eq!(entry.platform.as_deref(), Some("gitea"));
+        assert!(entry.connection_id.is_some());
+        let state: String = conn
+            .query_row(
+                "SELECT source_state FROM connections WHERE platform='gitea' AND host='git.mycompany.com'",
+                [],
+                |r| r.get::<_, String>(0),
+            )
+            .unwrap();
+        assert_eq!(state, "user_set");
+    }
+
+    #[test]
+    fn reopen_links_connection_without_overwriting_existing() {
+        let conn = test_conn();
+        // 已有连接：重开（路径已不存在，origin 读取失败）不清空连接
+        conn.execute(
+            "INSERT INTO repos (id, path, display_name, connection_id, created_at, last_opened_at)
+             VALUES ('r1', '/no/such/dir', 'r', 'conn-github', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+            [],
+        )
+        .unwrap();
+        let entry = repo_register_in(&conn, "/no/such/dir").unwrap();
+        assert_eq!(entry.connection_id.as_deref(), Some("conn-github"));
+        assert_eq!(entry.platform.as_deref(), Some("github"));
+
+        // 尚无连接：重开时 origin host 精确匹配 → 补挂（先建连接再重开 = 自动归类）
+        let dir = std::env::temp_dir().join(format!("hivetask-appdb-reopen-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        make_git_repo(&dir, "https://gitee.com/user/demo.git");
+        conn.execute(
+            "INSERT INTO repos (id, path, display_name, connection_id, created_at, last_opened_at)
+             VALUES ('r2', ?1, 'd', NULL, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+            [&dir.to_string_lossy().to_string()],
+        )
+        .unwrap();
+        let entry = repo_register_in(&conn, &dir.to_string_lossy()).unwrap();
+        assert!(entry.connection_id.is_some());
+        assert_eq!(entry.platform.as_deref(), Some("gitee"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn unknown_host_gets_no_connection() {
+        let conn = test_conn();
+        let dir = std::env::temp_dir().join(format!("hivetask-appdb-unknown-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        make_git_repo(&dir, "https://git.corp.cn/x/y.git");
+        let entry = repo_register_in(&conn, &dir.to_string_lossy()).unwrap();
+        // 未知域名不建连接不猜平台——前端按「无连接 → 本地」分组
+        assert!(entry.connection_id.is_none());
+        assert!(entry.platform.is_none());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }
