@@ -12,6 +12,7 @@ import { computed } from "vue";
 import { storeToRefs } from "pinia";
 import IssueRow from "../IssueRow.vue";
 import { useIssuesStore } from "../../stores/issues";
+import { useRepoStore } from "../../stores/repo";
 import { useI18n } from "../../i18n";
 import type { Issue } from "../../types";
 
@@ -22,6 +23,7 @@ interface MilestoneGroup {
 
 const store = useIssuesStore();
 const { issues, loading } = storeToRefs(store);
+const repoStore = useRepoStore();
 const { t } = useI18n();
 
 const groups = computed<MilestoneGroup[]>(() => {
@@ -49,7 +51,7 @@ const allUnassigned = computed(
 
 <template>
   <div v-if="!loading && issues.length === 0" class="empty-row">
-    {{ t("common.empty") }}
+    {{ t(repoStore.current ? "common.empty" : "common.noRepo") }}
   </div>
   <div v-else class="milestone-scroll">
     <p v-if="allUnassigned" class="unassigned-note">{{ t("milestone.noneInUse") }}</p>

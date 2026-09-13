@@ -6,6 +6,7 @@
 import { storeToRefs } from "pinia";
 import PanelShell from "../workbench/PanelShell.vue";
 import { usePullsStore } from "../stores/pulls";
+import { useRepoStore } from "../stores/repo";
 import { useI18n } from "../i18n";
 import { reviewLabel } from "./review-label";
 import { stateLabel } from "./state-label";
@@ -15,6 +16,7 @@ defineProps<{ leafId?: string; panelType?: string }>();
 
 const store = usePullsStore();
 const { pulls, state, loading, error, selectedNumber } = storeToRefs(store);
+const repoStore = useRepoStore();
 const { t } = useI18n();
 
 const states: { value: PullState }[] = [
@@ -89,7 +91,7 @@ function timeLabel(iso?: string | null): string {
         </div>
       </li>
       <li v-if="!loading && pulls.length === 0" class="empty-row">
-        {{ t("common.empty") }}
+        {{ t(repoStore.current ? "common.empty" : "common.noRepo") }}
       </li>
     </ul>
   </PanelShell>

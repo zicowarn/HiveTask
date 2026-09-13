@@ -6,10 +6,12 @@
 import { storeToRefs } from "pinia";
 import IssueRow from "../IssueRow.vue";
 import { useIssuesStore } from "../../stores/issues";
+import { useRepoStore } from "../../stores/repo";
 import { useI18n } from "../../i18n";
 
 const store = useIssuesStore();
 const { issues, loading } = storeToRefs(store);
+const repoStore = useRepoStore();
 const { t } = useI18n();
 </script>
 
@@ -20,7 +22,7 @@ const { t } = useI18n();
     </li>
     <IssueRow v-for="issue in issues" :key="issue.number" :issue="issue" />
     <li v-if="!loading && issues.length === 0" class="empty-row">
-      {{ t("common.empty") }}
+      {{ t(repoStore.current ? "common.empty" : "common.noRepo") }}
     </li>
   </ul>
 </template>
