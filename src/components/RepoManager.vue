@@ -261,10 +261,14 @@ async function remove(entry: RepoEntry) {
 }
 /* 添加区：列表底部虚线双钮横排，共享一个虚线外框、中间实线细缝
    （split-button 形态）——与来源连接对话框虚线配方同源，动作与分类
-   分离，标签行只做浏览。共享外框故 hover/active 只染文字与浅底。 */
+   分离，标签行只做浏览。上方水平线与标签行 border-bottom 呼应：
+   上线分隔「分类/内容」，此线分隔「内容/动作」。共享外框故
+   hover/active 只染文字与浅底。 */
 .add-area {
   display: flex;
+  margin-top: 6px;
   padding-top: 8px;
+  border-top: 1px solid var(--border);
 }
 .panel-add {
   flex: 1;
