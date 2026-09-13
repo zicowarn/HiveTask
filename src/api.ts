@@ -26,6 +26,9 @@ export const api = {
     invoke<RepoInfo>("repo_info", { repoPath }),
   refreshIssues: (repoPath: string, state: IssueState, limit = 50) =>
     invoke<Issue[]>("refresh_issues", { repoPath, state, limit }),
+  // v1 仅本地仓库（journal + SQLite）；远端创建后续接同一命令。
+  createIssue: (repoPath: string, title: string, body?: string) =>
+    invoke<Issue>("create_issue", { repoPath, title, body: body ?? null }),
   listCachedIssues: (repoPath: string, state: IssueState) =>
     invoke<Issue[]>("list_cached_issues", { repoPath, state }),
   cachedIssueCount: (repoPath: string, state: IssueState) =>

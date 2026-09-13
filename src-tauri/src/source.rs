@@ -139,14 +139,37 @@ pub fn json_number_to_string(value: Option<&serde_json::Value>) -> String {
 /// 解析 target（前端传入的仓库标识 = 本地路径 或 仅远端 remote_url）：
 /// 1. 登记表按 path 精确命中 → 用登记的 remote_url/host（快照）；
 /// 2. 登记表按 remote_url 命中 → 仅远端登记，workdir = None；
-/// 3. 都未命中 → 视为磁盘本地路径，现读 origin（git2 面板等仍传路径）。
+/// 3. 都未命中 → 磁盘本地路径：有 origin 走远端解析；
+///    **无 origin = 本地来源**（platform "local"，owner/repo 取目录名，
+///    类型只门控 Issue/PR 工作区——设计《仓库登记与类型》local 语义）。
+///    之后再给仓库加 remote，重解析自然迁回远端类型（类型可迁移）。
 pub fn resolve_target(target: &str) -> Result<RepoRef> {
     if let Some((remote_url, workdir, platform)) = crate::appdb::repo_find_by_target(target) {
         let mut r = ref_from_url(&remote_url, workdir)?;
         r.platform = platform;
         return Ok(r);
     }
-    ref_from_local(target)
+    ref_from_local(target).or_else(|_| local_ref(target))
+}
+
+/// 无 remote 的本地目录 → local 引用（journal + SQLite，见 local.rs）。
+fn local_ref(path: &str) -> Result<RepoRef> {
+    let p = std::path::Path::new(path);
+    if !p.is_dir() {
+        return Err(anyhow!("路径不存在: {path}"));
+    }
+    let name = p
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("local")
+        .to_string();
+    Ok(RepoRef {
+        owner: name.clone(),
+        repo: name,
+        host: "local".to_string(),
+        platform: Some("local".to_string()),
+        workdir: Some(p.to_path_buf()),
+    })
 }
 
 /// 登记表/磁盘之外的第三条路：直接从 URL 构造（登记时即时预览用）。
@@ -204,12 +227,14 @@ pub fn split_host_slug(url: &str) -> Option<(String, String)> {
 /// 全项目唯一的来源实现选择：**按连接的 platform 路由**（用户添加连接时
 /// 显式选择 = user_set 最高优先级）；无连接时按 host 推断兜底（auto）。
 /// Gitea 与 Gitee（v1/v5 皆仿 GitHub）共用同一兼容实现，仅 API 前缀与
-/// 合并方言不同。GitHub 透传 gh 活动账户；gitlab/unknown 后续实现。
+/// 合并方言不同。GitHub 透传 gh 活动账户；gitlab/unknown 后续实现；
+/// "local"（无 remote 仓库）走 journal + SQLite 的 LocalSource。
 pub fn source_for_ref(platform: Option<&str>, host: &str) -> Box<dyn Source> {
     let kind = platform
         .map(str::to_string)
         .unwrap_or_else(|| crate::appdb::platform_for_host(host).unwrap_or_else(|| "github".into()));
     match kind.as_str() {
+        "local" => Box::new(crate::local::LocalSource),
         "gitea" | "gitee" => {
             let token = keyring_token(&kind);
             Box::new(crate::gitea::GiteaSource::new(kind, host.to_string(), token))
@@ -234,6 +259,21 @@ mod tests {
         assert!(Kind::parse("pr").is_err()); // gh 方言不得回流
         assert!(Kind::parse("--admin").is_err());
         assert_eq!(Kind::Issue.as_str(), "issue");
+    }
+
+    #[test]
+    fn resolve_local_fallback_for_origin_less_dirs() {
+        let dir = std::env::temp_dir().join(format!("hivetask-resolve-local-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        // 无 origin 的真实目录 → local 引用（不再 Err）
+        let r = resolve_target(&dir.to_string_lossy()).unwrap();
+        assert_eq!(r.platform.as_deref(), Some("local"));
+        assert_eq!(r.host, "local");
+        assert!(r.workdir.is_some());
+        // 不存在的路径仍是错误（不能把任意字符串当仓库）
+        assert!(resolve_target("/no/such/dir/hivetask-xyz").is_err());
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]

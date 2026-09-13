@@ -100,7 +100,7 @@ fn now() -> String {
 }
 
 /// 极简 UTC 时间戳（避免为时间格式引入 chrono）。
-fn chrono_like_now() -> String {
+pub(crate) fn chrono_like_now() -> String {
     let secs = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs())

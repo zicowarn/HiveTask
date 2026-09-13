@@ -10,6 +10,7 @@ import PanelShell from "../workbench/PanelShell.vue";
 import ModeTabs from "../components/ModeTabs.vue";
 import { resolvePanel } from "../workbench/registry";
 import { useIssuesStore } from "../stores/issues";
+import { useRepoStore } from "../stores/repo";
 import { useI18n } from "../i18n";
 import { stateLabel } from "./state-label";
 import type { IssueState } from "../types";
@@ -38,6 +39,25 @@ const states: { value: IssueState }[] = [
   { value: "closed" },
   { value: "all" },
 ];
+
+// 本地 Issue（P3 收官）：仅本地仓库提供创建入口；远端创建走 create_issue
+// 同一通道后续接。
+const repoStore = useRepoStore();
+const { platform } = storeToRefs(repoStore);
+const isLocal = computed(() => platform.value === "local");
+
+const createOpen = ref(false);
+const createTitle = ref("");
+const createBody = ref("");
+async function submitCreate() {
+  if (!createTitle.value.trim()) return;
+  await store.createIssue(createTitle.value, createBody.value || undefined);
+  if (!store.error) {
+    createOpen.value = false;
+    createTitle.value = "";
+    createBody.value = "";
+  }
+}
 </script>
 
 <template>
@@ -60,9 +80,44 @@ const states: { value: IssueState }[] = [
       <button class="refresh-btn" :disabled="loading" @click="store.refresh()">
         {{ loading ? t("common.syncing") : t("common.refresh") }}
       </button>
+      <button
+        v-if="isLocal"
+        class="refresh-btn create-btn"
+        @click="createOpen = !createOpen"
+      >
+        {{ t("issue.createBtn") }}
+      </button>
     </template>
 
     <p v-if="error" class="error-banner">{{ error }}</p>
+
+    <div v-if="createOpen && isLocal" class="create-form">
+      <input
+        v-model="createTitle"
+        class="create-title"
+        :placeholder="t('issue.titlePlaceholder')"
+        spellcheck="false"
+        @keydown.enter="submitCreate"
+      />
+      <textarea
+        v-model="createBody"
+        class="create-body"
+        :placeholder="t('issue.bodyPlaceholder')"
+        rows="3"
+      />
+      <div class="create-actions">
+        <button class="create-cancel" @click="createOpen = false">
+          {{ t("conn.cancel") }}
+        </button>
+        <button
+          class="create-submit"
+          :disabled="!createTitle.trim()"
+          @click="submitCreate"
+        >
+          {{ t("issue.submit") }}
+        </button>
+      </div>
+    </div>
 
     <component :is="activeMode.component" />
   </PanelShell>
@@ -109,6 +164,68 @@ const states: { value: IssueState }[] = [
 .refresh-btn:disabled {
   opacity: 0.5;
   cursor: default;
+}
+.create-btn {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+.create-form {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 8px 10px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-app);
+}
+.create-title,
+.create-body {
+  box-sizing: border-box;
+  width: 100%;
+  font-size: 12px;
+  font-family: inherit;
+  color: var(--text);
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 6px 8px;
+  outline: none;
+  resize: vertical;
+}
+.create-title:focus,
+.create-body:focus {
+  border-color: var(--accent);
+}
+.create-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.create-cancel,
+.create-submit {
+  border: 1px solid var(--border);
+  background: var(--bg-panel);
+  color: var(--text);
+  font-size: 12px;
+  height: 24px;
+  padding: 0 12px;
+  border-radius: 5px;
+  cursor: pointer;
+}
+.create-submit {
+  color: var(--accent);
+  border-color: var(--accent);
+  font-weight: 600;
+}
+.create-submit:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.create-cancel:hover,
+.create-submit:not(:disabled):hover {
+  border-color: var(--accent);
+  color: var(--accent);
 }
 .error-banner {
   margin: 8px 14px 0;

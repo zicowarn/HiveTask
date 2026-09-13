@@ -3,6 +3,7 @@
  * Issue panel "list" mode: the flat issue list in sync order.
  * Hosted by IssueListPanel; state filtering and refresh live in the store.
  */
+import { computed } from "vue";
 import { storeToRefs } from "pinia";
 import IssueRow from "../IssueRow.vue";
 import { useIssuesStore } from "../../stores/issues";
@@ -13,6 +14,15 @@ const store = useIssuesStore();
 const { issues, loading } = storeToRefs(store);
 const repoStore = useRepoStore();
 const { t } = useI18n();
+
+// 本地仓库没有"远端"，空态引导创建而非刷新。
+const emptyKey = computed(() =>
+  !repoStore.current
+    ? "issue.emptyRepo"
+    : repoStore.platform === "local"
+      ? "issue.localEmpty"
+      : "common.empty",
+);
 </script>
 
 <template>
@@ -22,7 +32,7 @@ const { t } = useI18n();
     </li>
     <IssueRow v-for="issue in issues" :key="issue.number" :issue="issue" />
     <li v-if="!loading && issues.length === 0" class="empty-row">
-      {{ t(repoStore.current ? "common.empty" : "issue.emptyRepo") }}
+      {{ t(emptyKey) }}
     </li>
   </ul>
 </template>

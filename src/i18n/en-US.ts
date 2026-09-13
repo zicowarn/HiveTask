@@ -209,6 +209,11 @@ export const enUS: Record<MessageKey, string> = {
   // Issue workspace
   "issue.emptySelect": "Select an issue on the left to see its details",
   "issue.emptyRepo": "Choose a local Git repository, then refresh issues",
+  "issue.createBtn": "＋ New",
+  "issue.titlePlaceholder": "Title",
+  "issue.bodyPlaceholder": "Description (optional)",
+  "issue.submit": "Create",
+  "issue.localEmpty": "No issues yet — create the first one",
 
   // Pull request workspace
   "pull.emptySelect": "Select a pull request on the left to see its details",

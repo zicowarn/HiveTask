@@ -210,6 +210,11 @@ export const zhCN = {
   // Issue workspace
   "issue.emptySelect": "从左侧选择一个 Issue 查看详情",
   "issue.emptyRepo": "先选择一个本地 Git 仓库，然后刷新 Issues",
+  "issue.createBtn": "＋ 新建",
+  "issue.titlePlaceholder": "标题",
+  "issue.bodyPlaceholder": "描述（可选）",
+  "issue.submit": "创建",
+  "issue.localEmpty": "本仓库尚无 Issue，创建第一条",
 
   // Pull request workspace
   "pull.emptySelect": "从左侧选择一个 Pull Request 查看详情",

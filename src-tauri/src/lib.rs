@@ -7,6 +7,8 @@ mod credentials;
 mod gh;
 mod gitea;
 mod git;
+mod journal;
+mod local;
 mod models;
 mod pty;
 mod source;
@@ -269,6 +271,25 @@ fn add_comment(
     Ok(comments)
 }
 
+/// Create an issue. v1：仅本地仓库（journal `issue.create` + SQLite 双写，
+/// 编号由 meta 水位分配）；远端创建后续接同一通道。
+#[tauri::command]
+fn create_issue(repo_path: String, title: String, body: Option<String>) -> Result<Issue, String> {
+    let repo = resolve(&repo_path)?;
+    if repo.platform.as_deref() != Some("local") {
+        return Err("远端 Issue 创建即将支持，当前仅本地仓库可创建".to_string());
+    }
+    let workdir = repo
+        .workdir
+        .clone()
+        .ok_or_else(|| "本地仓库缺少工作目录".to_string())?;
+    let mut conn = storage::open(&storage_dir_of(&repo)).map_err(|e| e.to_string())?;
+    journal::sync(&workdir, &mut conn).map_err(|e| e.to_string())?;
+    let author = journal::current_author(&workdir);
+    journal::create_issue(&workdir, &mut conn, &title, body.as_deref(), &author)
+        .map_err(|e| e.to_string())
+}
+
 /// Close or reopen an issue; patches the cache row and returns the fresh
 /// entity so the frontend can patch both stores from one source of truth.
 #[tauri::command]
@@ -321,6 +342,7 @@ pub fn run() {
             list_cached_comments,
             fetch_comments,
             add_comment,
+            create_issue,
             set_issue_state,
             set_pull_state,
             list_synced_at,

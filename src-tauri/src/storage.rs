@@ -250,6 +250,78 @@ pub fn update_issue_state(conn: &Connection, number: &str, state: &str) -> Resul
     Ok(())
 }
 
+/// ---- 本地 Issue 物化视图（journal 重放目标，见 journal.rs）----
+
+/// Upsert one locally-created issue（重放与创建共用；data_source 标记来源）。
+pub fn upsert_local_issue(conn: &Connection, issue: &Issue) -> Result<()> {
+    let labels = json!(issue.labels).to_string();
+    let assignees = json!(issue.assignees).to_string();
+    conn.execute(
+        "INSERT INTO issues
+            (number, title, state, body, author, milestone, labels, assignees,
+             created_at, updated_at, url, data_source)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, 'local')
+         ON CONFLICT(number) DO UPDATE SET
+            title=excluded.title, state=excluded.state, body=excluded.body,
+            author=excluded.author, labels=excluded.labels,
+            assignees=excluded.assignees, updated_at=excluded.updated_at,
+            synced_at=datetime('now')",
+        rusqlite::params![
+            issue.number,
+            issue.title,
+            issue.state,
+            issue.body,
+            issue.author,
+            issue.milestone,
+            labels,
+            assignees,
+            issue.created_at,
+            issue.updated_at,
+            issue.url,
+        ],
+    )?;
+    Ok(())
+}
+
+/// Append one comment row without touching existing ones（重放/双写共用）。
+pub fn append_comment(
+    conn: &Connection,
+    kind: &str,
+    number: &str,
+    author: Option<&str>,
+    body: &str,
+    created_at: &str,
+) -> Result<()> {
+    conn.execute(
+        "INSERT INTO comments (kind, number, author, body, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5)",
+        rusqlite::params![kind, number, author, body, created_at],
+    )?;
+    Ok(())
+}
+
+/// Wipe issue-side materialization before a full journal replay. 一个仓库
+/// 的缓存库只服务一种来源（远端缓存或本地物化），清空即安全。
+pub fn reset_issue_material(conn: &Connection) -> Result<()> {
+    conn.execute("DELETE FROM issues", [])?;
+    conn.execute("DELETE FROM comments WHERE kind = 'issue'", [])?;
+    Ok(())
+}
+
+/// Read one cached issue by number.
+pub fn get_issue(conn: &Connection, number: &str) -> Result<Option<Issue>> {
+    let mut stmt = conn.prepare(
+        "SELECT number, title, state, body, author, milestone, labels, assignees,
+                created_at, updated_at, url
+         FROM issues WHERE number = ?1",
+    )?;
+    let mut rows = stmt.query([number])?;
+    match rows.next()? {
+        Some(row) => Ok(Some(map_issue(row)?)),
+        None => Ok(None),
+    }
+}
+
 /// Stamp a sync key ("synced:<kind>:<state>") with the current UTC time.
 pub fn stamp_synced(conn: &Connection, key: &str) -> Result<()> {
     conn.execute(
@@ -268,6 +340,27 @@ pub fn list_synced(conn: &Connection) -> Result<Vec<(String, String)>> {
     let mut stmt = conn.prepare("SELECT key, value FROM meta ORDER BY key")?;
     let rows = stmt.query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)))?;
     rows.collect::<std::result::Result<Vec<_>, _>>().map_err(Into::into)
+}
+
+/// Generic meta read (journal cursor, counters, ...).
+pub fn meta_get(conn: &Connection, key: &str) -> Result<Option<String>> {
+    let mut stmt = conn.prepare("SELECT value FROM meta WHERE key = ?1")?;
+    let mut rows = stmt.query([key])?;
+    match rows.next()? {
+        Some(row) => Ok(Some(row.get(0)?)),
+        None => Ok(None),
+    }
+}
+
+/// Generic meta write.
+pub fn meta_set(conn: &Connection, key: &str, value: &str) -> Result<()> {
+    conn.execute(
+        "INSERT INTO meta (key, value, synced_at)
+         VALUES (?1, ?2, datetime('now'))
+         ON CONFLICT(key) DO UPDATE SET value=excluded.value, synced_at=excluded.synced_at",
+        (key, value),
+    )?;
+    Ok(())
 }
 
 /// Full refresh of the cached PR set, same state-scoped semantics as

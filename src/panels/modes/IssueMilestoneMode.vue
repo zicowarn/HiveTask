@@ -26,6 +26,15 @@ const { issues, loading } = storeToRefs(store);
 const repoStore = useRepoStore();
 const { t } = useI18n();
 
+// 本地仓库没有"远端"，空态引导创建而非刷新。
+const emptyKey = computed(() =>
+  !repoStore.current
+    ? "issue.emptyRepo"
+    : repoStore.platform === "local"
+      ? "issue.localEmpty"
+      : "common.empty",
+);
+
 const groups = computed<MilestoneGroup[]>(() => {
   const byName = new Map<string, Issue[]>();
   for (const issue of issues.value) {
@@ -51,7 +60,7 @@ const allUnassigned = computed(
 
 <template>
   <div v-if="!loading && issues.length === 0" class="empty-row">
-    {{ t(repoStore.current ? "common.empty" : "issue.emptyRepo") }}
+    {{ t(emptyKey) }}
   </div>
   <div v-else class="milestone-scroll">
     <p v-if="allUnassigned" class="unassigned-note">{{ t("milestone.noneInUse") }}</p>
