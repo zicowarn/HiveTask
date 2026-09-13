@@ -10,6 +10,7 @@ mod git;
 mod journal;
 mod local;
 mod models;
+mod projects;
 mod pty;
 mod source;
 mod storage;
@@ -292,13 +293,71 @@ fn create_issue(repo_path: String, title: String, body: Option<String>) -> Resul
 
 /// Close or reopen an issue; patches the cache row and returns the fresh
 /// entity so the frontend can patch both stores from one source of truth.
+/// 尾部挂「关闭→Done」看板自动化（本地/远端关闭都流经此处）。
 #[tauri::command]
 fn set_issue_state(repo_path: String, number: String, closed: bool) -> Result<Issue, String> {
     let repo = resolve(&repo_path)?;
     let issue = source::source_for_ref(repo.platform.as_deref(), &repo.host).set_issue_state(&repo, &number, closed).map_err(|e| e.to_string())?;
     let conn = storage::open(&storage_dir_of(&repo)).map_err(|e| e.to_string())?;
     storage::update_issue_state(&conn, &issue.number, &issue.state).map_err(|e| e.to_string())?;
+    if closed {
+        if let Ok(app) = appdb::open() {
+            if let Some((_, _, _)) = appdb::repo_find_by_target(&repo_path) {
+                // 条目按登记 repo id 关联；解析失败的仓库（未登记）没有条目
+                if let Some(rid) = app_repo_id(&repo_path) {
+                    let _ = projects::on_issue_closed_in(&app, &rid, &issue.number);
+                }
+            }
+        }
+    }
     Ok(issue)
+}
+
+/// 登记表 repo id（看板条目关联键）；未登记 → None。
+fn app_repo_id(target: &str) -> Option<String> {
+    let conn = appdb::open().ok()?;
+    conn.query_row("SELECT id FROM repos WHERE path = ?1 OR remote_url = ?1", (target,), |row| row.get(0))
+        .ok()
+}
+
+/// 草稿卡转本地 Issue：先走既有 create_issue 通道（目标仓库本地库），
+/// 再把条目改为 issue 关联。两步无跨库事务——第二步失败时 Issue 已建，
+/// 草稿保留为对账锚（按 uuid 重试不重复建）。
+#[tauri::command]
+fn convert_draft_to_issue(item_id: String, repo_path: String) -> Result<projects::ProjectItem, String> {
+    // 1. 读草稿（必须 draft 形态）
+    let app = appdb::open().map_err(|e| e.to_string())?;
+    let item = projects::item_get_in(&app, &item_id)?;
+    if item.kind != "draft" {
+        return Err("只有草稿卡能转为 Issue".to_string());
+    }
+    let title = item.draft_title.clone().ok_or("草稿缺少标题")?;
+    let body = item.draft_body.clone();
+    // 2. 目标仓库必须是已登记的本地仓库
+    let rid = app_repo_id(&repo_path).ok_or("目标仓库未登记，请先在切换仓库中登记")?;
+    let repo = resolve(&repo_path)?;
+    if repo.platform.as_deref() != Some("local") {
+        return Err("v1 草稿只能转为本地 Issue（目标仓库需无 remote）".to_string());
+    }
+    let workdir = repo.workdir.clone().ok_or("本地仓库缺少工作目录")?;
+    // 3. 仓库侧创建（journal + SQLite）
+    let mut conn = storage::open(&storage_dir_of(&repo)).map_err(|e| e.to_string())?;
+    journal::sync(&workdir, &mut conn).map_err(|e| e.to_string())?;
+    let author = journal::current_author(&workdir);
+    let issue = journal::create_issue(&workdir, &mut conn, &title, body.as_deref(), &author)
+        .map_err(|e| e.to_string())?;
+    // 4. 条目改关联（字段值/排序原位保留）
+    let n = app
+        .execute(
+            "UPDATE project_items SET kind = 'issue', repo_id = ?2, number = ?3,
+                draft_title = NULL, draft_body = NULL WHERE id = ?1",
+            rusqlite::params![item_id, rid, issue.number],
+        )
+        .map_err(|e| e.to_string())?;
+    if n == 0 {
+        return Err("条目更新失败".to_string());
+    }
+    projects::item_get_in(&app, &item_id)
 }
 
 /// Close or reopen a pull request; upserts the fresh full record.
@@ -344,6 +403,20 @@ pub fn run() {
             add_comment,
             create_issue,
             set_issue_state,
+            projects::project_create,
+            projects::project_list,
+            projects::project_update,
+            projects::project_archive,
+            projects::project_delete,
+            projects::project_fields,
+            projects::project_field_set_options,
+            projects::project_item_add,
+            projects::project_item_list,
+            projects::project_item_move,
+            projects::project_item_remove,
+            projects::project_item_update_draft,
+            projects::project_field_value_set,
+            convert_draft_to_issue,
             set_pull_state,
             list_synced_at,
             probe_network,

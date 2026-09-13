@@ -736,7 +736,7 @@ mod comment_tests {
         let dir = repo.join(".hivetask");
         std::fs::create_dir_all(&dir).unwrap();
         {
-            let mut conn = Connection::open(dir.join("hivetask.db")).unwrap();
+            let conn = Connection::open(dir.join("hivetask.db")).unwrap();
             // 模拟 v5 存量库：整数主键的 issue/comment 行
             for sql in [MIGRATION_001, MIGRATION_002, MIGRATION_003, MIGRATION_004, MIGRATION_005] {
                 conn.execute_batch(sql).unwrap();

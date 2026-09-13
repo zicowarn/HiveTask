@@ -11,9 +11,10 @@ use serde::Serialize;
 use std::path::PathBuf;
 
 const APP_IDENTIFIER: &str = "dev.zicowarn.hivetask";
-const CURRENT_APP_SCHEMA_VERSION: i64 = 1;
+const CURRENT_APP_SCHEMA_VERSION: i64 = 2;
 
 const APP_MIGRATION_001: &str = include_str!("migrations/app_001_registry.sql");
+const APP_MIGRATION_002: &str = include_str!("migrations/app_002_projects.sql");
 
 pub fn app_data_dir() -> Option<PathBuf> {
     #[cfg(target_os = "macos")]
@@ -61,9 +62,17 @@ fn seed_github_connection(conn: &Connection) {
 }
 
 fn migrate(conn: &Connection) -> anyhow::Result<()> {
+    app_migrate(conn)
+}
+
+/// 供 projects.rs 测试构造同构内存库。
+pub(crate) fn app_migrate(conn: &Connection) -> anyhow::Result<()> {
     let version: i64 = conn.pragma_query_value(None, "user_version", |row| row.get(0))?;
     if version < 1 {
         conn.execute_batch(APP_MIGRATION_001).context("app 迁移 001 失败")?;
+    }
+    if version < 2 {
+        conn.execute_batch(APP_MIGRATION_002).context("app 迁移 002 失败")?;
     }
     conn.pragma_update(None, "user_version", CURRENT_APP_SCHEMA_VERSION)?;
     Ok(())
