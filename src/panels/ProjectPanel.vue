@@ -85,53 +85,40 @@ const confirmingDelete = ref<string | null>(null);
     </div>
 
     <div v-else class="pj-body">
-      <ul class="pj-list">
-        <li
-          v-for="p in projects"
-          :key="p.id"
-          class="pj-item"
-          :class="{ active: p.id === selectedId }"
-          @click="store.select(p.id)"
-        >
-          <template v-if="renaming === p.id">
-            <input
-              v-model="renameName"
-              class="pj-input"
-              @keydown.enter="submitRename"
-              @click.stop
-            />
-            <button class="pj-mini" @click.stop="submitRename">✓</button>
-          </template>
-          <template v-else>
-            <span class="pj-name">{{ p.displayName }}</span>
-            <button
-              class="pj-mini"
-              :title="t('project.rename')"
-              @click.stop="((renaming = p.id), (renameName = p.displayName))"
-            >✎</button>
-            <button
-              class="pj-mini danger"
-              :title="t('project.delete')"
-              @click.stop="((confirmingDelete = p.id))"
-            >✕</button>
-          </template>
-        </li>
-      </ul>
-
-      <div v-if="confirmingDelete" class="pj-confirm">
-        <p>{{ t("project.deleteConfirm") }}</p>
-        <div class="pj-form-actions">
-          <button class="pj-btn" @click="confirmingDelete = null">{{ t("conn.cancel") }}</button>
-          <button
-            class="pj-btn danger"
-            @click="((store.remove(confirmingDelete)), (confirmingDelete = null))"
+      <div class="pj-topbar">
+        <ul class="pj-list">
+          <li
+            v-for="p in projects"
+            :key="p.id"
+            class="pj-item"
+            :class="{ active: p.id === selectedId }"
+            @click="store.select(p.id)"
           >
-            {{ t("project.delete") }}
-          </button>
-        </div>
-      </div>
+            <template v-if="renaming === p.id">
+              <input
+                v-model="renameName"
+                class="pj-input"
+                @keydown.enter="submitRename"
+                @click.stop
+              />
+              <button class="pj-mini" @click.stop="submitRename">✓</button>
+            </template>
+            <template v-else>
+              <span class="pj-name">{{ p.displayName }}</span>
+              <button
+                class="pj-mini"
+                :title="t('project.rename')"
+                @click.stop="((renaming = p.id), (renameName = p.displayName))"
+              >✎</button>
+              <button
+                class="pj-mini danger"
+                :title="t('project.delete')"
+                @click.stop="((confirmingDelete = p.id))"
+              >✕</button>
+            </template>
+          </li>
+        </ul>
 
-      <div class="pj-view">
         <div class="view-toolbar">
           <div class="filter-box">
             <span
@@ -182,6 +169,22 @@ const confirmingDelete = ref<string | null>(null);
             </div>
           </div>
         </div>
+      </div>
+
+      <div v-if="confirmingDelete" class="pj-confirm">
+        <p>{{ t("project.deleteConfirm") }}</p>
+        <div class="pj-form-actions">
+          <button class="pj-btn" @click="confirmingDelete = null">{{ t("conn.cancel") }}</button>
+          <button
+            class="pj-btn danger"
+            @click="((store.remove(confirmingDelete)), (confirmingDelete = null))"
+          >
+            {{ t("project.delete") }}
+          </button>
+        </div>
+      </div>
+
+      <div class="pj-view">
         <component :is="activeMode.component" />
       </div>
     </div>
@@ -254,14 +257,22 @@ const confirmingDelete = ref<string | null>(null);
   flex: 1;
   min-height: 0;
 }
+/* 顶栏：项目 chips 在左，筛选条 + ⚙视图 在右（同一行） */
+.pj-topbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px 6px;
+  border-bottom: 1px solid var(--border);
+}
 .pj-list {
   list-style: none;
   display: flex;
   gap: 4px;
   margin: 0;
-  padding: 8px 10px 0;
-  border-bottom: 1px solid var(--border);
+  padding: 0;
   flex-wrap: wrap;
+  min-width: 0;
 }
 .pj-item {
   display: inline-flex;
@@ -321,12 +332,15 @@ const confirmingDelete = ref<string | null>(null);
   flex: 1;
   min-height: 0;
 }
-/* 视图工具栏：左筛选条 + 右 ⚙ View（对齐 GitHub Projects 两段式） */
+/* 视图工具栏：贴项目 chips 行右缘（筛选条 + ⚙ View） */
 .view-toolbar {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 6px 10px;
+  margin-left: auto;
+  flex: 1;
+  max-width: 460px;
+  min-width: 220px;
   position: relative;
 }
 .filter-box {
