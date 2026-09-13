@@ -32,11 +32,18 @@ struct RepoSlug {
 
 impl GiteaSource {
     pub fn new(platform: String, host: String, token: Option<String>) -> Self {
-        Self {
-            platform,
-            host: host.trim_end_matches('/').to_string(),
-            token,
-        }
+        // host 归一为完整基址：路由传入的 RepoRef.host 来自 split_host_slug，
+        // scheme 已被剥掉（"gitee.com"），直接拼接会得到相对 URL 而请求必败
+        // （实测 "Gitea 请求失败"）；此处统一补 https://。
+        // 注意：http-only 自建实例需在路由侧透传连接 host（带 scheme），
+        // 属后续项——当前路径下它本就不可用，补 https 不造成回退。
+        let trimmed = host.trim_end_matches('/');
+        let host = if trimmed.starts_with("http://") || trimmed.starts_with("https://") {
+            trimmed.to_string()
+        } else {
+            format!("https://{trimmed}")
+        };
+        Self { platform, host, token }
     }
 
     /// API 前缀：Gitea /api/v1，Gitee /api/v5。
@@ -450,6 +457,17 @@ mod tests {
         assert_eq!(c.author.as_deref(), Some("eve"));
         assert_eq!(c.body.as_deref(), Some("hi"));
         assert!(!c.pending);
+    }
+
+    /// host 归一：裸域名补 https://；已带 scheme 原样保留。
+    #[test]
+    fn host_scheme_normalized() {
+        let bare = GiteaSource::new("gitee".into(), "gitee.com".into(), None);
+        assert_eq!(bare.api("/x"), "https://gitee.com/api/v5/x");
+        let https = GiteaSource::new("gitea".into(), "https://gitea.lan/".into(), None);
+        assert_eq!(https.api("/x"), "https://gitea.lan/api/v1/x");
+        let http = GiteaSource::new("gitea".into(), "http://192.168.1.5:3000".into(), None);
+        assert_eq!(http.api("/x"), "http://192.168.1.5:3000/api/v1/x");
     }
 
     #[test]
