@@ -108,10 +108,16 @@ async fn pick_repo(window: tauri::WebviewWindow) -> Result<Option<String>, Strin
 #[tauri::command]
 fn repo_info(repo_path: String) -> RepoInfo {
     let path = PathBuf::from(&repo_path);
+    // 与运行时路由同一条链（resolve_target：登记连接 > host 推断），
+    // 状态栏来源标签不是独立猜测的第三套口径。
+    let platform = resolve(&repo_path)
+        .ok()
+        .and_then(|r| r.platform.or_else(|| crate::appdb::platform_for_host(&r.host)));
     RepoInfo {
         origin: gh::git_origin(&path),
         valid: path.is_dir(),
         path: repo_path,
+        platform,
     }
 }
 

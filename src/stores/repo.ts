@@ -42,6 +42,8 @@ export const useRepoStore = defineStore("repo", () => {
     }
   })();
   const origin = ref<string | null>(null);
+  // 当前仓库的来源路由口径（repo_info 与运行时同链解析）；null = 本地/未知。
+  const platform = ref<string | null>(null);
   const recent = ref<string[]>(loadRecent());
   // null = not checked yet (e.g. plain-browser preview skips the probe).
   const ghAvailable = ref<boolean | null>(null);
@@ -76,15 +78,18 @@ export const useRepoStore = defineStore("repo", () => {
   async function refreshInfo() {
     if (!current.value) {
       origin.value = null;
+      platform.value = null;
       return;
     }
     try {
       const info: RepoInfo = await api.repoInfo(current.value);
       origin.value = info.origin ?? null;
+      platform.value = info.platform ?? null;
     } catch {
       origin.value = null;
+      platform.value = null;
     }
   }
 
-  return { current, origin, recent, ghAvailable, checkHealth, setCurrent, pick, refreshInfo };
+  return { current, origin, platform, recent, ghAvailable, checkHealth, setCurrent, pick, refreshInfo };
 });

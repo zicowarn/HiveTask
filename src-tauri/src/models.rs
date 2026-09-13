@@ -143,4 +143,8 @@ pub struct RepoInfo {
     /// Path exists on disk — guards against stale persisted repo paths
     /// (e.g. a demo clone under /tmp removed by periodic cleanup).
     pub valid: bool,
+    /// 来源路由口径（与运行时同一条链：登记连接显式 > host 推断）；
+    /// None = 无 remote 或来源未知（前端显示「本地」）。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub platform: Option<String>,
 }

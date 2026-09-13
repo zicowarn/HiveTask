@@ -53,6 +53,8 @@ export interface RepoInfo {
   origin?: string | null;
   /** Path exists on disk — false means the persisted repo rotted away. */
   valid?: boolean;
+  /** 来源路由口径（登记连接 > host 推断）；null = 本地/未知。 */
+  platform?: string | null;
 }
 
 export type IssueState = "open" | "closed" | "all";

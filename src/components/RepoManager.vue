@@ -259,28 +259,34 @@ async function remove(entry: RepoEntry) {
   gap: 6px;
   padding: 6px 0;
 }
-/* 添加区：列表底部虚线双钮，与来源连接对话框「+ 添加连接」同配方——
-   动作与分类分离，标签行只做浏览。 */
+/* 添加区：列表底部虚线双钮横排，共享一个虚线外框、中间实线细缝
+   （split-button 形态）——与来源连接对话框虚线配方同源，动作与分类
+   分离，标签行只做浏览。共享外框故 hover/active 只染文字与浅底。 */
 .add-area {
   display: flex;
-  flex-direction: column;
-  gap: 6px;
   padding-top: 8px;
 }
 .panel-add {
-  width: 100%;
+  flex: 1;
   border: 1px dashed var(--border);
   background: transparent;
   color: var(--text-dim);
   font-size: 12px;
   height: 28px;
-  border-radius: 6px;
   cursor: pointer;
+}
+.panel-add:first-child {
+  border-radius: 6px 0 0 6px;
+  border-right: none;
+}
+.panel-add:last-child {
+  border-radius: 0 6px 6px 0;
+  border-left: 1px solid var(--border);
 }
 .panel-add:hover,
 .panel-add.active {
-  border-color: var(--accent);
   color: var(--accent);
+  background: var(--bg-selected);
 }
 .remote-platform {
   display: flex;
