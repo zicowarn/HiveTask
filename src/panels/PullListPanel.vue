@@ -3,8 +3,10 @@
  * Pull-request list panel — registered as "pull.list". Mirrors the issue
  * list with PR-specific meta (head→base, draft, review decision, diffstat).
  */
+import { computed } from "vue";
 import { storeToRefs } from "pinia";
 import PanelShell from "../workbench/PanelShell.vue";
+import BranchReviewList from "./modes/BranchReviewList.vue";
 import { usePullsStore } from "../stores/pulls";
 import { useRepoStore } from "../stores/repo";
 import { useI18n } from "../i18n";
@@ -18,6 +20,9 @@ const store = usePullsStore();
 const { pulls, state, loading, error, selectedNumber } = storeToRefs(store);
 const repoStore = useRepoStore();
 const { t } = useI18n();
+
+/** 本地仓库 → 分支 review 形态（PR 的本地投影；设计《本地分支Review》）。 */
+const isLocal = computed(() => repoStore.platform === "local");
 
 const states: { value: PullState }[] = [
   { value: "open" },
@@ -33,7 +38,7 @@ function timeLabel(iso?: string | null): string {
 
 <template>
   <PanelShell :leaf-id="leafId" :panel-type="panelType">
-    <template #actions>
+    <template v-if="!isLocal" #actions>
       <div class="state-tabs">
         <button
           v-for="s in states"
@@ -50,9 +55,10 @@ function timeLabel(iso?: string | null): string {
       </button>
     </template>
 
-    <p v-if="error" class="error-banner">{{ error }}</p>
+    <p v-if="error && !isLocal" class="error-banner">{{ error }}</p>
 
-    <ul class="item-list">
+    <BranchReviewList v-if="isLocal" />
+    <ul v-else class="item-list">
       <li v-if="loading" class="load-row" :class="{ centered: pulls.length === 0 }">
         <span class="load-spin"></span>{{ t("list.loading") }}
       </li>

@@ -124,6 +124,49 @@ pub struct BranchRow {
     pub behind: i64,
 }
 
+// ---- 本地分支 review（设计：《本地Issue与本地分支Review》Q3）----
+
+/// 相对 base 的分支条目（领先/落后计数；分支名即意图声明，无实体表）。
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReviewBranch {
+    pub name: String,
+    pub is_current: bool,
+    pub ahead: i64,
+    pub behind: i64,
+    pub short_id: String,
+}
+
+/// diff 单文件：状态 + 行统计 + unified patch 文本（v1 单栏着色，无 side-by-side）。
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReviewFile {
+    pub path: String,
+    /// added | modified | deleted | renamed
+    pub status: String,
+    pub additions: i64,
+    pub deletions: i64,
+    pub patch: Option<String>,
+}
+
+/// 一次分支 review 的全部预览数据（提交 + 文件 diff + 可合并性）。
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BranchReviewDiff {
+    pub base: String,
+    pub head: String,
+    /// head 已完全包含在 base 中（无事可合并）。
+    pub up_to_date: bool,
+    /// 可干净合并（非 up_to_date 且无冲突）。
+    pub mergeable: bool,
+    /// 存在冲突——红线：不提供解决 UI，诚实提示去终端/编辑器。
+    pub conflict: bool,
+    pub commits: Vec<CommitRow>,
+    pub files: Vec<ReviewFile>,
+    /// patch 总量超限被截断（防大 diff 拖垮 webview）。
+    pub truncated: bool,
+}
+
 /// One conversation comment on an issue or PR.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

@@ -165,6 +165,21 @@ export const enUS: Record<MessageKey, string> = {
   "project.sortAdded": "Recently added",
   "project.renameCol": "Rename column",
   "project.addHere": "Add to this column",
+  "branchReview.base": "Merge target",
+  "branchReview.empty": "No branches ahead of the merge target",
+  "branchReview.pickBranch": "Pick a branch on the left to view diff and merge",
+  "branchReview.upToDate": "This branch is fully contained in the merge target",
+  "branchReview.mergeable": "Clean merge available",
+  "branchReview.conflict": "Conflicts detected — resolve them in your terminal or editor, then retry",
+  "branchReview.merge": "Merge",
+  "branchReview.mergedDone": "Merged.",
+  "branchReview.deleteBranch": "Delete branch",
+  "branchReview.keepBranch": "Keep",
+  "branchReview.commits": "Commits ({n})",
+  "branchReview.files": "Files ({n})",
+  "branchReview.noFiles": "No file changes",
+  "branchReview.truncated": "patch truncated",
+
 
   // Issue/PR state (filter tabs + detail badges)
   "state.open": "Open",

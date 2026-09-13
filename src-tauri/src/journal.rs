@@ -265,11 +265,12 @@ pub fn set_issue_state(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
-    /// libgit2 部分全局状态（mwindow 等）在并行测试下偶发互踩——串行化。
-    static TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    /// libgit2 部分全局状态（mwindow 等）在并行测试下偶发互踩——
+    /// 全 crate 一把锁（git.rs 的 review 测试共用）。
+    pub(crate) static TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
     fn temp_workdir() -> std::path::PathBuf {
         let dir = std::env::temp_dir().join(format!(

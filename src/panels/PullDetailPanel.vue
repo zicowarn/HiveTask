@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch } from "vue";
+import { computed, ref, watch } from "vue";
 import { storeToRefs } from "pinia";
 import PanelShell from "../workbench/PanelShell.vue";
 import MarkdownView from "../components/MarkdownView.vue";
@@ -13,6 +13,7 @@ import { reviewLabel } from "./review-label";
 import { stateLabel } from "./state-label";
 import { useCloseReopen } from "./close-reopen";
 import MergeDialog from "./MergeDialog.vue";
+import BranchReviewDetail from "./modes/BranchReviewDetail.vue";
 
 defineProps<{ leafId?: string; panelType?: string }>();
 
@@ -20,6 +21,9 @@ const pulls = usePullsStore();
 const repo = useRepoStore();
 const { selected, detailLoading } = storeToRefs(pulls);
 const { t } = useI18n();
+
+/** 本地仓库 → 分支 review 详情（PR 的本地投影）。 */
+const isLocal = computed(() => repo.platform === "local");
 
 const {
   armed: closeArmed,
@@ -58,7 +62,8 @@ function hasVisibleBody(body?: string | null): boolean {
 
 <template>
   <PanelShell :leaf-id="leafId" :panel-type="panelType">
-    <template v-if="selected">
+    <BranchReviewDetail v-if="isLocal" />
+    <template v-else-if="selected">
       <header class="detail-header">
         <div class="detail-title-row">
           <span class="detail-number">#{{ selected.number }}</span>

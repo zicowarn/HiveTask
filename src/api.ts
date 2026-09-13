@@ -78,6 +78,41 @@ export interface RemoteRepoInfo {
   updatedAt: string | null;
 }
 
+// ---- 本地分支 review ----
+
+export interface ReviewBranch {
+  name: string;
+  isCurrent: boolean;
+  ahead: number;
+  behind: number;
+  shortId: string;
+}
+
+export interface ReviewFile {
+  path: string;
+  status: "added" | "modified" | "deleted" | "renamed";
+  additions: number;
+  deletions: number;
+  patch: string | null;
+}
+
+export interface BranchReviewDiff {
+  base: string;
+  head: string;
+  upToDate: boolean;
+  mergeable: boolean;
+  conflict: boolean;
+  commits: Array<{
+    oid: string;
+    parents: string[];
+    message: string;
+    author?: string | null;
+    committedAtUnix: number;
+  }>;
+  files: ReviewFile[];
+  truncated: boolean;
+}
+
 export const isTauri = (): boolean => "__TAURI_INTERNALS__" in window;
 
 export const api = {
@@ -209,4 +244,14 @@ export const api = {
   /** 线上仓库清单（按接入凭据拉取，用于「刷新从线上查找」）。 */
   remoteRepoList: (platform: string, host: string) =>
     invoke<RemoteRepoInfo[]>("remote_repo_list", { platform, host }),
+
+  // ---- 本地分支 review（PR 工作区本地形态）----
+  branchReviewList: (repoPath: string, base: string) =>
+    invoke<ReviewBranch[]>("branch_review_list", { repoPath, base }),
+  branchReviewDiff: (repoPath: string, base: string, head: string) =>
+    invoke<BranchReviewDiff>("branch_review_diff", { repoPath, base, head }),
+  branchMerge: (repoPath: string, base: string, head: string, method: "merge" | "squash" | "rebase") =>
+    invoke<string>("branch_merge", { repoPath, base, head, method }),
+  branchDelete: (repoPath: string, name: string, force = false) =>
+    invoke<void>("branch_delete", { repoPath, name, force }),
 };

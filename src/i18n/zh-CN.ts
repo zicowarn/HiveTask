@@ -166,6 +166,21 @@ export const zhCN = {
   "project.sortAdded": "添加时间",
   "project.renameCol": "修改列名",
   "project.addHere": "添加到这一列",
+  "branchReview.base": "合并目标",
+  "branchReview.empty": "没有领先于合并目标的分支",
+  "branchReview.pickBranch": "从左侧选择一个分支查看 diff 与合并",
+  "branchReview.upToDate": "该分支已完全包含在合并目标中",
+  "branchReview.mergeable": "可干净合并",
+  "branchReview.conflict": "存在冲突——请到终端或编辑器解决后重试",
+  "branchReview.merge": "合并",
+  "branchReview.mergedDone": "合并完成。",
+  "branchReview.deleteBranch": "删除分支",
+  "branchReview.keepBranch": "保留",
+  "branchReview.commits": "提交（{n}）",
+  "branchReview.files": "文件（{n}）",
+  "branchReview.noFiles": "无文件变更",
+  "branchReview.truncated": "patch 过长已截断",
+
 
   // Issue/PR state (filter tabs + detail badges)
   "state.open": "开启中",

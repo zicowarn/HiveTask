@@ -218,6 +218,39 @@ fn git_fetch(repo_path: String) -> Result<(), String> {
     git::fetch(&dir.to_string_lossy()).map_err(|e| e.to_string())
 }
 
+// ---- 本地分支 review（PR 工作区本地形态，纯 git 能力不扩 Source trait）----
+
+#[tauri::command]
+fn branch_review_list(repo_path: String, base: String) -> Result<Vec<models::ReviewBranch>, String> {
+    let dir = local_dir_of(&repo_path)?;
+    git::review_branch_list(&dir.to_string_lossy(), &base).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn branch_review_diff(repo_path: String, base: String, head: String) -> Result<models::BranchReviewDiff, String> {
+    let dir = local_dir_of(&repo_path)?;
+    git::review_diff(&dir.to_string_lossy(), &base, &head).map_err(|e| e.to_string())
+}
+
+/// 合并执行（merge / squash / rebase）。返回合并后 base 的顶点 oid。
+#[tauri::command]
+fn branch_merge(repo_path: String, base: String, head: String, method: String) -> Result<String, String> {
+    let method = MergeMethod::parse(&method).map_err(|e| e.to_string())?;
+    let m = match method {
+        MergeMethod::Merge => "merge",
+        MergeMethod::Squash => "squash",
+        MergeMethod::Rebase => "rebase",
+    };
+    let dir = local_dir_of(&repo_path)?;
+    git::review_merge(&dir.to_string_lossy(), &base, &head, m).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn branch_delete(repo_path: String, name: String, force: bool) -> Result<(), String> {
+    let dir = local_dir_of(&repo_path)?;
+    git::branch_delete(&dir.to_string_lossy(), &name, force).map_err(|e| e.to_string())
+}
+
 /// All recorded sync timestamps for the status bar's "last updated" cell.
 #[tauri::command]
 fn list_synced_at(repo_path: String) -> Result<Vec<(String, String)>, String> {
@@ -443,6 +476,10 @@ pub fn run() {
             git_history,
             git_branches,
             git_fetch,
+            branch_review_list,
+            branch_review_diff,
+            branch_merge,
+            branch_delete,
             pty::pty_spawn,
             pty::pty_write,
             pty::pty_resize,
