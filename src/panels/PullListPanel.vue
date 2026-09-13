@@ -51,6 +51,9 @@ function timeLabel(iso?: string | null): string {
     <p v-if="error" class="error-banner">{{ error }}</p>
 
     <ul class="item-list">
+      <li v-if="loading" class="load-row" :class="{ centered: pulls.length === 0 }">
+        <span class="load-spin"></span>{{ t("list.loading") }}
+      </li>
       <li
         v-for="pull in pulls"
         :key="pull.number"
@@ -256,6 +259,32 @@ function timeLabel(iso?: string | null): string {
   background: var(--bg-chip);
   color: var(--text-dim);
   border: 1px solid var(--border);
+}
+.load-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+.load-row.centered {
+  justify-content: center;
+  padding: 26px 12px;
+}
+.load-spin {
+  width: 12px;
+  height: 12px;
+  flex: none;
+  border: 2px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 .empty-row {
   padding: 24px 12px;

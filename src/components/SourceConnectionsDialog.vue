@@ -126,7 +126,6 @@ onBeforeUnmount(() => document.removeEventListener("keydown", onKeydown));
     <div class="conn-panel" role="dialog" :aria-label="t('conn.title')">
       <div class="conn-head">
         <span class="conn-title">{{ t("conn.title") }}</span>
-        <button class="conn-close" @click="close">✕</button>
       </div>
 
       <template v-if="!editing">

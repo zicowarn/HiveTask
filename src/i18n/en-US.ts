@@ -161,6 +161,7 @@ export const enUS: Record<MessageKey, string> = {
   "about.close": "Close",
 
   // Shared strings
+  "list.loading": "Loading…",
   "common.refresh": "Refresh",
   "common.syncing": "Syncing…",
   "common.empty": "No data yet — hit Refresh to fetch from GitHub",

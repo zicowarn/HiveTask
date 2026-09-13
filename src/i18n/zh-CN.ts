@@ -162,6 +162,7 @@ export const zhCN = {
   "about.close": "关闭",
 
   // Shared strings
+  "list.loading": "加载中…",
   "common.refresh": "刷新",
   "common.syncing": "同步中…",
   "common.empty": "暂无数据，点击「刷新」从 GitHub 拉取",
