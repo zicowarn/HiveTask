@@ -118,6 +118,7 @@ async function submitCreate() {
 <style scoped>
 .state-tabs {
   display: flex;
+  flex-wrap: wrap;
   gap: 2px;
 }
 .state-tab {
@@ -129,6 +130,7 @@ async function submitCreate() {
   padding: 0 9px;
   border-radius: 5px;
   cursor: pointer;
+  white-space: nowrap;
 }
 .state-tab:hover {
   background: var(--bg-hover);

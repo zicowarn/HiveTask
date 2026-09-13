@@ -125,9 +125,11 @@ function timeLabel(iso?: string | null): string {
 <style scoped>
 .state-tabs {
   display: flex;
+  flex-wrap: wrap;
   gap: 2px;
 }
 .state-tab {
+  white-space: nowrap;
   border: none;
   background: transparent;
   color: var(--text-dim);
