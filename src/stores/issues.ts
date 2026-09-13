@@ -15,7 +15,7 @@ export const useIssuesStore = defineStore("issues", () => {
   const loading = ref(false);
   const error = ref<string | null>(null);
   const cachedCount = ref<number | null>(null);
-  const selectedNumber = ref<number | null>(null);
+  const selectedNumber = ref<string | null>(null);
   // Conversation of the selected issue; pending rows are optimistic adds.
   const comments = ref<Comment[]>([]);
   const commentsLoading = ref(false);
@@ -82,7 +82,7 @@ export const useIssuesStore = defineStore("issues", () => {
 
   /** Cache-first paint, then reconcile with GitHub. Guards against races:
    * only the currently selected issue may land in `comments`. */
-  async function loadComments(number: number) {
+  async function loadComments(number: string) {
     const repo = useRepoStore();
     const path = repo.current; // 同 loadCache：await 后 current 可能已被探针清空
     if (!path || !isTauri()) return;
@@ -101,7 +101,7 @@ export const useIssuesStore = defineStore("issues", () => {
 
   /** Optimistic pending row → gh post → replace with the fresh conversation;
    * any failure drops the pending row and surfaces the error. */
-  async function addComment(number: number, body: string) {
+  async function addComment(number: string, body: string) {
     const repo = useRepoStore();
     if (!repo.current) return;
     if (!isTauri()) {
@@ -121,7 +121,7 @@ export const useIssuesStore = defineStore("issues", () => {
     }
   }
 
-  function patchState(number: number, stateValue: string) {
+  function patchState(number: string, stateValue: string) {
     const target = issues.value.find((i) => i.number === number);
     if (target) target.state = stateValue;
   }

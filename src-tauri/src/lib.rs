@@ -164,7 +164,7 @@ fn refresh_pulls(repo_path: String, state: String, limit: u32) -> Result<Vec<Pul
 #[tauri::command]
 fn refresh_pull_detail(repo_path: String, number: i64) -> Result<Pull, String> {
     let repo = resolve(&repo_path)?;
-    let pull = source::source_for_ref(repo.platform.as_deref(), &repo.host).fetch_pull_detail(&repo, number).map_err(|e| e.to_string())?;
+    let pull = source::source_for_ref(repo.platform.as_deref(), &repo.host).fetch_pull_detail(&repo, &number.to_string()).map_err(|e| e.to_string())?;
     let conn = storage::open(&storage_dir_of(&repo)).map_err(|e| e.to_string())?;
     storage::upsert_pull(&conn, &pull).map_err(|e| e.to_string())?;
     Ok(pull)
@@ -188,7 +188,7 @@ fn cached_pull_count(repo_path: String, state: String) -> Result<i64, String> {
 fn merge_pull(repo_path: String, number: i64, method: String) -> Result<Pull, String> {
     let method = MergeMethod::parse(&method).map_err(|e| e.to_string())?;
     let repo = resolve(&repo_path)?;
-    let pull = source::source_for_ref(repo.platform.as_deref(), &repo.host).merge_pull(&repo, number, method).map_err(|e| e.to_string())?;
+    let pull = source::source_for_ref(repo.platform.as_deref(), &repo.host).merge_pull(&repo, &number.to_string(), method).map_err(|e| e.to_string())?;
     let conn = storage::open(&storage_dir_of(&repo)).map_err(|e| e.to_string())?;
     storage::upsert_pull(&conn, &pull).map_err(|e| e.to_string())?;
     Ok(pull)
@@ -230,25 +230,26 @@ fn probe_network() -> Result<(), String> {
 }
 
 /// Read an entity's comments from the offline cache (cache-first rendering).
+/// number 统一文本口径（Gitee issue 编号是字符串；PR 由前端转十进制文本）。
 #[tauri::command]
 fn list_cached_comments(
     repo_path: String,
     kind: String,
-    number: i64,
+    number: String,
 ) -> Result<Vec<Comment>, String> {
     let kind = Kind::parse(&kind).map_err(|e| e.to_string())?;
     let conn = storage::open(&storage_dir_for_target(&repo_path)).map_err(|e| e.to_string())?;
-    storage::list_comments(&conn, kind.as_str(), number).map_err(|e| e.to_string())
+    storage::list_comments(&conn, kind.as_str(), &number).map_err(|e| e.to_string())
 }
 
 /// Fetch an entity's comments via gh, replace the cache slice, return fresh.
 #[tauri::command]
-fn fetch_comments(repo_path: String, kind: String, number: i64) -> Result<Vec<Comment>, String> {
+fn fetch_comments(repo_path: String, kind: String, number: String) -> Result<Vec<Comment>, String> {
     let kind = Kind::parse(&kind).map_err(|e| e.to_string())?;
     let repo = resolve(&repo_path)?;
-    let comments = source::source_for_ref(repo.platform.as_deref(), &repo.host).fetch_comments(&repo, kind, number).map_err(|e| e.to_string())?;
+    let comments = source::source_for_ref(repo.platform.as_deref(), &repo.host).fetch_comments(&repo, kind, &number).map_err(|e| e.to_string())?;
     let mut conn = storage::open(&storage_dir_of(&repo)).map_err(|e| e.to_string())?;
-    storage::replace_comments(&mut conn, kind.as_str(), number, &comments).map_err(|e| e.to_string())?;
+    storage::replace_comments(&mut conn, kind.as_str(), &number, &comments).map_err(|e| e.to_string())?;
     Ok(comments)
 }
 
@@ -257,25 +258,25 @@ fn fetch_comments(repo_path: String, kind: String, number: i64) -> Result<Vec<Co
 fn add_comment(
     repo_path: String,
     kind: String,
-    number: i64,
+    number: String,
     body: String,
 ) -> Result<Vec<Comment>, String> {
     let kind = Kind::parse(&kind).map_err(|e| e.to_string())?;
     let repo = resolve(&repo_path)?;
-    let comments = source::source_for_ref(repo.platform.as_deref(), &repo.host).add_comment(&repo, kind, number, &body).map_err(|e| e.to_string())?;
+    let comments = source::source_for_ref(repo.platform.as_deref(), &repo.host).add_comment(&repo, kind, &number, &body).map_err(|e| e.to_string())?;
     let mut conn = storage::open(&storage_dir_of(&repo)).map_err(|e| e.to_string())?;
-    storage::replace_comments(&mut conn, kind.as_str(), number, &comments).map_err(|e| e.to_string())?;
+    storage::replace_comments(&mut conn, kind.as_str(), &number, &comments).map_err(|e| e.to_string())?;
     Ok(comments)
 }
 
 /// Close or reopen an issue; patches the cache row and returns the fresh
 /// entity so the frontend can patch both stores from one source of truth.
 #[tauri::command]
-fn set_issue_state(repo_path: String, number: i64, closed: bool) -> Result<Issue, String> {
+fn set_issue_state(repo_path: String, number: String, closed: bool) -> Result<Issue, String> {
     let repo = resolve(&repo_path)?;
-    let issue = source::source_for_ref(repo.platform.as_deref(), &repo.host).set_issue_state(&repo, number, closed).map_err(|e| e.to_string())?;
+    let issue = source::source_for_ref(repo.platform.as_deref(), &repo.host).set_issue_state(&repo, &number, closed).map_err(|e| e.to_string())?;
     let conn = storage::open(&storage_dir_of(&repo)).map_err(|e| e.to_string())?;
-    storage::update_issue_state(&conn, number, &issue.state).map_err(|e| e.to_string())?;
+    storage::update_issue_state(&conn, &issue.number, &issue.state).map_err(|e| e.to_string())?;
     Ok(issue)
 }
 
@@ -283,7 +284,7 @@ fn set_issue_state(repo_path: String, number: i64, closed: bool) -> Result<Issue
 #[tauri::command]
 fn set_pull_state(repo_path: String, number: i64, closed: bool) -> Result<Pull, String> {
     let repo = resolve(&repo_path)?;
-    let pull = source::source_for_ref(repo.platform.as_deref(), &repo.host).set_pull_state(&repo, number, closed).map_err(|e| e.to_string())?;
+    let pull = source::source_for_ref(repo.platform.as_deref(), &repo.host).set_pull_state(&repo, &number.to_string(), closed).map_err(|e| e.to_string())?;
     let conn = storage::open(&storage_dir_of(&repo)).map_err(|e| e.to_string())?;
     storage::upsert_pull(&conn, &pull).map_err(|e| e.to_string())?;
     Ok(pull)

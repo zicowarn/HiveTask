@@ -20,9 +20,10 @@ const MIGRATION_002: &str = include_str!("migrations/002_projects.sql");
 const MIGRATION_003: &str = include_str!("migrations/003_pr_draft.sql");
 const MIGRATION_004: &str = include_str!("migrations/004_comments.sql");
 const MIGRATION_005: &str = include_str!("migrations/005_meta.sql");
+const MIGRATION_006: &str = include_str!("migrations/006_issue_number_text.sql");
 
 /// Latest schema revision tracked through PRAGMA user_version.
-const CURRENT_SCHEMA_VERSION: i64 = 5;
+const CURRENT_SCHEMA_VERSION: i64 = 6;
 
 pub fn db_path(repo: &Path) -> PathBuf {
     repo.join(".hivetask").join("hivetask.db")
@@ -82,6 +83,9 @@ fn migrate(conn: &mut Connection) -> Result<()> {
     }
     if version < 5 {
         conn.execute_batch(MIGRATION_005).context("迁移 005 失败")?;
+    }
+    if version < 6 {
+        conn.execute_batch(MIGRATION_006).context("迁移 006 失败")?;
     }
     conn.pragma_update(None, "user_version", CURRENT_SCHEMA_VERSION)?;
     Ok(())
@@ -156,14 +160,16 @@ pub fn cached_issue_count(conn: &Connection, state: &str) -> Result<i64> {
         .map_err(Into::into)
 }
 
-/// Read cached issues, newest number first.
+/// Read cached issues, newest first. TEXT 编号下 `ORDER BY number` 会退化成
+/// 字典序（"10" < "9"）：含非数字字符的编号（Gitee "IKCTH7"）排最后，
+/// 纯数字编号按「长度优先、再字典」恢复数值序。
 pub fn list_issues(conn: &Connection, state: &str) -> Result<Vec<Issue>> {
     let (predicate, args) = state_predicate(state);
     let sql = format!(
         "SELECT number, title, state, body, author, milestone, labels, assignees,
                 created_at, updated_at, url
          FROM issues{predicate}
-         ORDER BY number DESC"
+         ORDER BY number GLOB '*[^0-9]*' ASC, length(number) DESC, number DESC"
     );
     let mut stmt = conn.prepare(&sql)?;
     let rows = stmt.query_map(rusqlite::params_from_iter(args), map_issue)?;
@@ -194,10 +200,11 @@ fn parse_string_array(raw: Option<String>) -> Vec<String> {
 }
 
 /// Replace the cached comments of one entity (kind: "issue" | "pull").
+/// number 统一文本口径（issue 为平台原样编号，pull 为十进制文本）。
 pub fn replace_comments(
     conn: &mut Connection,
     kind: &str,
-    number: i64,
+    number: &str,
     comments: &[Comment],
 ) -> Result<()> {
     let tx = conn.transaction()?;
@@ -217,7 +224,7 @@ pub fn replace_comments(
 }
 
 /// Read cached comments of one entity, oldest first.
-pub fn list_comments(conn: &Connection, kind: &str, number: i64) -> Result<Vec<Comment>> {
+pub fn list_comments(conn: &Connection, kind: &str, number: &str) -> Result<Vec<Comment>> {
     let mut stmt = conn.prepare(
         "SELECT author, body, created_at FROM comments
          WHERE kind = ?1 AND number = ?2
@@ -235,7 +242,7 @@ pub fn list_comments(conn: &Connection, kind: &str, number: i64) -> Result<Vec<C
 }
 
 /// Patch one cached issue's state after a close/reopen mutation.
-pub fn update_issue_state(conn: &Connection, number: i64, state: &str) -> Result<()> {
+pub fn update_issue_state(conn: &Connection, number: &str, state: &str) -> Result<()> {
     conn.execute(
         "UPDATE issues SET state = ?1, synced_at = datetime('now') WHERE number = ?2",
         (state, number),
@@ -405,9 +412,9 @@ mod tests {
         dir
     }
 
-    fn sample_issue(number: i64, state: &str) -> Issue {
+    fn sample_issue(number: &str, state: &str) -> Issue {
         Issue {
-            number,
+            number: number.to_string(),
             title: format!("issue {number}"),
             state: state.to_string(),
             body: Some("body text".into()),
@@ -426,7 +433,7 @@ mod tests {
         let repo = temp_repo();
         {
             let mut conn = open(&repo).unwrap();
-            replace_issues(&mut conn, "open", &[sample_issue(1, "OPEN")]).unwrap();
+            replace_issues(&mut conn, "open", &[sample_issue("1", "OPEN")]).unwrap();
         }
         // Reopen must replay idempotent scripts without error.
         let conn = open(&repo).unwrap();
@@ -445,22 +452,44 @@ mod tests {
         replace_issues(
             &mut conn,
             "open",
-            &[sample_issue(1, "OPEN"), sample_issue(2, "OPEN")],
+            &[sample_issue("1", "OPEN"), sample_issue("2", "OPEN")],
         )
         .unwrap();
-        replace_issues(&mut conn, "closed", &[sample_issue(9, "CLOSED")]).unwrap();
+        replace_issues(&mut conn, "closed", &[sample_issue("9", "CLOSED")]).unwrap();
         assert_eq!(cached_issue_count(&conn, "all").unwrap(), 3);
 
         // Re-sync open: stale open rows removed/replaced, closed row survives.
-        replace_issues(&mut conn, "open", &[sample_issue(3, "OPEN")]).unwrap();
+        replace_issues(&mut conn, "open", &[sample_issue("3", "OPEN")]).unwrap();
         assert_eq!(cached_issue_count(&conn, "all").unwrap(), 2);
         assert_eq!(cached_issue_count(&conn, "closed").unwrap(), 1);
 
         let open_issues = list_issues(&conn, "open").unwrap();
         assert_eq!(open_issues.len(), 1);
-        assert_eq!(open_issues[0].number, 3);
+        assert_eq!(open_issues[0].number, "3");
         assert_eq!(open_issues[0].labels, vec!["bug".to_string()]);
 
+        std::fs::remove_dir_all(&repo).ok();
+    }
+
+    #[test]
+    fn text_numbers_sort_numerically() {
+        let repo = temp_repo();
+        let mut conn = open(&repo).unwrap();
+        replace_issues(
+            &mut conn,
+            "open",
+            &[
+                sample_issue("10", "OPEN"),
+                sample_issue("2", "OPEN"),
+                sample_issue("1", "OPEN"),
+                sample_issue("IKCTH7", "OPEN"),
+            ],
+        )
+        .unwrap();
+        let numbers: Vec<String> =
+            list_issues(&conn, "open").unwrap().into_iter().map(|i| i.number).collect();
+        // 纯数字编号按数值序（长度优先再字典），字母编号字典序兜底在最后。
+        assert_eq!(numbers, vec!["10", "2", "1", "IKCTH7"]);
         std::fs::remove_dir_all(&repo).ok();
     }
 
@@ -556,23 +585,23 @@ mod comment_tests {
         replace_comments(
             &mut conn,
             "issue",
-            42,
+            "42",
             &[comment("alice", "2026-09-01T10:00:00Z"), comment("bob", "2026-09-02T11:00:00Z")],
         )
         .unwrap();
         // A PR with the same number must not bleed across kinds.
-        replace_comments(&mut conn, "pull", 42, &[comment("carol", "2026-09-03T09:00:00Z")]).unwrap();
+        replace_comments(&mut conn, "pull", "42", &[comment("carol", "2026-09-03T09:00:00Z")]).unwrap();
 
-        let issue_comments = list_comments(&conn, "issue", 42).unwrap();
+        let issue_comments = list_comments(&conn, "issue", "42").unwrap();
         assert_eq!(issue_comments.len(), 2);
         assert_eq!(issue_comments[0].author.as_deref(), Some("alice"));
-        let pull_comments = list_comments(&conn, "pull", 42).unwrap();
+        let pull_comments = list_comments(&conn, "pull", "42").unwrap();
         assert_eq!(pull_comments.len(), 1);
         assert_eq!(pull_comments[0].author.as_deref(), Some("carol"));
 
         // Re-sync replaces wholesale instead of appending.
-        replace_comments(&mut conn, "issue", 42, &[comment("dave", "2026-09-04T08:00:00Z")]).unwrap();
-        let resynced = list_comments(&conn, "issue", 42).unwrap();
+        replace_comments(&mut conn, "issue", "42", &[comment("dave", "2026-09-04T08:00:00Z")]).unwrap();
+        let resynced = list_comments(&conn, "issue", "42").unwrap();
         assert_eq!(resynced.len(), 1);
         assert_eq!(resynced[0].author.as_deref(), Some("dave"));
 
@@ -584,7 +613,7 @@ mod comment_tests {
         let repo = temp_repo();
         let mut conn = open(&repo).unwrap();
         let issues = vec![Issue {
-            number: 7,
+            number: "7".to_string(),
             title: "issue 7".into(),
             state: "OPEN".into(),
             body: None,
@@ -598,13 +627,43 @@ mod comment_tests {
         }];
         replace_issues(&mut conn, "open", &issues).unwrap();
 
-        update_issue_state(&conn, 7, "CLOSED").unwrap();
+        update_issue_state(&conn, "7", "CLOSED").unwrap();
         let open_bucket = list_issues(&conn, "open").unwrap();
         assert!(open_bucket.is_empty());
         let closed_bucket = list_issues(&conn, "closed").unwrap();
         assert_eq!(closed_bucket.len(), 1);
         assert_eq!(closed_bucket[0].state, "CLOSED");
 
+        std::fs::remove_dir_all(&repo).ok();
+    }
+
+    #[test]
+    fn migration_006_casts_legacy_integer_numbers() {
+        let repo = temp_repo();
+        let dir = repo.join(".hivetask");
+        std::fs::create_dir_all(&dir).unwrap();
+        {
+            let mut conn = Connection::open(dir.join("hivetask.db")).unwrap();
+            // 模拟 v5 存量库：整数主键的 issue/comment 行
+            for sql in [MIGRATION_001, MIGRATION_002, MIGRATION_003, MIGRATION_004, MIGRATION_005] {
+                conn.execute_batch(sql).unwrap();
+            }
+            conn.execute_batch(
+                "INSERT INTO issues (number, title, state) VALUES (7, 'legacy', 'OPEN');
+                 INSERT INTO comments (kind, number, author, body)
+                 VALUES ('issue', 7, 'alice', 'hi');",
+            )
+            .unwrap();
+            conn.pragma_update(None, "user_version", 5).unwrap();
+        }
+        // open() 执行 006：整数编号无损转文本
+        let conn = open(&repo).unwrap();
+        let issues = list_issues(&conn, "open").unwrap();
+        assert_eq!(issues.len(), 1);
+        assert_eq!(issues[0].number, "7");
+        let comments = list_comments(&conn, "issue", "7").unwrap();
+        assert_eq!(comments.len(), 1);
+        assert_eq!(comments[0].author.as_deref(), Some("alice"));
         std::fs::remove_dir_all(&repo).ok();
     }
 }

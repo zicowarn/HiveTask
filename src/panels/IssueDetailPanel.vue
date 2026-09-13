@@ -27,11 +27,13 @@ const {
   if (issues.selected) await issues.setClosed(issues.selected, closed);
 });
 
-// Load the conversation whenever the selection changes.
+// Load the conversation whenever the selection changes. 编号是文本后不能用
+// 真值判断（空串合法地代表"未选中"，而编号本身不可能为空串——但显式
+// 判 null 才不依赖这个巧合）。
 watch(
   () => issues.selected?.number,
   (number) => {
-    if (number) void issues.loadComments(number);
+    if (number != null && number !== "") void issues.loadComments(number);
     else issues.clearComments();
   },
   { immediate: true },

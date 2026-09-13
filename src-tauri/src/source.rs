@@ -112,16 +112,28 @@ pub struct RepoRef {
     pub workdir: Option<PathBuf>,
 }
 
-/// 数据来源抽象。
+/// 数据来源抽象。带编号的方法统一 `&str` 入参：gh CLI 与 REST 路径
+/// 拼接本就以文本进行；PR 编号在各平台恒为整数，但仅作为文本透传
+/// （Pull 返回结构里仍是 i64）。
 pub trait Source: Send + Sync {
     fn fetch_issues(&self, repo: &RepoRef, state: IssueStateFilter, limit: u32) -> Result<Vec<Issue>>;
     fn fetch_pulls(&self, repo: &RepoRef, state: PullStateFilter, limit: u32) -> Result<Vec<Pull>>;
-    fn fetch_pull_detail(&self, repo: &RepoRef, number: i64) -> Result<Pull>;
-    fn fetch_comments(&self, repo: &RepoRef, kind: Kind, number: i64) -> Result<Vec<Comment>>;
-    fn add_comment(&self, repo: &RepoRef, kind: Kind, number: i64, body: &str) -> Result<Vec<Comment>>;
-    fn set_issue_state(&self, repo: &RepoRef, number: i64, closed: bool) -> Result<Issue>;
-    fn set_pull_state(&self, repo: &RepoRef, number: i64, closed: bool) -> Result<Pull>;
-    fn merge_pull(&self, repo: &RepoRef, number: i64, method: MergeMethod) -> Result<Pull>;
+    fn fetch_pull_detail(&self, repo: &RepoRef, number: &str) -> Result<Pull>;
+    fn fetch_comments(&self, repo: &RepoRef, kind: Kind, number: &str) -> Result<Vec<Comment>>;
+    fn add_comment(&self, repo: &RepoRef, kind: Kind, number: &str, body: &str) -> Result<Vec<Comment>>;
+    fn set_issue_state(&self, repo: &RepoRef, number: &str, closed: bool) -> Result<Issue>;
+    fn set_pull_state(&self, repo: &RepoRef, number: &str, closed: bool) -> Result<Pull>;
+    fn merge_pull(&self, repo: &RepoRef, number: &str, method: MergeMethod) -> Result<Pull>;
+}
+
+/// JSON 编号字段 → 文本口径：字符串直取（Gitee v5 issue "IKCTH7"），
+/// 整数转十进制文本（GitHub/Gitea/PR）。其余形态归空串。
+pub fn json_number_to_string(value: Option<&serde_json::Value>) -> String {
+    match value {
+        Some(serde_json::Value::String(s)) => s.clone(),
+        Some(v) => v.as_i64().map(|n| n.to_string()).unwrap_or_default(),
+        None => String::new(),
+    }
 }
 
 /// 解析 target（前端传入的仓库标识 = 本地路径 或 仅远端 remote_url）：

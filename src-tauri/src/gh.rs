@@ -97,22 +97,22 @@ impl Source for GhSource {
     fn fetch_pulls(&self, repo: &RepoRef, state: PullStateFilter, limit: u32) -> Result<Vec<Pull>> {
         fetch_pulls(&format!("{}/{}", repo.owner, repo.repo), state.as_gh_str(), limit)
     }
-    fn fetch_pull_detail(&self, repo: &RepoRef, number: i64) -> Result<Pull> {
+    fn fetch_pull_detail(&self, repo: &RepoRef, number: &str) -> Result<Pull> {
         fetch_pull_detail(&format!("{}/{}", repo.owner, repo.repo), number)
     }
-    fn fetch_comments(&self, repo: &RepoRef, kind: Kind, number: i64) -> Result<Vec<Comment>> {
+    fn fetch_comments(&self, repo: &RepoRef, kind: Kind, number: &str) -> Result<Vec<Comment>> {
         fetch_comments(&format!("{}/{}", repo.owner, repo.repo), kind, number)
     }
-    fn add_comment(&self, repo: &RepoRef, kind: Kind, number: i64, body: &str) -> Result<Vec<Comment>> {
+    fn add_comment(&self, repo: &RepoRef, kind: Kind, number: &str, body: &str) -> Result<Vec<Comment>> {
         add_comment(&format!("{}/{}", repo.owner, repo.repo), kind, number, body)
     }
-    fn set_issue_state(&self, repo: &RepoRef, number: i64, closed: bool) -> Result<Issue> {
+    fn set_issue_state(&self, repo: &RepoRef, number: &str, closed: bool) -> Result<Issue> {
         set_issue_state(&format!("{}/{}", repo.owner, repo.repo), number, closed)
     }
-    fn set_pull_state(&self, repo: &RepoRef, number: i64, closed: bool) -> Result<Pull> {
+    fn set_pull_state(&self, repo: &RepoRef, number: &str, closed: bool) -> Result<Pull> {
         set_pull_state(&format!("{}/{}", repo.owner, repo.repo), number, closed)
     }
-    fn merge_pull(&self, repo: &RepoRef, number: i64, method: MergeMethod) -> Result<Pull> {
+    fn merge_pull(&self, repo: &RepoRef, number: &str, method: MergeMethod) -> Result<Pull> {
         merge_pull(&format!("{}/{}", repo.owner, repo.repo), number, method)
     }
 }
@@ -180,7 +180,7 @@ fn parse_issue_value(v: &Value) -> Issue {
         .unwrap_or_default();
 
     Issue {
-        number: v.get("number").and_then(Value::as_i64).unwrap_or_default(),
+        number: crate::source::json_number_to_string(v.get("number")),
         title: v
             .get("title")
             .and_then(Value::as_str)
@@ -255,10 +255,9 @@ fn without_merged(pulls: Vec<Pull>) -> Vec<Pull> {
 }
 
 /// Fetch one PR with full fields via `gh pr view <number> --json`.
-fn fetch_pull_detail(slug: &str, number: i64) -> Result<Pull> {
+fn fetch_pull_detail(slug: &str, number: &str) -> Result<Pull> {
     let fields = format!("{PR_LIST_FIELDS},{PR_DETAIL_FIELDS}");
-    let number_str = number.to_string();
-    let args = ["pr", "view", &number_str, "--repo", slug, "--json", &fields];
+    let args = ["pr", "view", number, "--repo", slug, "--json", &fields];
     let stdout = run_gh(&args)?;
     let value: Value =
         serde_json::from_str(&stdout).context("解析 gh pr view 的 JSON 输出失败")?;
@@ -280,10 +279,9 @@ fn gh_subcommand(kind: Kind) -> &'static str {
 
 /// Fetch an entity's conversation comments via `gh issue|pr view --json
 /// comments`. `kind` is the entity kind "issue" | "pull".
-fn fetch_comments(slug: &str, kind: Kind, number: i64) -> Result<Vec<Comment>> {
+fn fetch_comments(slug: &str, kind: Kind, number: &str) -> Result<Vec<Comment>> {
     let sub = gh_subcommand(kind);
-    let number_str = number.to_string();
-    let args = [sub, "view", &number_str, "--repo", slug, "--json", "comments"];
+    let args = [sub, "view", number, "--repo", slug, "--json", "comments"];
     let stdout = run_gh(&args)?;
     let value: Value = serde_json::from_str(&stdout).context("解析 gh 的评论 JSON 失败")?;
     Ok(value
@@ -309,10 +307,9 @@ fn parse_comment_value(v: &Value) -> Comment {
 /// Post a comment via `gh issue|pr comment`, then re-read the conversation.
 /// Returning the fresh list IS the write-through: one roundtrip leaves the
 /// cache and the UI consistent without a separate refresh call.
-fn add_comment(slug: &str, kind: Kind, number: i64, body: &str) -> Result<Vec<Comment>> {
+fn add_comment(slug: &str, kind: Kind, number: &str, body: &str) -> Result<Vec<Comment>> {
     let sub = gh_subcommand(kind);
-    let number_str = number.to_string();
-    let args = [sub, "comment", &number_str, "--repo", slug, "--body", body];
+    let args = [sub, "comment", number, "--repo", slug, "--body", body];
     run_gh(&args)?;
     fetch_comments(slug, kind, number)
 }
@@ -332,10 +329,9 @@ fn merge_flag(method: MergeMethod) -> &'static str {
 
 /// Merge a pull request, then re-read the full record (write-through: the
 /// fresh MERGED state becomes the single source for store patching).
-fn merge_pull(slug: &str, number: i64, method: MergeMethod) -> Result<Pull> {
+fn merge_pull(slug: &str, number: &str, method: MergeMethod) -> Result<Pull> {
     let flag = merge_flag(method);
-    let number_str = number.to_string();
-    let args = ["pr", "merge", &number_str, "--repo", slug, flag];
+    let args = ["pr", "merge", number, "--repo", slug, flag];
     run_gh(&args)?;
     fetch_pull_detail(slug, number)
 }
@@ -356,12 +352,11 @@ pub fn probe_network() -> Result<()> {
 }
 
 /// Close or reopen an issue; returns the fresh entity for store patching.
-fn set_issue_state(slug: &str, number: i64, closed: bool) -> Result<Issue> {
-    let number_str = number.to_string();
+fn set_issue_state(slug: &str, number: &str, closed: bool) -> Result<Issue> {
     let verb = if closed { "close" } else { "reopen" };
-    let args = ["issue", verb, &number_str, "--repo", slug];
+    let args = ["issue", verb, number, "--repo", slug];
     run_gh(&args)?;
-    let args = ["issue", "view", &number_str, "--repo", slug, "--json", ISSUE_LIST_FIELDS];
+    let args = ["issue", "view", number, "--repo", slug, "--json", ISSUE_LIST_FIELDS];
     let stdout = run_gh(&args)?;
     let value: Value =
         serde_json::from_str(&stdout).context("解析 gh issue view 的 JSON 输出失败")?;
@@ -370,10 +365,9 @@ fn set_issue_state(slug: &str, number: i64, closed: bool) -> Result<Issue> {
 
 /// Close or reopen a pull request; returns the fresh full record so a close
 /// that raced a merge surfaces as MERGED, not CLOSED.
-fn set_pull_state(slug: &str, number: i64, closed: bool) -> Result<Pull> {
-    let number_str = number.to_string();
+fn set_pull_state(slug: &str, number: &str, closed: bool) -> Result<Pull> {
     let verb = if closed { "close" } else { "reopen" };
-    let args = ["pr", verb, &number_str, "--repo", slug];
+    let args = ["pr", verb, number, "--repo", slug];
     run_gh(&args)?;
     fetch_pull_detail(slug, number)
 }
@@ -535,7 +529,7 @@ mod tests {
         assert_eq!(issues.len(), 2);
 
         let first = &issues[0];
-        assert_eq!(first.number, 42);
+        assert_eq!(first.number, "42");
         assert_eq!(first.state, "OPEN");
         assert_eq!(first.author.as_deref(), Some("zicowarn"));
         assert_eq!(first.labels, vec!["bug", "ui"]);
@@ -543,7 +537,7 @@ mod tests {
         assert_eq!(first.assignees, vec!["zicowarn"]);
 
         let second = &issues[1];
-        assert_eq!(second.number, 41);
+        assert_eq!(second.number, "41");
         assert!(second.body.is_none());
         assert!(second.author.is_none());
         assert!(second.labels.is_empty());

@@ -38,14 +38,15 @@ export const api = {
     invoke<Pull[]>("list_cached_pulls", { repoPath, state }),
   cachedPullCount: (repoPath: string, state: PullState) =>
     invoke<number>("cached_pull_count", { repoPath, state }),
-  listCachedComments: (repoPath: string, kind: "issue" | "pull", number: number) =>
+  // issue 编号统一文本口径（Gitee v5 是字符串）；pull 编号保持数字。
+  listCachedComments: (repoPath: string, kind: "issue" | "pull", number: string) =>
     invoke<Comment[]>("list_cached_comments", { repoPath, kind, number }),
-  fetchComments: (repoPath: string, kind: "issue" | "pull", number: number) =>
+  fetchComments: (repoPath: string, kind: "issue" | "pull", number: string) =>
     invoke<Comment[]>("fetch_comments", { repoPath, kind, number }),
   // Returns the fresh conversation — the write-through contract.
-  addComment: (repoPath: string, kind: "issue" | "pull", number: number, body: string) =>
+  addComment: (repoPath: string, kind: "issue" | "pull", number: string, body: string) =>
     invoke<Comment[]>("add_comment", { repoPath, kind, number, body }),
-  setIssueState: (repoPath: string, number: number, closed: boolean) =>
+  setIssueState: (repoPath: string, number: string, closed: boolean) =>
     invoke<Issue>("set_issue_state", { repoPath, number, closed }),
   setPullState: (repoPath: string, number: number, closed: boolean) =>
     invoke<Pull>("set_pull_state", { repoPath, number, closed }),

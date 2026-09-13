@@ -115,9 +115,9 @@ export const usePullsStore = defineStore("pulls", () => {
     if (!repo.current || !isTauri()) return;
     commentsLoading.value = true;
     try {
-      const cached = await api.listCachedComments(repo.current, "pull", number);
+      const cached = await api.listCachedComments(repo.current, "pull", String(number));
       if (selectedNumber.value === number) comments.value = cached;
-      const fresh = await api.fetchComments(repo.current, "pull", number);
+      const fresh = await api.fetchComments(repo.current, "pull", String(number));
       if (selectedNumber.value === number) comments.value = fresh;
     } catch (e) {
       error.value = translateError(String(e));
@@ -137,7 +137,7 @@ export const usePullsStore = defineStore("pulls", () => {
     commentSubmitting.value = true;
     comments.value.push({ body, pending: true });
     try {
-      const fresh = await api.addComment(repo.current, "pull", number, body);
+      const fresh = await api.addComment(repo.current, "pull", String(number), body);
       if (selectedNumber.value === number) comments.value = fresh;
     } catch (e) {
       comments.value = comments.value.filter((c) => !c.pending);

@@ -125,7 +125,9 @@ impl GiteaSource {
 
 pub(crate) fn map_gitea_issue(v: &Value) -> Issue {
     Issue {
-        number: v.get("number").and_then(Value::as_i64).unwrap_or_default(),
+        // Gitee v5 的 issue number 是字符串（"IKCTH7"），Gitea 是整数——
+        // 统一文本口径（此前 as_i64 对 Gitee 静默变 0）。
+        number: crate::source::json_number_to_string(v.get("number")),
         title: v.get("title").and_then(Value::as_str).unwrap_or_default().to_string(),
         state: match v.get("state").and_then(Value::as_str) {
             Some("closed") => "CLOSED",
@@ -231,7 +233,7 @@ pub(crate) fn map_gitea_comment(v: &Value) -> Comment {
 }
 
 impl GiteaSource {
-    fn comments_url(&self, slug: &RepoSlug, number: i64) -> String {
+    fn comments_url(&self, slug: &RepoSlug, number: &str) -> String {
         self.api(&format!("/repos/{}/{}/issues/{number}/comments", slug.owner, slug.repo))
     }
 }
@@ -262,14 +264,14 @@ impl Source for GiteaSource {
         Ok(pulls)
     }
 
-    fn fetch_pull_detail(&self, repo: &RepoRef, number: i64) -> Result<Pull> {
+    fn fetch_pull_detail(&self, repo: &RepoRef, number: &str) -> Result<Pull> {
         let slug = self.slug_ref(repo);
         let url = self.api(&format!("/repos/{}/{}/pulls/{number}", slug.owner, slug.repo));
         let value = self.get(&url)?;
         Ok(map_gitea_pull(&value))
     }
 
-    fn fetch_comments(&self, repo: &RepoRef, kind: Kind, number: i64) -> Result<Vec<Comment>> {
+    fn fetch_comments(&self, repo: &RepoRef, kind: Kind, number: &str) -> Result<Vec<Comment>> {
         // Gitee/Gitea 的 PR 评论走 issue 评论端点（PR 即带编号的 issue）。
         let _ = kind;
         let value = self.get(&self.comments_url(&self.slug_ref(repo), number))?;
@@ -279,14 +281,14 @@ impl Source for GiteaSource {
             .unwrap_or_default())
     }
 
-    fn add_comment(&self, repo: &RepoRef, kind: Kind, number: i64, body: &str) -> Result<Vec<Comment>> {
+    fn add_comment(&self, repo: &RepoRef, kind: Kind, number: &str, body: &str) -> Result<Vec<Comment>> {
         let slug = self.slug_ref(repo);
         let url = self.comments_url(&slug, number);
         self.send_json(reqwest::Method::POST, &url, serde_json::json!({ "body": body }))?;
         self.fetch_comments(repo, kind, number)
     }
 
-    fn set_issue_state(&self, repo: &RepoRef, number: i64, closed: bool) -> Result<Issue> {
+    fn set_issue_state(&self, repo: &RepoRef, number: &str, closed: bool) -> Result<Issue> {
         let slug = self.slug_ref(repo);
         let url = self.api(&format!("/repos/{}/{}/issues/{number}", slug.owner, slug.repo));
         let state = if closed { "closed" } else { "open" };
@@ -295,7 +297,7 @@ impl Source for GiteaSource {
         Ok(map_gitea_issue(&value))
     }
 
-    fn set_pull_state(&self, repo: &RepoRef, number: i64, closed: bool) -> Result<Pull> {
+    fn set_pull_state(&self, repo: &RepoRef, number: &str, closed: bool) -> Result<Pull> {
         let slug = self.slug_ref(repo);
         let url = self.api(&format!("/repos/{}/{}/pulls/{number}", slug.owner, slug.repo));
         let state = if closed { "closed" } else { "open" };
@@ -304,7 +306,7 @@ impl Source for GiteaSource {
         Ok(map_gitea_pull(&value))
     }
 
-    fn merge_pull(&self, repo: &RepoRef, number: i64, method: MergeMethod) -> Result<Pull> {
+    fn merge_pull(&self, repo: &RepoRef, number: &str, method: MergeMethod) -> Result<Pull> {
         let slug = self.slug_ref(repo);
         let url = self.api(&format!("/repos/{}/{}/pulls/{number}/merge", slug.owner, slug.repo));
         // 方言：Gitea 用 Do 字段；Gitee v5 用 merge_method 字段。
@@ -358,12 +360,30 @@ mod tests {
     fn maps_issue_dialect() {
         let v: Value = serde_json::from_str(ISSUE_SAMPLE).unwrap();
         let issue = map_gitea_issue(&v);
-        assert_eq!(issue.number, 42);
+        assert_eq!(issue.number, "42"); // 整数编号归一为十进制文本
         assert_eq!(issue.state, "OPEN"); // 小写方言 → GitHub 大写口径
         assert_eq!(issue.milestone.as_deref(), Some("v1.2"));
         assert_eq!(issue.labels, vec!["bug", "ui"]);
         assert_eq!(issue.author.as_deref(), Some("alice"));
         assert_eq!(issue.url.as_deref(), Some("https://gitea.example.com/o/r/issues/42"));
+    }
+
+    /// 真 Gitee v5 的 issue 样本：number 是字符串形态。
+    const GITEE_ISSUE_SAMPLE: &str = r#"{
+      "number": "IKCTH7",
+      "title": "gitee string id",
+      "state": "open",
+      "user": {"login": "alice"},
+      "html_url": "https://gitee.com/o/r/issues/IKCTH7"
+    }"#;
+
+    #[test]
+    fn maps_gitee_string_issue_number() {
+        let v: Value = serde_json::from_str(GITEE_ISSUE_SAMPLE).unwrap();
+        let issue = map_gitea_issue(&v);
+        // 此前 as_i64 对字符串编号静默变 0——文本口径后原样保留。
+        assert_eq!(issue.number, "IKCTH7");
+        assert_eq!(issue.state, "OPEN");
     }
 
     #[test]

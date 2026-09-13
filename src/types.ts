@@ -29,7 +29,8 @@ export interface GitBranchRow {
   behind: number;
 }
 export interface Issue {
-  number: number;
+  /** 平台原样编号：GitHub/Gitea 十进制文本，Gitee v5 为 "IKCTH7" 形态。 */
+  number: string;
   title: string;
   state: "OPEN" | "CLOSED" | string;
   body?: string | null;

@@ -7,7 +7,9 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Issue {
-    pub number: i64,
+    /// 平台原样编号：GitHub/Gitea 为十进制文本，Gitee v5 为 "IKCTH7" 形态
+    /// 字符串（缓存列已同步 TEXT，见 migration 006）。
+    pub number: String,
     pub title: String,
     /// GitHub state as returned by `gh`: "OPEN" | "CLOSED".
     pub state: String,
