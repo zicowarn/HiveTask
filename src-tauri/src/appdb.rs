@@ -11,11 +11,12 @@ use serde::Serialize;
 use std::path::PathBuf;
 
 const APP_IDENTIFIER: &str = "dev.zicowarn.hivetask";
-const CURRENT_APP_SCHEMA_VERSION: i64 = 3;
+const CURRENT_APP_SCHEMA_VERSION: i64 = 4;
 
 const APP_MIGRATION_001: &str = include_str!("migrations/app_001_registry.sql");
 const APP_MIGRATION_002: &str = include_str!("migrations/app_002_projects.sql");
 const APP_MIGRATION_003: &str = include_str!("migrations/app_003_project_repos.sql");
+const APP_MIGRATION_004: &str = include_str!("migrations/app_004_repo_visibility.sql");
 
 pub fn app_data_dir() -> Option<PathBuf> {
     #[cfg(target_os = "macos")]
@@ -78,6 +79,9 @@ pub(crate) fn app_migrate(conn: &Connection) -> anyhow::Result<()> {
     if version < 3 {
         conn.execute_batch(APP_MIGRATION_003).context("app 迁移 003 失败")?;
     }
+    if version < 4 {
+        conn.execute_batch(APP_MIGRATION_004).context("app 迁移 004 失败")?;
+    }
     conn.pragma_update(None, "user_version", CURRENT_APP_SCHEMA_VERSION)?;
     Ok(())
 }
@@ -104,6 +108,8 @@ pub struct RepoEntry {
     /// JOIN connections 派生（NULL 连接 = 自动解析，按 host 推断）。
     pub connection_label: Option<String>,
     pub platform: Option<String>,
+    /// 平台侧可见性缓存（'public'|'private'；NULL = 未探测/本地/未知）。
+    pub visibility: Option<String>,
     pub last_opened_at: String,
 }
 
@@ -264,7 +270,7 @@ fn repo_list_in(conn: &Connection) -> Result<Vec<RepoEntry>, String> {
     let mut stmt = conn
         .prepare(
             "SELECT r.id, r.path, r.remote_url, r.display_name, r.connection_id,
-                    c.label, c.platform, r.last_opened_at
+                    c.label, c.platform, r.visibility, r.last_opened_at
              FROM repos r LEFT JOIN connections c ON c.id = r.connection_id
              ORDER BY r.last_opened_at DESC",
         )
@@ -279,7 +285,8 @@ fn repo_list_in(conn: &Connection) -> Result<Vec<RepoEntry>, String> {
                 connection_id: row.get(4)?,
                 connection_label: row.get(5)?,
                 platform: row.get(6)?,
-                last_opened_at: row.get(7)?,
+                visibility: row.get(7)?,
+                last_opened_at: row.get(8)?,
             })
         })
         .map_err(|e| e.to_string())?;
@@ -388,6 +395,34 @@ pub fn repo_delete(id: String) -> Result<(), String> {
     let conn = open().map_err(|e| e.to_string())?;
     conn.execute("DELETE FROM repos WHERE id = ?1", (&id,)).map_err(|e| e.to_string())?;
     Ok(())
+}
+
+/// 探测仓库平台侧可见性（"public"|"private"），写回登记表缓存并返回。
+/// 未挂连接（来源未知/纯本地）→ Ok(None)，不猜测——与分组同一条
+/// 「只认连接」纪律；探测失败向上传 Err（前端按 best-effort 吞掉）。
+#[tauri::command]
+pub fn repo_visibility(target: String) -> Result<Option<String>, String> {
+    let conn = open().map_err(|e| e.to_string())?;
+    let platform: Option<String> = conn
+        .query_row(
+            "SELECT c.platform FROM repos r
+             LEFT JOIN connections c ON c.id = r.connection_id
+             WHERE r.path = ?1 OR r.remote_url = ?1",
+            (&target,),
+            |row| row.get(0),
+        )
+        .ok();
+    let Some(platform) = platform else { return Ok(None) };
+    let repo = crate::source::resolve_target(&target).map_err(|e| e.to_string())?;
+    let vis = crate::source::source_for_ref(Some(&platform), &repo.host)
+        .repo_visibility(&repo)
+        .map_err(|e| e.to_string())?;
+    conn.execute(
+        "UPDATE repos SET visibility = ?1 WHERE path = ?2 OR remote_url = ?2",
+        (vis, &target),
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(Some(vis.to_string()))
 }
 
 #[cfg(test)]

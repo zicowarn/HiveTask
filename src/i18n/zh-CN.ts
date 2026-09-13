@@ -24,6 +24,8 @@ export const zhCN = {
   "repo.tabEmpty": "该来源暂无登记仓库",
   "repo.current": "当前",
   "repo.deleteTitle": "移除登记（仓库数据保留）",
+  "repo.visibilityPrivate": "私有仓库",
+  "repo.visibilityPublic": "公开仓库",
   "lang.switch": "切换语言",
   "lang.system": "跟随系统",
   "theme.switch": "主题：暗色 → 亮色 → 跟随系统（点击循环）",

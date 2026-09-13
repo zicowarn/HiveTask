@@ -23,6 +23,7 @@ import { netOnline, probeNow } from "../net";
 import { useI18n } from "../i18n";
 import { APP_VERSION } from "../app-info";
 import { shortOrigin } from "../origin";
+import EditorIcon from "../components/EditorIcon.vue";
 
 const props = defineProps<{ workspace: string }>();
 
@@ -141,7 +142,17 @@ async function probe() {
         {{ repoName ?? t("statusbar.noRepo") }}
       </button>
       <span v-if="origin" class="status-cell" :title="origin">{{ shortOrigin(origin) }}</span>
-      <span v-if="current" class="status-cell source-cell">{{ platformLabel }}</span>
+      <span
+        v-if="current"
+        class="status-cell source-cell"
+        :title="repo.visibility ? t(repo.visibility === 'private' ? 'repo.visibilityPrivate' : 'repo.visibilityPublic') : undefined"
+      >
+        <EditorIcon
+          v-if="repo.visibility"
+          :name="repo.visibility === 'private' ? 'lock' : 'unlock'"
+        />
+        {{ platformLabel }}
+      </span>
       <button
         v-if="projBoard && projTotal > 0"
         class="status-cell proj-cell"

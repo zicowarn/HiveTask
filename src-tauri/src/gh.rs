@@ -115,6 +115,9 @@ impl Source for GhSource {
     fn merge_pull(&self, repo: &RepoRef, number: &str, method: MergeMethod) -> Result<Pull> {
         merge_pull(&format!("{}/{}", repo.owner, repo.repo), number, method)
     }
+    fn repo_visibility(&self, repo: &RepoRef) -> Result<&'static str> {
+        repo_visibility(&format!("{}/{}", repo.owner, repo.repo))
+    }
 }
 
 /// 过滤器的 gh 方言（恰好与前端口径一致）。
@@ -262,6 +265,17 @@ fn fetch_pull_detail(slug: &str, number: &str) -> Result<Pull> {
     let value: Value =
         serde_json::from_str(&stdout).context("解析 gh pr view 的 JSON 输出失败")?;
     Ok(parse_pull_value(&value))
+}
+
+/// Repo visibility via `gh repo view --json visibility`. PUBLIC /
+/// PRIVATE / INTERNAL（GHE 企业可见，亦非公开）→ public/private。
+fn repo_visibility(slug: &str) -> Result<&'static str> {
+    let stdout = run_gh(&["repo", "view", "-R", slug, "--json", "visibility", "-q", ".visibility"])?;
+    Ok(match stdout.trim().to_ascii_uppercase().as_str() {
+        "PUBLIC" => "public",
+        "" => return Err(anyhow!("gh 未返回 visibility（仓库不存在或无权限）")),
+        _ => "private",
+    })
 }
 
 // ---- Mutations & conversations (the P1 write-through surface) ----

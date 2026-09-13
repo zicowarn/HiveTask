@@ -456,6 +456,7 @@ pub fn run() {
             appdb::repo_list,
             appdb::repo_register,
             appdb::repo_register_remote,
+            appdb::repo_visibility,
             appdb::repo_delete
         ])
         .manage(pty::PtyMap(std::sync::Mutex::new(std::collections::HashMap::new())))

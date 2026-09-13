@@ -26,6 +26,8 @@ export const useRepoStore = defineStore("repo", () => {
   const origin = ref<string | null>(null);
   // 当前仓库的来源路由口径（repo_info 与运行时同链解析）；null = 本地/未知。
   const platform = ref<string | null>(null);
+  // 平台侧可见性（"public"|"private"；null = 未探测/本地/来源未知）。
+  const visibility = ref<string | null>(null);
 
   // Startup guard: a persisted path may have rotted away (e.g. /tmp cleanup).
   // Clear it so the UI falls back to "未选择仓库" instead of dead reads.
@@ -39,6 +41,7 @@ export const useRepoStore = defineStore("repo", () => {
       } catch {
         // best-effort
       }
+      void probeVisibility();
       return;
     }
     try {
@@ -48,6 +51,8 @@ export const useRepoStore = defineStore("repo", () => {
         current.value = null;
         platform.value = null;
         localStorage.removeItem(LAST_KEY);
+      } else {
+        void probeVisibility();
       }
     } catch {
       // Probe is best-effort; keep the persisted path on failure.
@@ -72,7 +77,21 @@ export const useRepoStore = defineStore("repo", () => {
     localStorage.setItem(LAST_KEY, path);
     recent.value = [path, ...recent.value.filter((p) => p !== path)].slice(0, 10);
     localStorage.setItem(RECENT_KEY, JSON.stringify(recent.value));
+    visibility.value = null; // 旧仓库的可见性不串台，探测后落位
     refreshInfo();
+    void probeVisibility();
+  }
+
+  /** 探测当前仓库的平台可见性（异步 best-effort，结果缓存进登记表）。 */
+  async function probeVisibility() {
+    const path = current.value; // 快照：await 间隙 current 可能被清（同 issues store 教训）
+    if (!path || !isTauri()) return;
+    try {
+      const v = await api.repoVisibility(path);
+      if (current.value === path) visibility.value = v ?? null;
+    } catch {
+      // 探测失败保持 null（不显示锁）——不打扰用户。
+    }
   }
 
   async function pick() {
@@ -100,5 +119,5 @@ export const useRepoStore = defineStore("repo", () => {
     }
   }
 
-  return { current, origin, platform, recent, ghAvailable, checkHealth, setCurrent, pick, refreshInfo };
+  return { current, origin, platform, visibility, recent, ghAvailable, checkHealth, setCurrent, pick, refreshInfo, probeVisibility };
 });

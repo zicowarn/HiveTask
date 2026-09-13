@@ -124,6 +124,9 @@ pub trait Source: Send + Sync {
     fn set_issue_state(&self, repo: &RepoRef, number: &str, closed: bool) -> Result<Issue>;
     fn set_pull_state(&self, repo: &RepoRef, number: &str, closed: bool) -> Result<Pull>;
     fn merge_pull(&self, repo: &RepoRef, number: &str, method: MergeMethod) -> Result<Pull>;
+    /// 仓库在平台侧的可见性："public" | "private"。GitHub 的 INTERNAL
+    /// （GHE 企业可见，亦非公开）归一为 private；本地/无平台语义 → Err。
+    fn repo_visibility(&self, repo: &RepoRef) -> Result<&'static str>;
 }
 
 /// JSON 编号字段 → 文本口径：字符串直取（Gitee v5 issue "IKCTH7"），

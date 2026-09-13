@@ -266,6 +266,16 @@ impl GiteaSource {
 }
 
 impl Source for GiteaSource {
+    fn repo_visibility(&self, repo: &RepoRef) -> Result<&'static str> {
+        let slug = self.slug_ref(repo);
+        let value = self.get(&self.api(&format!("/repos/{}/{}", slug.owner, slug.repo)))?;
+        Ok(if value["private"].as_bool().unwrap_or(false) {
+            "private"
+        } else {
+            "public"
+        })
+    }
+
     fn fetch_issues(&self, repo: &RepoRef, filter: IssueStateFilter, limit: u32) -> Result<Vec<Issue>> {
         let slug = self.slug_ref(repo);
         let url = self.issues_url(&slug, filter, limit);

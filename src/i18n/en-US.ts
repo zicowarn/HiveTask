@@ -23,6 +23,8 @@ export const enUS: Record<MessageKey, string> = {
   "repo.tabEmpty": "No repositories registered for this source",
   "repo.current": "Current",
   "repo.deleteTitle": "Remove registration (repo data is kept)",
+  "repo.visibilityPrivate": "Private repository",
+  "repo.visibilityPublic": "Public repository",
   "lang.switch": "Switch language",
   "lang.system": "System",
   "theme.switch": "Theme: dark → light → system (click to cycle)",

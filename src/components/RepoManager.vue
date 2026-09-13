@@ -8,6 +8,7 @@ import { computed, onMounted, ref, watch } from "vue";
 import { api, isTauri } from "../api";
 import { useI18n } from "../i18n";
 import { useRepoStore } from "../stores/repo";
+import EditorIcon from "./EditorIcon.vue";
 
 const emit = defineEmits<{ close: []; select: [path: string] }>();
 
@@ -22,6 +23,7 @@ interface RepoEntry {
   connectionId?: string | null;
   connectionLabel?: string | null;
   platform?: string | null;
+  visibility?: string | null;
   lastOpenedAt: string;
 }
 
@@ -137,6 +139,23 @@ async function load() {
     }
   } finally {
     loading.value = false;
+  }
+  void probeMissingVisibility();
+}
+
+/** 后台补探缺可见性的行（有连接才有平台语义），逐个写回本地数组
+ * （命令层同时落登记表缓存；已探测过的不重打 API）。 */
+async function probeMissingVisibility() {
+  for (const entry of repos.value) {
+    if (entry.visibility || !entry.platform) continue;
+    const target = entry.path ?? entry.remoteUrl;
+    if (!target) continue;
+    try {
+      const v = await api.repoVisibility(target);
+      entry.visibility = v ?? null;
+    } catch {
+      // 探测失败留空（无锁）——下回路过后不再重试同一轮。
+    }
   }
 }
 
@@ -259,6 +278,11 @@ async function remove(entry: RepoEntry) {
         @click="pick(entry)"
       >
         <span class="repo-name">{{ nameOf(entry) }}</span>
+        <span
+          v-if="entry.visibility"
+          class="repo-vis"
+          :title="t(entry.visibility === 'private' ? 'repo.visibilityPrivate' : 'repo.visibilityPublic')"
+        ><EditorIcon :name="entry.visibility === 'private' ? 'lock' : 'unlock'" /></span>
         <span v-if="!entry.path" class="repo-remote-flag">{{ t("repo.remoteOnly") }}</span>
         <span v-if="entry.path === repoStore.current" class="repo-current">{{ t("repo.current") }}</span>
         <span class="repo-meta">{{ entry.connectionLabel ?? entry.remoteUrl ?? entry.path }}</span>
@@ -540,6 +564,10 @@ async function remove(entry: RepoEntry) {
   border: 1px dashed var(--border);
   border-radius: 8px;
   padding: 0 6px;
+}
+.repo-vis {
+  display: inline-flex;
+  color: var(--text-dim);
 }
 .repo-current {
   font-size: 10px;

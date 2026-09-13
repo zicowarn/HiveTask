@@ -49,6 +49,10 @@ impl Source for LocalSource {
         Err(anyhow!("本地仓库没有 Pull Request"))
     }
 
+    fn repo_visibility(&self, _repo: &RepoRef) -> Result<&'static str> {
+        Err(anyhow!("本地仓库没有平台可见性"))
+    }
+
     fn fetch_comments(&self, repo: &RepoRef, kind: Kind, number: &str) -> Result<Vec<Comment>> {
         if kind == Kind::Pull {
             return Ok(Vec::new());

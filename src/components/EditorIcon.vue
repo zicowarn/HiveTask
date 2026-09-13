@@ -57,6 +57,14 @@ defineProps<{ name: string }>();
       <circle cx="7" cy="7" r="2.2" />
       <path d="M7 1.4v2M7 10.6v2M1.4 7h2M10.6 7h2M3 3l1.4 1.4M9.6 9.6 11 11M11 3 9.6 4.4M4.4 9.6 3 11" />
     </template>
+    <template v-else-if="name === 'lock'">
+      <rect x="3.6" y="6.4" width="6.8" height="4.8" rx="1" />
+      <path d="M5.2 6.4V4.7a1.8 1.8 0 0 1 3.6 0v1.7" />
+    </template>
+    <template v-else-if="name === 'unlock'">
+      <rect x="3.6" y="6.4" width="6.8" height="4.8" rx="1" />
+      <path d="M5.2 6.4V4.7a1.8 1.8 0 0 1 3.6 0v.9" />
+    </template>
   </svg>
 </template>
 

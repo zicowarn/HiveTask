@@ -136,7 +136,8 @@ export const api = {
     invoke<{ id: string; label: string }>("connection_save", args),
   connectionDelete: (id: string) => invoke<void>("connection_delete", { id }),
   repoList: () =>
-    invoke<Array<{ id: string; path?: string | null; remoteUrl?: string | null; displayName?: string | null; connectionId?: string | null; connectionLabel?: string | null; platform?: string | null; lastOpenedAt: string }>>("repo_list"),
+    invoke<Array<{ id: string; path?: string | null; remoteUrl?: string | null; displayName?: string | null; connectionId?: string | null; connectionLabel?: string | null; platform?: string | null; visibility?: string | null; lastOpenedAt: string }>>("repo_list"),
+  repoVisibility: (target: string) => invoke<string | null>("repo_visibility", { target }),
   repoRegister: (path: string) => invoke<unknown>("repo_register", { path }),
   repoRegisterRemote: (url: string, platform: string) =>
     invoke<unknown>("repo_register_remote", { url, platform }),
