@@ -310,22 +310,32 @@ onBeforeUnmount(() => document.removeEventListener("keydown", onKeydown));
   font-size: 12px;
   color: var(--text);
 }
+/* 下拉与输入框同款扁平样式；select 必须 appearance:none，
+   否则 macOS 画原生渐变/立体外观（此前踩过）。 */
 .form-select,
 .form-input {
+  appearance: none;
+  -webkit-appearance: none;
   flex: 1;
   box-sizing: border-box;
   font-size: 12px;
   color: var(--text);
-  background: var(--bg-app);
+  background-color: var(--bg-app);
   border: 1px solid var(--border);
   border-radius: 5px;
   height: 26px;
   padding: 0 8px;
   outline: none;
 }
-.form-select,
-.form-select option {
-  color: var(--text);
+.form-select {
+  padding-right: 24px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 10 10'%3E%3Cpath d='M2 3.5L5 6.5L8 3.5' fill='none' stroke='%239aa0a8' stroke-width='1.4' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 8px center;
+  background-size: 8px;
+}
+[data-theme="light"] .form-select {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 10 10'%3E%3Cpath d='M2 3.5L5 6.5L8 3.5' fill='none' stroke='%23656d76' stroke-width='1.4' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
 }
 .form-input:focus,
 .form-select:focus {
