@@ -17,6 +17,7 @@ import { storeToRefs } from "pinia";
 import { useRepoStore } from "../stores/repo";
 import { useIssuesStore } from "../stores/issues";
 import { usePullsStore } from "../stores/pulls";
+import { useProjectsStore } from "../stores/projects";
 import { useSyncMetaStore } from "../stores/sync-meta";
 import { netOnline, probeNow } from "../net";
 import { useI18n } from "../i18n";
@@ -28,6 +29,7 @@ const props = defineProps<{ workspace: string }>();
 const repo = useRepoStore();
 const issues = useIssuesStore();
 const pulls = usePullsStore();
+const projectsStore = useProjectsStore();
 const syncMeta = useSyncMetaStore();
 const { t, locale, localeChoice, locales, cycleLocale } = useI18n();
 const { current, origin, ghAvailable } = storeToRefs(repo);
@@ -57,6 +59,24 @@ const platformLabel = computed(() => {
   const p = repo.platform;
   return p ? (PLATFORM_LABELS[p] ?? p) : t("statusbar.local");
 });
+
+/** 项目分布格：选中项目的按列计数（堆叠条 + 总数），点击跳项目工作区。
+ * 应用级数据（projects store 启动时已加载）；无选中项目则隐藏。 */
+const projBoard = computed(() => projectsStore.selected);
+const projDist = computed(() => {
+  const field = projectsStore.statusField;
+  if (!field) return [];
+  return field.options.map((o) => ({
+    id: o.id,
+    name: o.name,
+    color: o.color,
+    count: projectsStore.items.filter((i) => i.fieldValues[field.id] === o.id).length,
+  }));
+});
+const projTotal = computed(() => projDist.value.reduce((sum, d) => sum + d.count, 0));
+function gotoProjects() {
+  projectsStore.navRequest = { workspace: "projects" };
+}
 
 // Freshness is per filter bucket on the data workspaces; on other tabs
 // (and when the active bucket was never synced) the cell falls back to the
@@ -122,6 +142,24 @@ async function probe() {
       </button>
       <span v-if="origin" class="status-cell" :title="origin">{{ shortOrigin(origin) }}</span>
       <span v-if="current" class="status-cell source-cell">{{ platformLabel }}</span>
+      <button
+        v-if="projBoard && projTotal > 0"
+        class="status-cell proj-cell"
+        :title="projDist.map((d) => `${d.name} ${d.count}`).join(' · ')"
+        @click="gotoProjects"
+      >
+        <span class="proj-mark">◫</span>
+        {{ projBoard.displayName }}
+        <span class="proj-bar">
+          <span
+            v-for="d in projDist"
+            :key="d.id"
+            class="proj-seg"
+            :style="{ background: d.color, flexGrow: d.count }"
+          ></span>
+        </span>
+        {{ projTotal }}
+      </button>
     </div>
 
     <div class="status-right">
@@ -217,6 +255,23 @@ button.status-cell {
 }
 .source-cell {
   color: var(--accent);
+}
+.proj-cell {
+  max-width: 300px;
+}
+.proj-mark {
+  color: var(--accent);
+}
+.proj-bar {
+  display: inline-flex;
+  width: 56px;
+  height: 6px;
+  border-radius: 3px;
+  overflow: hidden;
+  background: var(--bg-hover);
+}
+.proj-seg {
+  min-width: 2px;
 }
 .net-cell.online {
   color: var(--success);

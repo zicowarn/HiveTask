@@ -62,6 +62,11 @@ export const zhCN = {
   // Status bar
   "statusbar.noRepo": "未选择仓库",
   "statusbar.local": "本地",
+  "app.projectNone": "未选择项目",
+  "app.projectSwitch": "切换项目",
+  "project.gotoBoard": "到项目工作区管理",
+  "project.bindRepos": "关联仓库（可多选，接入配置随仓库携带）",
+  "project.bindEmpty": "暂无已登记仓库——可先在「切换仓库」中登记",
   "statusbar.syncedAt": "{time} 同步",
   "statusbar.ghOk": "gh CLI 可用",
   "statusbar.ghMissing": "未检测到 gh CLI",

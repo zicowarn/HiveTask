@@ -11,7 +11,7 @@ import { workspaces } from "./workbench/registry";
 import { buildMenuDefs } from "./menu-defs";
 import { syncApplicationMenu } from "./native-menu";
 import { openExternalUrl } from "./open-url";
-import { isTauri } from "./api";
+import { api, isTauri } from "./api";
 import { useRepoStore } from "./stores/repo";
 import { useIssuesStore } from "./stores/issues";
 import { usePullsStore } from "./stores/pulls";
@@ -87,12 +87,46 @@ async function copyGithubUrl() {
 
 const aboutOpen = ref(false);
 const repoManagerOpen = ref(false);
+const projectPickerOpen = ref(false);
 
 // RepoManager 的 select：本地路径 / 仅远端 URL 都在此切换当前仓库。
 function onRepoManagerSelect(target: string) {
   repo.setCurrent(target);
   repoManagerOpen.value = false;
 }
+
+// 跨工作区导航：看板卡片 → Issues（先切仓库上下文再选中），
+// 状态栏项目格 → 项目工作区。消费后清空。
+watch(
+  () => projectsStore.navRequest,
+  async (nav) => {
+    if (!nav) return;
+    projectsStore.navRequest = null;
+    if (nav.workspace === "projects") {
+      switchWorkspace("projects");
+      return;
+    }
+    if (nav.repoId) {
+      try {
+        const rows = (await api.repoList()) as Array<{ id: string; path?: string | null; remoteUrl?: string | null }>;
+        const row = rows.find((r) => r.id === nav.repoId);
+        const target = row?.path ?? row?.remoteUrl;
+        if (target && target !== repo.current) repo.setCurrent(target);
+      } catch {
+        // 仓库解析失败仍切工作区（保持当前上下文）
+      }
+      switchWorkspace(nav.workspace);
+      if (nav.workspace === "issues" && nav.number) {
+        try {
+          await issues.refresh();
+        } catch {
+          // 刷新失败仍尝试选中本地缓存
+        }
+        issues.selectedNumber = nav.number;
+      }
+    }
+  },
+);
 
 // 打开即登记：启动时把 lastRepo/recentRepos 导入 app.db（幂等）。
 // 已不存在的路径（如 /tmp 清理）跳过——否则死路径每次启动都被重新登记。
@@ -181,6 +215,7 @@ onMounted(async () => {
   void importLegacyRepos();
   void probeNow(); // seed the status bar's online/offline cell
   await repo.refreshInfo();
+  void projectsStore.loadAll(); // 应用级项目列表（状态栏分布格 + 头部切换器）
 
   // Dev affordance: VITE_AUTO_REPO=/path/to/repo loads and syncs a repo at
   // startup; it is only read from the Vite dev environment, never packaged.
@@ -234,9 +269,16 @@ onBeforeUnmount(() => {
       </div>
 
       <div class="header-actions">
-        <button class="header-btn" @click="repoManagerOpen = true">
-          {{ current ? t("app.repoSwitch") : t("app.repoPick") }}
-        </button>
+        <template v-if="activeKey === 'projects'">
+          <button class="header-btn" @click="projectPickerOpen = true">
+            {{ projectsStore.selected ? projectsStore.selected.displayName : t("app.projectNone") }}
+          </button>
+        </template>
+        <template v-else>
+          <button class="header-btn" @click="repoManagerOpen = true">
+            {{ current ? t("app.repoSwitch") : t("app.repoPick") }}
+          </button>
+        </template>
         <button class="header-btn theme-btn" :title="t('theme.switch')" @click="cycleTheme()">
           {{ theme === "system" ? "◐" : resolvedTheme === "dark" ? "☾" : "☀" }}
         </button>
@@ -273,6 +315,33 @@ onBeforeUnmount(() => {
           <button class="repo-panel-close" @click="repoManagerOpen = false">✕</button>
         </div>
         <RepoManager @select="onRepoManagerSelect" />
+      </div>
+    </div>
+
+    <div v-if="projectPickerOpen" class="repo-overlay" @click.self="projectPickerOpen = false">
+      <div class="repo-panel">
+        <div class="repo-panel-head">
+          <span class="repo-panel-title">{{ t("app.projectSwitch") }}</span>
+          <button class="repo-panel-close" @click="projectPickerOpen = false">✕</button>
+        </div>
+        <ul class="pj-picker">
+          <li
+            v-for="p in projectsStore.projects"
+            :key="p.id"
+            class="pj-picker-item"
+            :class="{ active: p.id === projectsStore.selectedId }"
+            @click="((projectsStore.select(p.id)), (projectPickerOpen = false))"
+          >
+            <span>{{ p.displayName }}</span>
+            <span class="pj-picker-desc">{{ p.description }}</span>
+          </li>
+        </ul>
+        <p v-if="projectsStore.projects.length === 0" class="pj-picker-empty">
+          {{ t("project.empty") }}
+        </p>
+        <button class="pj-picker-new" @click="((projectPickerOpen = false), switchWorkspace('projects'))">
+          {{ t("project.gotoBoard") }}
+        </button>
       </div>
     </div>
 
@@ -321,6 +390,60 @@ onBeforeUnmount(() => {
 }
 .repo-panel-close:hover {
   color: var(--text);
+}
+.pj-picker {
+  list-style: none;
+  margin: 0;
+  padding: 8px;
+  max-height: 50vh;
+  overflow-y: auto;
+}
+.pj-picker-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 7px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  color: var(--text);
+  cursor: pointer;
+}
+.pj-picker-item:hover {
+  background: var(--bg-hover);
+}
+.pj-picker-item.active {
+  background: var(--bg-selected);
+  color: var(--accent);
+  font-weight: 600;
+}
+.pj-picker-desc {
+  font-size: 11px;
+  color: var(--text-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pj-picker-empty {
+  text-align: center;
+  color: var(--text-dim);
+  font-size: 12px;
+  padding: 12px 0;
+}
+.pj-picker-new {
+  width: calc(100% - 16px);
+  margin: 0 8px 10px;
+  border: 1px dashed var(--border);
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 12px;
+  height: 28px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.pj-picker-new:hover {
+  border-color: var(--accent);
+  color: var(--accent);
 }
 </style>
 <style scoped>

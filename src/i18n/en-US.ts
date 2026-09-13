@@ -61,6 +61,11 @@ export const enUS: Record<MessageKey, string> = {
   // Status bar
   "statusbar.noRepo": "No repository",
   "statusbar.local": "Local",
+  "app.projectNone": "No project selected",
+  "app.projectSwitch": "Switch project",
+  "project.gotoBoard": "Manage in Projects workspace",
+  "project.bindRepos": "Bind repositories (multi-select; connections travel with repos)",
+  "project.bindEmpty": "No registered repositories — register one via \"Switch repository\" first",
   "statusbar.syncedAt": "Synced {time}",
   "statusbar.ghOk": "gh CLI available",
   "statusbar.ghMissing": "gh CLI not found",

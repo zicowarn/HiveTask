@@ -43,6 +43,12 @@ function tagOf(item: (typeof items.value)[number]): string {
   return item.repoLabel ?? "";
 }
 
+// ---- 卡片点击：引用卡跳线上 Issue（切仓库上下文 + 打开详情） ----
+function openCard(item: (typeof items.value)[number]) {
+  if (item.kind === "draft" || item.ghost || !item.repoId || !item.number) return;
+  store.navRequest = { workspace: "issues", repoId: item.repoId, number: item.number };
+}
+
 // ---- 拖拽：dragover 记录落点（列 + 参照卡），drop 一次性提交 ----
 const dragId = ref<string | null>(null);
 const dropTarget = ref<{ optionId: string; prevId: string | null } | null>(null);
@@ -151,10 +157,11 @@ async function submitConvert(item: (typeof items.value)[number], path: string) {
         v-for="card in cardsOf(col.id)"
         :key="card.id"
         class="card"
-        :class="{ ghosty: card.ghost, dropping: dropTarget?.prevId === card.id }"
+        :class="{ ghosty: card.ghost, dropping: dropTarget?.prevId === card.id, clickable: card.kind !== 'draft' && !card.ghost }"
         draggable="true"
         @dragstart="onDragStart(card, $event)"
         @dragover="onDragOverCard(col.id, card, $event)"
+        @click="openCard(card)"
       >
         <p class="card-title">{{ titleOf(card) }}</p>
         <p class="card-meta">
@@ -274,6 +281,9 @@ async function submitConvert(item: (typeof items.value)[number], path: string) {
   border-style: dashed;
 }
 .card.dropping {
+  border-color: var(--accent);
+}
+.card.clickable:hover {
   border-color: var(--accent);
 }
 .card-title {

@@ -5,7 +5,7 @@
  */
 import { defineStore } from "pinia";
 import { computed, ref } from "vue";
-import { api, type FieldOption, type Project, type ProjectField, type ProjectItem } from "../api";
+import { api, type BoundRepo, type FieldOption, type Project, type ProjectField, type ProjectItem } from "../api";
 import { isTauri } from "../api";
 
 export const useProjectsStore = defineStore("projects", () => {
@@ -13,8 +13,12 @@ export const useProjectsStore = defineStore("projects", () => {
   const selectedId = ref<string | null>(null);
   const fields = ref<ProjectField[]>([]);
   const items = ref<ProjectItem[]>([]);
+  const boundRepos = ref<BoundRepo[]>([]);
   const loading = ref(false);
   const error = ref<string | null>(null);
+  /** 跨工作区导航请求（看板卡片 → Issues；状态栏 → 项目工作区）。
+   * repoId = 登记表 id，App.vue 消费时解析成 path/URL target。 */
+  const navRequest = ref<{ workspace: string; repoId?: string; number?: string } | null>(null);
 
   const selected = computed(() => projects.value.find((p) => p.id === selectedId.value) ?? null);
   /** 列定义真源：builtin_status 字段的 options（数组序即列序）。 */
@@ -38,12 +42,14 @@ export const useProjectsStore = defineStore("projects", () => {
     if (!isTauri() || !selectedId.value) {
       fields.value = [];
       items.value = [];
+      boundRepos.value = [];
       return;
     }
     try {
-      [fields.value, items.value] = await Promise.all([
+      [fields.value, items.value, boundRepos.value] = await Promise.all([
         api.projectFields(selectedId.value),
         api.projectItemList(selectedId.value),
+        api.projectRepoList(selectedId.value),
       ]);
     } catch (e) {
       error.value = String(e);
@@ -124,6 +130,18 @@ export const useProjectsStore = defineStore("projects", () => {
     items.value = items.value.map((i) => (i.id === updated.id ? updated : i));
   }
 
+  async function bindRepo(repoId: string) {
+    if (!selectedId.value) return;
+    await api.projectRepoBind(selectedId.value, repoId);
+    boundRepos.value = await api.projectRepoList(selectedId.value);
+  }
+
+  async function unbindRepo(repoId: string) {
+    if (!selectedId.value) return;
+    await api.projectRepoUnbind(selectedId.value, repoId);
+    boundRepos.value = await api.projectRepoList(selectedId.value);
+  }
+
   /** 状态列 options（含兜底，避免字段缺失时整板渲染失败）。 */
   function statusOptions(): FieldOption[] {
     return statusField.value?.options ?? [];
@@ -135,8 +153,10 @@ export const useProjectsStore = defineStore("projects", () => {
     selected,
     fields,
     items,
+    boundRepos,
     loading,
     error,
+    navRequest,
     statusField,
     priorityField,
     loadProjects,
@@ -152,6 +172,8 @@ export const useProjectsStore = defineStore("projects", () => {
     updateDraft,
     setPriority,
     convertToIssue,
+    bindRepo,
+    unbindRepo,
     statusOptions,
   };
 });

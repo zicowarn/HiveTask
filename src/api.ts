@@ -59,6 +59,17 @@ export interface ProjectItem {
   fieldValues: Record<string, string>;
 }
 
+/** 项目绑定的仓库（接入配置标签随 repos 行携带）。 */
+export interface BoundRepo {
+  repoId: string;
+  label: string;
+  platform: string;
+  connectionLabel: string | null;
+  /** 本地克隆 = path；仅远端 = remote_url；悬挂绑定 = 空串。 */
+  target: string;
+  ghost: boolean;
+}
+
 export const isTauri = (): boolean => "__TAURI_INTERNALS__" in window;
 
 export const api = {
@@ -180,4 +191,10 @@ export const api = {
     invoke<void>("project_field_value_set", { itemId, fieldId, value: value ?? null }),
   convertDraftToIssue: (itemId: string, repoPath: string) =>
     invoke<ProjectItem>("convert_draft_to_issue", { itemId, repoPath }),
+  projectRepoBind: (projectId: string, repoId: string) =>
+    invoke<void>("project_repo_bind", { projectId, repoId }),
+  projectRepoUnbind: (projectId: string, repoId: string) =>
+    invoke<void>("project_repo_unbind", { projectId, repoId }),
+  projectRepoList: (projectId: string) =>
+    invoke<BoundRepo[]>("project_repo_list", { projectId }),
 };

@@ -187,13 +187,15 @@ pub fn project_archive_in(conn: &Connection, id: &str, archived: bool) -> Result
 }
 
 pub fn project_delete_in(conn: &Connection, id: &str) -> Result<(), String> {
-    // 级联：field_values → items → fields → project（显式删除需前端两击确认）
+    // 级联：field_values → items（含字段值）→ 绑定 → fields → project
+    // （显式删除需前端两击确认）
     conn.execute(
         "DELETE FROM project_field_values WHERE item_id IN (SELECT id FROM project_items WHERE project_id = ?1)",
         (id,),
     )
     .map_err(|e| e.to_string())?;
     conn.execute("DELETE FROM project_items WHERE project_id = ?1", (id,)).map_err(|e| e.to_string())?;
+    conn.execute("DELETE FROM project_repos WHERE project_id = ?1", (id,)).map_err(|e| e.to_string())?;
     conn.execute("DELETE FROM project_fields WHERE project_id = ?1", (id,)).map_err(|e| e.to_string())?;
     conn.execute("DELETE FROM projects WHERE id = ?1", (id,)).map_err(|e| e.to_string())?;
     Ok(())
@@ -493,6 +495,102 @@ pub fn on_issue_closed_in(conn: &Connection, repo_id: &str, number: &str) -> Res
     Ok(())
 }
 
+// ---- 项目 ↔ 仓库绑定（仿仓库登记：接入配置标签随 repos 行携带）----
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BoundRepo {
+    pub repo_id: String,
+    /// 登记显示名（path 尾段或 remote 显示名）。
+    pub label: String,
+    /// 连接派生来源（github/gitee/gitea）；无连接 = local。
+    pub platform: String,
+    pub connection_label: Option<String>,
+    /// 切换/取数用的 target：本地克隆 = path，仅远端 = remote_url。
+    pub target: String,
+    /// true = 绑定的登记行已删除（悬挂，跳过展示与导航）。
+    pub ghost: bool,
+}
+
+pub fn repo_bind_in(conn: &Connection, project_id: &str, repo_id: &str) -> Result<(), String> {
+    let exists: Option<String> = conn
+        .query_row("SELECT id FROM repos WHERE id = ?1", (repo_id,), |row| row.get(0))
+        .ok();
+    if exists.is_none() {
+        return Err("仓库未登记".to_string());
+    }
+    conn.execute(
+        "INSERT INTO project_repos (project_id, repo_id, position) VALUES (?1, ?2,
+            COALESCE((SELECT MAX(position) + 1 FROM project_repos WHERE project_id = ?1), 0))
+         ON CONFLICT(project_id, repo_id) DO NOTHING",
+        (project_id, repo_id),
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+pub fn repo_unbind_in(conn: &Connection, project_id: &str, repo_id: &str) -> Result<(), String> {
+    conn.execute(
+        "DELETE FROM project_repos WHERE project_id = ?1 AND repo_id = ?2",
+        (project_id, repo_id),
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+pub fn bound_repos_in(conn: &Connection, project_id: &str) -> Result<Vec<BoundRepo>, String> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT pr.repo_id, r.display_name, r.path, r.remote_url, c.platform, c.label
+             FROM project_repos pr
+             LEFT JOIN repos r ON r.id = pr.repo_id
+             LEFT JOIN connections c ON c.id = r.connection_id
+             WHERE pr.project_id = ?1
+             ORDER BY pr.position",
+        )
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map((project_id,), |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, Option<String>>(1)?,
+                row.get::<_, Option<String>>(2)?,
+                row.get::<_, Option<String>>(3)?,
+                row.get::<_, Option<String>>(4)?,
+                row.get::<_, Option<String>>(5)?,
+            ))
+        })
+        .map_err(|e| e.to_string())?;
+    let mut out = Vec::new();
+    for triple in rows {
+        let (repo_id, display_name, path, remote_url, platform, connection_label) =
+            triple.map_err(|e| e.to_string())?;
+        // 悬挂绑定（登记行已删）：保留 id 供条目对照，标记 ghost
+        let (label, target, ghost) = match (&path, &remote_url) {
+            (Some(p), _) => (
+                display_name.clone().unwrap_or_else(|| {
+                    p.split('/').filter(|s| !s.is_empty()).last().unwrap_or(p).to_string()
+                }),
+                p.clone(),
+                false,
+            ),
+            (None, Some(u)) => {
+                (display_name.clone().unwrap_or_else(|| u.clone()), u.clone(), false)
+            }
+            (None, None) => (repo_id.clone(), String::new(), true),
+        };
+        out.push(BoundRepo {
+            repo_id,
+            label,
+            platform: platform.unwrap_or_else(|| "local".to_string()),
+            connection_label,
+            target,
+            ghost,
+        });
+    }
+    Ok(out)
+}
+
 // ---- 命令层（appdb 先例：命令在各自模块、_in 核心供测试） ----
 
 #[tauri::command]
@@ -586,6 +684,24 @@ pub fn project_field_value_set(item_id: String, field_id: String, value: Option<
     set_field_value_in(&conn, &item_id, &field_id, value.as_deref())
 }
 
+#[tauri::command]
+pub fn project_repo_bind(project_id: String, repo_id: String) -> Result<(), String> {
+    let conn = crate::appdb::open().map_err(|e| e.to_string())?;
+    repo_bind_in(&conn, &project_id, &repo_id)
+}
+
+#[tauri::command]
+pub fn project_repo_unbind(project_id: String, repo_id: String) -> Result<(), String> {
+    let conn = crate::appdb::open().map_err(|e| e.to_string())?;
+    repo_unbind_in(&conn, &project_id, &repo_id)
+}
+
+#[tauri::command]
+pub fn project_repo_list(project_id: String) -> Result<Vec<BoundRepo>, String> {
+    let conn = crate::appdb::open().map_err(|e| e.to_string())?;
+    bound_repos_in(&conn, &project_id)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -669,5 +785,30 @@ mod tests {
         let items = item_list_in(&conn, &p.id).unwrap();
         let done_id = status.options.iter().find(|o| o.name == "Done").unwrap().id.clone();
         assert_eq!(items.iter().find(|i| i.id == item.id).unwrap().field_values.get(&status.id).map(|v| v.as_str()), Some(done_id.as_str()));
+    }
+
+    #[test]
+    fn repo_binding_roundtrip_and_cascade() {
+        let conn = mem_db();
+        seed_repo(&conn, "r1");
+        let p = project_create_in(&conn, "board", None).unwrap();
+        // 未登记 id 拒绝
+        assert!(repo_bind_in(&conn, &p.id, "nope").is_err());
+        repo_bind_in(&conn, &p.id, "r1").unwrap();
+        repo_bind_in(&conn, &p.id, "r1").unwrap(); // 幂等
+        let bound = bound_repos_in(&conn, &p.id).unwrap();
+        assert_eq!(bound.len(), 1);
+        assert_eq!(bound[0].repo_id, "r1");
+        assert_eq!(bound[0].label, "demo");
+        assert!(!bound[0].ghost);
+        // 登记删除 → 绑定悬挂标 ghost
+        conn.execute("DELETE FROM repos WHERE id = 'r1'", []).unwrap();
+        assert!(bound_repos_in(&conn, &p.id).unwrap()[0].ghost);
+        // 项目级联删除连带绑定
+        project_delete_in(&conn, &p.id).unwrap();
+        let count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM project_repos", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(count, 0);
     }
 }
