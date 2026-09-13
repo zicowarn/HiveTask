@@ -157,8 +157,8 @@ export const useProjectsStore = defineStore("projects", () => {
     void loadSelected();
   }
 
-  async function create(name: string, description?: string) {
-    const p = await api.projectCreate(name, description);
+  async function create(name: string, description?: string, connectionId?: string) {
+    const p = await api.projectCreate(name, description, connectionId);
     projects.value = [p, ...projects.value];
     selectedId.value = p.id;
     await loadSelected();

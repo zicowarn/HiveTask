@@ -70,6 +70,7 @@ export const enUS: Record<MessageKey, string> = {
   "app.projectSwitch": "Switch project",
   "project.gotoBoard": "Manage in Projects workspace",
   "project.bindRepos": "Bind repositories (multi-select; connections travel with repos)",
+  "project.tabEmpty": "No projects for this source",
   "project.bindEmpty": "No registered repositories — register one via \"Switch repository\" first",
   "repo.refreshOnline": "Refresh online list",
   "repo.onlineEmpty": "No online repositories found (check credentials or network)",

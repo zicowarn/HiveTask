@@ -71,6 +71,7 @@ export const zhCN = {
   "app.projectSwitch": "切换项目",
   "project.gotoBoard": "到项目工作区管理",
   "project.bindRepos": "关联仓库（可多选，接入配置随仓库携带）",
+  "project.tabEmpty": "该接入暂无项目",
   "project.bindEmpty": "暂无已登记仓库——可先在「切换仓库」中登记",
   "repo.refreshOnline": "刷新线上列表",
   "repo.onlineEmpty": "线上未找到仓库（检查凭据或网络）",

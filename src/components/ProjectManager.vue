@@ -1,9 +1,9 @@
 <script setup lang="ts">
 /**
- * Project manager — the "切换项目" dialog body (mirrors RepoManager's role
- * for the repo side): lists projects for switching, and hosts the create
- * form including repository binding chips grouped by connection label
- * (创建仿仓库登记——接入配置随仓库进项目). Works directly against the
+ * Project manager — the "切换项目" dialog body, structurally mirroring
+ * RepoManager: tabs = source connections, projects listed under their
+ * owning connection (NULL = 本地 tab), create form binds repos of the
+ * active connection (with 线上列表 lookup). Works directly against the
  * projects store; the host dialog just toggles visibility.
  */
 import { computed, onMounted, ref } from "vue";
@@ -24,29 +24,7 @@ function pick(id: string) {
   store.select(id);
 }
 
-// ---- 行内改名 / 删除（两击确认，级联由后端承担） ----
-const renaming = ref<string | null>(null);
-const renameName = ref("");
-async function submitRename() {
-  if (!renaming.value || !renameName.value.trim()) return;
-  await store.rename(renaming.value, renameName.value);
-  renaming.value = null;
-}
-const confirmingDelete = ref<string | null>(null);
-async function confirmDelete() {
-  if (!confirmingDelete.value) return;
-  await store.remove(confirmingDelete.value);
-  confirmingDelete.value = null;
-}
-
-// ---- 新建（名称 + 描述 + 绑定仓库：按接入 Tab 浏览 + ⟳ 线上拉取绑定） ----
-const createOpen = ref(false);
-const createName = ref("");
-const createDesc = ref("");
-const chosenRepoIds = ref<Set<string>>(new Set());
-const creating = ref(false);
-const bindTab = ref<string>("local");
-
+// ---- 接入 Tab（与切换仓库同构）----
 interface ConnectionInfo {
   id: string;
   platform: string;
@@ -54,13 +32,47 @@ interface ConnectionInfo {
   label: string;
 }
 const connections = ref<ConnectionInfo[]>([]);
-/** 绑定 Tab：连接 + 本地（与切换仓库同构）。 */
-const bindTabs = computed(() => {
-  const connTabs = connections.value.map((c) => ({ key: c.id, label: c.label || c.host, conn: c as ConnectionInfo | null }));
-  connTabs.push({ key: "local", label: t("repoTab.local"), conn: null });
+const activeTab = ref<string>("local");
+
+const allRepos = ref<Array<{ id: string; displayName?: string | null; path?: string | null; remoteUrl?: string | null; connectionId?: string | null }>>([]);
+const chosenRepoIds = ref<Set<string>>(new Set());
+
+const tabs = computed(() => {
+  const connTabs = connections.value.map((c) => ({
+    key: c.id,
+    label: c.label || c.host,
+    count: projects.value.filter((p) => p.connectionId === c.id).length,
+  }));
+  connTabs.push({
+    key: "local",
+    label: t("repoTab.local"),
+    count: projects.value.filter((p) => !p.connectionId).length,
+  });
   return connTabs;
 });
-const bindTabConnection = computed(() => bindTabs.value.find((tb) => tb.key === bindTab.value)?.conn ?? null);
+
+const activeConnection = computed(() => connections.value.find((c) => c.id === activeTab.value) ?? null);
+
+const visibleProjects = computed(() =>
+  projects.value
+    .filter((p) => (p.connectionId ?? "local") === activeTab.value)
+    .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)),
+);
+
+// ---- 新建（名称 + 描述 + 绑定该接入下的仓库；线上列表可拉取）----
+const createOpen = ref(false);
+const createName = ref("");
+const createDesc = ref("");
+const creating = ref(false);
+
+const tabRepoChoices = computed(() =>
+  allRepos.value
+    .filter((r) => (activeConnection.value ? r.connectionId === activeTab.value : !r.connectionId))
+    .map((r) => ({
+      id: r.id,
+      label: r.displayName ?? r.path?.split("/").filter(Boolean).pop() ?? r.remoteUrl ?? r.id,
+    })),
+);
 
 interface OnlineRepo {
   fullName: string;
@@ -72,26 +84,16 @@ const onlineOpen = ref(false);
 const onlineLoading = ref(false);
 const onlineRepos = ref<OnlineRepo[]>([]);
 const onlineError = ref<string | null>(null);
-const chosenOnline = ref<OnlineRepo[]>([]);
 
-const allRepos = ref<Array<{ id: string; displayName?: string | null; path?: string | null; remoteUrl?: string | null; connectionId?: string | null }>>([]);
-const tabRepoChoices = computed(() => {
-  const conn = bindTabConnection.value;
-  return allRepos.value
-    .filter((r) => (conn ? r.connectionId === conn.id : !r.connectionId))
-    .map((r) => ({
-      id: r.id,
-      label: r.displayName ?? r.path?.split("/").filter(Boolean).pop() ?? r.remoteUrl ?? r.id,
-      group: "",
-    }));
-});
 function isRegistered(url: string): boolean {
-  return allRepos.value.some((r) => r.remoteUrl && r.remoteUrl.replace(/\.git$/, "") === url.replace(/\.git$/, ""));
+  return allRepos.value.some(
+    (r) => r.remoteUrl && r.remoteUrl.replace(/\.git$/, "") === url.replace(/\.git$/, ""),
+  );
 }
 
 async function toggleCreate() {
   createOpen.value = !createOpen.value;
-  if (createOpen.value) {
+  if (createOpen.value && allRepos.value.length === 0) {
     try {
       allRepos.value = (await api.repoList()) as typeof allRepos.value;
       connections.value = await api.connectionList();
@@ -112,7 +114,7 @@ async function toggleOnline() {
   if (onlineOpen.value) await fetchOnline();
 }
 async function fetchOnline() {
-  const conn = bindTabConnection.value;
+  const conn = activeConnection.value;
   if (!conn) return;
   onlineLoading.value = true;
   onlineError.value = null;
@@ -127,7 +129,7 @@ async function fetchOnline() {
 }
 /** 线上仓库勾选 = 登记（未登记时）+ 绑定：一步进项目。 */
 async function chooseOnline(repo: OnlineRepo) {
-  const conn = bindTabConnection.value;
+  const conn = activeConnection.value;
   if (!conn) return;
   const existing = allRepos.value.find(
     (r) => r.remoteUrl && r.remoteUrl.replace(/\.git$/, "") === repo.url.replace(/\.git$/, ""),
@@ -136,16 +138,19 @@ async function chooseOnline(repo: OnlineRepo) {
   if (!repoId) {
     const entry = await api.repoRegisterRemote(repo.url, conn.platform);
     repoId = (entry as { id: string }).id;
-    allRepos.value.push({ id: repoId, remoteUrl: repo.url, displayName: repo.fullName });
+    allRepos.value.push({ id: repoId, remoteUrl: repo.url, displayName: repo.fullName, connectionId: conn.id });
   }
   if (!chosenRepoIds.value.has(repoId)) toggleChoose(repoId);
-  chosenOnline.value = [...chosenOnline.value.filter((r) => r.url !== repo.url), repo];
 }
 async function submitCreate() {
   if (!createName.value.trim()) return;
   creating.value = true;
   try {
-    await store.create(createName.value, createDesc.value || undefined);
+    await store.create(
+      createName.value,
+      createDesc.value || undefined,
+      activeTab.value !== "local" ? activeTab.value : undefined,
+    );
     for (const repoId of chosenRepoIds.value) {
       await store.bindRepo(repoId);
     }
@@ -153,7 +158,6 @@ async function submitCreate() {
     createName.value = "";
     createDesc.value = "";
     chosenRepoIds.value = new Set();
-    chosenOnline.value = [];
     onlineOpen.value = false;
     onlineRepos.value = [];
   } catch (e) {
@@ -162,14 +166,42 @@ async function submitCreate() {
     creating.value = false;
   }
 }
+
+// ---- 行内改名 / 删除（两击确认，级联由后端承担） ----
+const renaming = ref<string | null>(null);
+const renameName = ref("");
+async function submitRename() {
+  if (!renaming.value || !renameName.value.trim()) return;
+  await store.rename(renaming.value, renameName.value);
+  renaming.value = null;
+}
+const confirmingDelete = ref<string | null>(null);
+async function confirmDelete() {
+  if (!confirmingDelete.value) return;
+  await store.remove(confirmingDelete.value);
+  confirmingDelete.value = null;
+}
 </script>
 
 <template>
   <div class="pjmgr">
+    <div class="pjmgr-tabs">
+      <button
+        v-for="tab in tabs"
+        :key="tab.key"
+        class="pjmgr-tab"
+        :class="{ active: activeTab === tab.key }"
+        @click="activeTab = tab.key"
+      >
+        {{ tab.label }} <span class="pjmgr-count">{{ tab.count }}</span>
+      </button>
+    </div>
+
     <p v-if="projects.length === 0 && !createOpen" class="pjmgr-empty">{{ t("project.empty") }}</p>
+    <p v-else-if="visibleProjects.length === 0" class="pjmgr-empty">{{ t("project.tabEmpty") }}</p>
     <ul v-else class="pjmgr-list">
       <li
-        v-for="p in projects"
+        v-for="p in visibleProjects"
         :key="p.id"
         class="pjmgr-item"
         :class="{ active: p.id === selectedId }"
@@ -227,23 +259,6 @@ async function submitCreate() {
         @keydown.enter="submitCreate"
       />
       <p class="pjmgr-bind-head">{{ t("project.bindRepos") }}</p>
-      <div class="pjmgr-bind-tabs">
-        <button
-          v-for="tb in bindTabs"
-          :key="tb.key"
-          class="pjmgr-bind-tab"
-          :class="{ active: bindTab === tb.key }"
-          @click="((bindTab = tb.key), (onlineOpen = false), (onlineRepos = []))"
-        >{{ tb.label }}</button>
-        <span class="pjmgr-bind-spacer"></span>
-        <button
-          v-if="bindTabConnection"
-          class="pjmgr-bind-refresh"
-          :disabled="onlineLoading"
-          @click="toggleOnline"
-        >{{ onlineLoading ? t("list.loading") : t("common.refresh") }}</button>
-      </div>
-
       <div v-if="tabRepoChoices.length === 0 && !onlineOpen" class="pjmgr-bind-empty">
         {{ t("project.bindEmpty") }}
       </div>
@@ -257,21 +272,28 @@ async function submitCreate() {
         >{{ c.label }}</button>
       </div>
 
-      <div v-if="onlineOpen && bindTabConnection" class="pjmgr-online">
-        <p v-if="onlineError" class="pjmgr-online-error">{{ onlineError }}</p>
-        <p v-else-if="onlineRepos.length === 0 && !onlineLoading" class="pjmgr-bind-empty">
-          {{ t("repo.onlineEmpty") }}
-        </p>
-        <div v-for="r in onlineRepos" :key="r.url" class="pjmgr-online-item">
-          <span class="pjmgr-online-name">{{ r.fullName }}</span>
-          <button
-            class="pjmgr-chip"
-            :class="{ chosen: isRegistered(r.url) && chosenRepoIds.has(allRepos.find((x) => x.remoteUrl?.replace(/\.git$/, '') === r.url.replace(/\.git$/, ''))?.id ?? '') }"
-            :disabled="onlineLoading"
-            @click="chooseOnline(r)"
-          >
-            {{ isRegistered(r.url) ? t("project.bind") : t("project.bindRegister") }}
-          </button>
+      <div v-if="activeConnection" class="pjmgr-online-wrap">
+        <button
+          class="pjmgr-online-toggle"
+          :disabled="onlineLoading"
+          @click="toggleOnline"
+        >{{ onlineLoading ? t("list.loading") : onlineOpen ? "× " + t("repo.refreshOnline") : t("repo.refreshOnline") }}</button>
+        <div v-if="onlineOpen" class="pjmgr-online">
+          <p v-if="onlineError" class="pjmgr-online-error">{{ onlineError }}</p>
+          <p v-else-if="onlineRepos.length === 0 && !onlineLoading" class="pjmgr-bind-empty">
+            {{ t("repo.onlineEmpty") }}
+          </p>
+          <div v-for="r in onlineRepos" :key="r.url" class="pjmgr-online-item">
+            <span class="pjmgr-online-name">{{ r.fullName }}</span>
+            <button
+              class="pjmgr-chip"
+              :class="{ chosen: isRegistered(r.url) && chosenRepoIds.has(allRepos.find((x) => x.remoteUrl?.replace(/\.git$/, '') === r.url.replace(/\.git$/, ''))?.id ?? '') }"
+              :disabled="onlineLoading"
+              @click="chooseOnline(r)"
+            >
+              {{ isRegistered(r.url) ? t("project.bind") : t("project.bindRegister") }}
+            </button>
+          </div>
         </div>
       </div>
 
@@ -288,6 +310,34 @@ async function submitCreate() {
 <style scoped>
 .pjmgr {
   padding: 8px;
+}
+.pjmgr-tabs {
+  display: flex;
+  gap: 2px;
+  padding-bottom: 6px;
+  margin-bottom: 6px;
+  border-bottom: 1px solid var(--border);
+}
+.pjmgr-tab {
+  border: none;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 12px;
+  padding: 3px 8px;
+  border-radius: 5px;
+  cursor: pointer;
+}
+.pjmgr-tab:hover {
+  color: var(--text);
+}
+.pjmgr-tab.active {
+  background: var(--bg-selected);
+  color: var(--accent);
+  font-weight: 600;
+}
+.pjmgr-count {
+  font-size: 10px;
+  opacity: 0.75;
 }
 .pjmgr-empty {
   text-align: center;
@@ -400,32 +450,22 @@ async function submitCreate() {
   font-size: 11px;
   color: var(--text-dim);
 }
-.pjmgr-bind-tabs {
-  display: flex;
-  align-items: center;
-  gap: 2px;
-}
-.pjmgr-bind-tab {
-  border: none;
-  background: transparent;
+.pjmgr-bind-empty {
+  font-size: 11px;
   color: var(--text-dim);
-  font-size: 12px;
-  padding: 3px 8px;
-  border-radius: 5px;
-  cursor: pointer;
 }
-.pjmgr-bind-tab:hover {
-  color: var(--text);
+.pjmgr-bind-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
 }
-.pjmgr-bind-tab.active {
-  background: var(--bg-selected);
-  color: var(--accent);
-  font-weight: 600;
+.pjmgr-online-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }
-.pjmgr-bind-spacer {
-  flex: 1;
-}
-.pjmgr-bind-refresh {
+.pjmgr-online-toggle {
+  align-self: flex-start;
   border: 1px solid var(--border);
   background: var(--bg-panel);
   color: var(--text);
@@ -435,22 +475,13 @@ async function submitCreate() {
   border-radius: 5px;
   cursor: pointer;
 }
-.pjmgr-bind-refresh:hover {
+.pjmgr-online-toggle:hover {
   border-color: var(--accent);
   color: var(--accent);
 }
-.pjmgr-bind-refresh:disabled {
+.pjmgr-online-toggle:disabled {
   opacity: 0.5;
   cursor: default;
-}
-.pjmgr-bind-empty {
-  font-size: 11px;
-  color: var(--text-dim);
-}
-.pjmgr-bind-chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
 }
 .pjmgr-online {
   display: flex;

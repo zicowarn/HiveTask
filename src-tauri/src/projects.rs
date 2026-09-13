@@ -19,6 +19,8 @@ pub struct Project {
     pub display_name: String,
     pub description: Option<String>,
     pub group_tag: Option<String>,
+    /// 归属接入（切换项目对话框按它分 Tab）；NULL = 本地/未接入。
+    pub connection_id: Option<String>,
     pub archived: bool,
     pub created_at: String,
     pub updated_at: String,
@@ -78,6 +80,7 @@ fn project_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Project> {
         display_name: row.get("display_name")?,
         description: row.get("description")?,
         group_tag: row.get("group_tag")?,
+        connection_id: row.get("connection_id")?,
         archived: row.get::<_, i64>("archived")? != 0,
         created_at: row.get("created_at")?,
         updated_at: row.get("updated_at")?,
@@ -105,15 +108,28 @@ fn now() -> String {
     chrono_like_now()
 }
 
-pub fn project_create_in(conn: &Connection, name: &str, description: Option<&str>) -> Result<Project, String> {
+pub fn project_create_in(
+    conn: &Connection,
+    name: &str,
+    description: Option<&str>,
+    connection_id: Option<&str>,
+) -> Result<Project, String> {
     if name.trim().is_empty() {
         return Err("项目名不能为空".to_string());
     }
+    if let Some(cid) = connection_id {
+        let exists: Option<String> = conn
+            .query_row("SELECT id FROM connections WHERE id = ?1", (cid,), |row| row.get(0))
+            .ok();
+        if exists.is_none() {
+            return Err("接入不存在".to_string());
+        }
+    }
     let id = uuid();
     conn.execute(
-        "INSERT INTO projects (id, display_name, description, created_at, updated_at, last_opened_at)
-         VALUES (?1, ?2, ?3, ?1, ?1, ?1)",
-        rusqlite::params![id, name.trim(), description],
+        "INSERT INTO projects (id, display_name, description, connection_id, created_at, updated_at, last_opened_at)
+         VALUES (?1, ?2, ?3, ?4, ?1, ?1, ?1)",
+        rusqlite::params![id, name.trim(), description, connection_id],
     )
     .map_err(|e| e.to_string())?;
     seed_fields(conn, &id)?;
@@ -594,9 +610,13 @@ pub fn bound_repos_in(conn: &Connection, project_id: &str) -> Result<Vec<BoundRe
 // ---- 命令层（appdb 先例：命令在各自模块、_in 核心供测试） ----
 
 #[tauri::command]
-pub fn project_create(name: String, description: Option<String>) -> Result<Project, String> {
+pub fn project_create(
+    name: String,
+    description: Option<String>,
+    connection_id: Option<String>,
+) -> Result<Project, String> {
     let conn = crate::appdb::open().map_err(|e| e.to_string())?;
-    project_create_in(&conn, &name, description.as_deref())
+    project_create_in(&conn, &name, description.as_deref(), connection_id.as_deref())
 }
 
 #[tauri::command]
@@ -724,7 +744,7 @@ mod tests {
     #[test]
     fn create_seeds_status_and_priority() {
         let conn = mem_db();
-        let p = project_create_in(&conn, "看板", None).unwrap();
+        let p = project_create_in(&conn, "看板", None, None).unwrap();
         let fields = fields_in(&conn, &p.id).unwrap();
         assert_eq!(fields.len(), 2);
         let status = fields.iter().find(|f| f.kind == "builtin_status").unwrap();
@@ -736,7 +756,7 @@ mod tests {
     #[test]
     fn item_add_move_and_rank_order() {
         let conn = mem_db();
-        let p = project_create_in(&conn, "board", None).unwrap();
+        let p = project_create_in(&conn, "board", None, None).unwrap();
         let status = status_field_in(&conn, &p.id).unwrap().unwrap();
         let a = item_add_in(&conn, &p.id, "draft", None, None, Some("a"), None).unwrap();
         let b = item_add_in(&conn, &p.id, "draft", None, None, Some("b"), None).unwrap();
@@ -764,7 +784,7 @@ mod tests {
     fn repo_delete_makes_items_ghost() {
         let conn = mem_db();
         seed_repo(&conn, "r1");
-        let p = project_create_in(&conn, "board", None).unwrap();
+        let p = project_create_in(&conn, "board", None, None).unwrap();
         item_add_in(&conn, &p.id, "issue", Some("r1"), Some("7"), None, None).unwrap();
         assert!(!item_list_in(&conn, &p.id).unwrap()[0].ghost);
         // 删除登记行（appdb 不开 foreign_keys → 悬挂）
@@ -778,7 +798,7 @@ mod tests {
     fn close_issue_moves_item_to_done() {
         let conn = mem_db();
         seed_repo(&conn, "r1");
-        let p = project_create_in(&conn, "board", None).unwrap();
+        let p = project_create_in(&conn, "board", None, None).unwrap();
         let status = status_field_in(&conn, &p.id).unwrap().unwrap();
         let item = item_add_in(&conn, &p.id, "issue", Some("r1"), Some("7"), None, None).unwrap();
         on_issue_closed_in(&conn, "r1", "7").unwrap();
@@ -788,10 +808,32 @@ mod tests {
     }
 
     #[test]
+    fn project_belongs_to_connection_tab() {
+        let conn = mem_db();
+        // 接入 + 该接入下的登记仓库
+        conn.execute(
+            "INSERT INTO connections (id, platform, host, label, source_state, created_at)
+             VALUES ('c1', 'gitea', 'git.lan', '公司', 'user_set', '2026-01-01T00:00:00Z')",
+            [],
+        )
+        .unwrap();
+        seed_repo(&conn, "r1");
+        conn.execute("UPDATE repos SET connection_id = 'c1' WHERE id = 'r1'", []).unwrap();
+
+        let local = project_create_in(&conn, "草稿板", None, None).unwrap();
+        let bound = project_create_in(&conn, "公司板", None, Some("c1")).unwrap();
+        // 未知接入拒绝
+        assert!(project_create_in(&conn, "x", None, Some("nope")).is_err());
+
+        assert_eq!(local.connection_id, None);
+        assert_eq!(bound.connection_id.as_deref(), Some("c1"));
+    }
+
+    #[test]
     fn repo_binding_roundtrip_and_cascade() {
         let conn = mem_db();
         seed_repo(&conn, "r1");
-        let p = project_create_in(&conn, "board", None).unwrap();
+        let p = project_create_in(&conn, "board", None, None).unwrap();
         // 未登记 id 拒绝
         assert!(repo_bind_in(&conn, &p.id, "nope").is_err());
         repo_bind_in(&conn, &p.id, "r1").unwrap();

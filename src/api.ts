@@ -30,6 +30,8 @@ export interface Project {
   displayName: string;
   description: string | null;
   groupTag: string | null;
+  /** 归属接入（切换项目对话框按它分 Tab）；null = 本地。 */
+  connectionId: string | null;
   archived: boolean;
   createdAt: string;
   updatedAt: string;
@@ -190,8 +192,8 @@ export const api = {
   probeNetwork: () => invoke<void>("probe_network"),
 
   // ---- Projects 看板 ----
-  projectCreate: (name: string, description?: string) =>
-    invoke<Project>("project_create", { name, description: description ?? null }),
+  projectCreate: (name: string, description?: string, connectionId?: string) =>
+    invoke<Project>("project_create", { name, description: description ?? null, connectionId: connectionId ?? null }),
   projectList: (includeArchived = false) =>
     invoke<Project[]>("project_list", { includeArchived }),
   projectUpdate: (id: string, name: string, description?: string) =>
