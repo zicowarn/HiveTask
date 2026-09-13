@@ -21,3 +21,4 @@ src-tauri/gen/
 
 # Local agent harness
 .dsh/
+src-tauri/binaries/

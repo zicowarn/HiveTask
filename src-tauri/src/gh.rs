@@ -41,6 +41,16 @@ pub fn find_gh() -> Option<PathBuf> {
             return Some(candidate);
         }
     }
+    // 三级：内嵌 sidecar（externalBin 打包后与主程序同目录——分发期兜底，
+    // 用户零安装；dev 下 target/debug 旁通常没有 gh，自然跳过）。
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            let candidate = dir.join(executable_name("gh"));
+            if candidate.is_file() {
+                return Some(candidate);
+            }
+        }
+    }
     None
 }
 

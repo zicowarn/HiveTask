@@ -25,6 +25,9 @@
   },
   "bundle": {
     "active": true,
+    "externalBin": [
+      "binaries/gh"
+    ],
     "targets": "all",
     "icon": [
       "icons/32x32.png",
