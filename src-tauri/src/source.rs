@@ -8,7 +8,7 @@
 //! `Box<dyn Source>` ≈ 多态指针。传输与认证属实现细节（gh = 子进程 + CLI 认证；
 //! Gitea = reqwest + token），不进 trait 签名。
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use anyhow::{anyhow, Result};
 
@@ -124,19 +124,6 @@ pub trait Source: Send + Sync {
     fn merge_pull(&self, repo: &RepoRef, number: i64, method: MergeMethod) -> Result<Pull>;
 }
 
-/// 读 origin remote 的 host（https 与 scp 语法都覆盖），
-/// 如 "github.com"。无 remote / 无法解析 → None。
-pub fn remote_host(repo: &Path) -> Option<String> {
-    let url = crate::gh::git_origin(repo)?;
-    let s = url
-        .strip_prefix("https://")
-        .or_else(|| url.strip_prefix("http://"))
-        .unwrap_or(&url);
-    let s = s.split_once('@').map(|(_, rest)| rest).unwrap_or(s);
-    let host = s.split('/').next()?.split(':').next()?;
-    (!host.is_empty()).then(|| host.to_lowercase())
-}
-
 /// 解析 target（前端传入的仓库标识 = 本地路径 或 仅远端 remote_url）：
 /// 1. 登记表按 path 精确命中 → 用登记的 remote_url/host（快照）；
 /// 2. 登记表按 remote_url 命中 → 仅远端登记，workdir = None；
@@ -233,24 +220,21 @@ mod tests {
     }
 
     #[test]
-    fn remote_host_parses_https_and_scp() {
-        let dir = std::env::temp_dir().join(format!(
-            "hivetask-host-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        let repo = git2::Repository::init(&dir).unwrap();
-        repo.remote("origin", "https://github.com/o/r.git").unwrap();
-        assert_eq!(remote_host(&dir).as_deref(), Some("github.com"));
-        repo.remote_set_url("origin", "git@github.com:o/r.git").unwrap();
-        assert_eq!(remote_host(&dir).as_deref(), Some("github.com"));
+    fn split_host_slug_parses_https_scp_and_self_hosted() {
+        assert_eq!(
+            split_host_slug("https://github.com/o/r.git"),
+            Some(("github.com".into(), "o/r".into()))
+        );
+        // scp 语法：git@host:owner/repo
+        assert_eq!(
+            split_host_slug("git@github.com:o/r.git"),
+            Some(("github.com".into(), "o/r".into()))
+        );
         // 自建 host 原样返回（未来交 API 指纹探测 / 设置兜底）
-        repo.remote_set_url("origin", "https://git.company.com/team/r.git").unwrap();
-        assert_eq!(remote_host(&dir).as_deref(), Some("git.company.com"));
-        std::fs::remove_dir_all(&dir).ok();
+        assert_eq!(
+            split_host_slug("https://git.company.com/team/r.git"),
+            Some(("git.company.com".into(), "team/r".into()))
+        );
     }
 
     #[test]
