@@ -18,6 +18,7 @@ const { projects, selectedId } = storeToRefs(store);
 
 onMounted(() => {
   void store.loadProjects();
+  void loadConnections();
 });
 
 function pick(id: string) {
@@ -91,17 +92,19 @@ function isRegistered(url: string): boolean {
   );
 }
 
+async function loadConnections() {
+  try {
+    allRepos.value = (await api.repoList()) as typeof allRepos.value;
+    connections.value = await api.connectionList();
+  } catch {
+    allRepos.value = [];
+    connections.value = [];
+  }
+}
 async function toggleCreate() {
   createOpen.value = !createOpen.value;
-  if (createOpen.value && allRepos.value.length === 0) {
-    try {
-      allRepos.value = (await api.repoList()) as typeof allRepos.value;
-      connections.value = await api.connectionList();
-    } catch {
-      allRepos.value = [];
-      connections.value = [];
-    }
-  }
+  // 绑定 chips 与线上清单需要仓库/接入清单——每次展开都刷新一次
+  if (createOpen.value) await loadConnections();
 }
 function toggleChoose(id: string) {
   const next = new Set(chosenRepoIds.value);
