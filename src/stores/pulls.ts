@@ -97,6 +97,26 @@ export const usePullsStore = defineStore("pulls", () => {
     }
   }
 
+  /** 创建 PR（远端来源写穿透）：成功后刷新列表并选中新 PR。 */
+  async function createPull(head: string, base: string, title: string, body?: string) {
+    const repo = useRepoStore();
+    if (!repo.current || !isTauri()) return null;
+    loading.value = true;
+    error.value = null;
+    try {
+      const fresh = await api.createPull(repo.current, head, base, title, body);
+      await refresh();
+      select(fresh);
+      setOnline(true);
+      return fresh;
+    } catch (e) {
+      error.value = translateError(String(e));
+      return null;
+    } finally {
+      loading.value = false;
+    }
+  }
+
   async function setState(next: PullState) {
     state.value = next;
     await loadCache();
@@ -218,6 +238,7 @@ export const usePullsStore = defineStore("pulls", () => {
     merge,
     loadCache,
     refresh,
+    createPull,
     setState,
     select,
     ensureDetail,

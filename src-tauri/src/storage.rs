@@ -252,15 +252,15 @@ pub fn update_issue_state(conn: &Connection, number: &str, state: &str) -> Resul
 
 /// ---- 本地 Issue 物化视图（journal 重放目标，见 journal.rs）----
 
-/// Upsert one locally-created issue（重放与创建共用；data_source 标记来源）。
-pub fn upsert_local_issue(conn: &Connection, issue: &Issue) -> Result<()> {
+/// Upsert one issue（journal 重放与创建共用；data_source 标记来源）。
+pub fn upsert_issue(conn: &Connection, issue: &Issue, data_source: &str) -> Result<()> {
     let labels = json!(issue.labels).to_string();
     let assignees = json!(issue.assignees).to_string();
     conn.execute(
         "INSERT INTO issues
             (number, title, state, body, author, milestone, labels, assignees,
              created_at, updated_at, url, data_source)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, 'local')
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
          ON CONFLICT(number) DO UPDATE SET
             title=excluded.title, state=excluded.state, body=excluded.body,
             author=excluded.author, labels=excluded.labels,
@@ -278,6 +278,7 @@ pub fn upsert_local_issue(conn: &Connection, issue: &Issue) -> Result<()> {
             issue.created_at,
             issue.updated_at,
             issue.url,
+            data_source,
         ],
     )?;
     Ok(())

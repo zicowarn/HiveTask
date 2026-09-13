@@ -3,10 +3,11 @@
  * Pull-request list panel — registered as "pull.list". Mirrors the issue
  * list with PR-specific meta (head→base, draft, review decision, diffstat).
  */
-import { computed } from "vue";
+import { computed, ref } from "vue";
 import { storeToRefs } from "pinia";
 import PanelShell from "../workbench/PanelShell.vue";
 import BranchReviewList from "./modes/BranchReviewList.vue";
+import PullCreateDialog from "./PullCreateDialog.vue";
 import { usePullsStore } from "../stores/pulls";
 import { useRepoStore } from "../stores/repo";
 import { useI18n } from "../i18n";
@@ -31,6 +32,14 @@ const states: { value: PullState }[] = [
   { value: "all" },
 ];
 
+// PR 创建（远端来源）：创建成功后按编号选中新 PR
+const createOpen = ref(false);
+async function onCreated(number: number) {
+  createOpen.value = false;
+  await store.refresh();
+  store.select({ number } as never);
+}
+
 function timeLabel(iso?: string | null): string {
   return iso ? iso.slice(0, 10) : "";
 }
@@ -53,7 +62,17 @@ function timeLabel(iso?: string | null): string {
       <button class="refresh-btn" :disabled="loading" @click="store.refresh()">
         {{ loading ? t("common.syncing") : t("common.refresh") }}
       </button>
+      <button class="refresh-btn create-btn" @click="createOpen = true">
+        {{ t("pull.createBtn") }}
+      </button>
     </template>
+
+    <PullCreateDialog
+      :open="createOpen"
+      :repo-path="repoStore.current ?? ''"
+      @close="createOpen = false"
+      @created="onCreated"
+    />
 
     <p v-if="error && !isLocal" class="error-banner">{{ error }}</p>
 
@@ -144,6 +163,10 @@ function timeLabel(iso?: string | null): string {
 .refresh-btn:disabled {
   opacity: 0.5;
   cursor: default;
+}
+.create-btn {
+  color: var(--accent);
+  border-color: var(--accent);
 }
 .error-banner {
   margin: 8px 14px 0;

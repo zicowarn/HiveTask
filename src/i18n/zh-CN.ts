@@ -301,6 +301,9 @@ export const zhCN = {
 
   // Pull request workspace
   "pull.emptySelect": "从左侧选择一个 Pull Request 查看详情",
+  "pull.createBtn": "＋ 新建 PR",
+  "pull.createTitle": "新建 Pull Request",
+  "pull.headLabel": "来源分支",
   "pull.emptyRepo": "先选择一个本地 Git 仓库，然后刷新 Pull Requests",
 
   // GitHub reviewDecision values

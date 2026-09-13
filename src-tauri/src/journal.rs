@@ -144,7 +144,7 @@ pub fn sync(workdir: &Path, conn: &mut Connection) -> Result<()> {
 fn apply(conn: &Connection, event: &Event) -> Result<()> {
     match event.action.as_str() {
         "issue.create" => {
-            storage::upsert_local_issue(
+            storage::upsert_issue(
                 conn,
                 &crate::models::Issue {
                     number: event.number.clone(),
@@ -159,6 +159,7 @@ fn apply(conn: &Connection, event: &Event) -> Result<()> {
                     updated_at: Some(event.ts.clone()),
                     url: None,
                 },
+                "local",
             )?;
         }
         "issue.comment" => {

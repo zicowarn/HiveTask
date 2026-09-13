@@ -361,6 +361,42 @@ impl Source for GiteaSource {
         self.send_json(reqwest::Method::POST, &url, body)?;
         self.fetch_pull_detail(repo, number)
     }
+
+    fn create_issue(&self, repo: &RepoRef, title: &str, body: Option<&str>) -> Result<Issue> {
+        let slug = self.slug_ref(repo);
+        let url = self.api(&format!("/repos/{}/{}/issues", slug.owner, slug.repo));
+        let value = self.send_json(
+            reqwest::Method::POST,
+            &url,
+            serde_json::json!({ "title": title, "body": body }),
+        )?;
+        Ok(map_gitea_issue(&value))
+    }
+
+    fn create_pull(&self, repo: &RepoRef, head: &str, base: &str, title: &str, body: Option<&str>) -> Result<Pull> {
+        let slug = self.slug_ref(repo);
+        let url = self.api(&format!("/repos/{}/{}/pulls", slug.owner, slug.repo));
+        let value = self.send_json(
+            reqwest::Method::POST,
+            &url,
+            serde_json::json!({ "head": head, "base": base, "title": title, "body": body }),
+        )?;
+        Ok(map_gitea_pull(&value))
+    }
+
+    fn remote_branches(&self, repo: &RepoRef) -> Result<Vec<String>> {
+        let slug = self.slug_ref(repo);
+        let url = self.api(&format!("/repos/{}/{}/branches?limit=100", slug.owner, slug.repo));
+        let value = self.get(&url)?;
+        Ok(value
+            .as_array()
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|b| b.get("name").and_then(Value::as_str).map(str::to_string))
+                    .collect()
+            })
+            .unwrap_or_default())
+    }
 }
 
 #[cfg(test)]

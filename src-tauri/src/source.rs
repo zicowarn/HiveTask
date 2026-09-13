@@ -127,6 +127,12 @@ pub trait Source: Send + Sync {
     /// 仓库在平台侧的可见性："public" | "private"。GitHub 的 INTERNAL
     /// （GHE 企业可见，亦非公开）归一为 private；本地/无平台语义 → Err。
     fn repo_visibility(&self, repo: &RepoRef) -> Result<&'static str>;
+    /// 创建 Issue（远端写穿透；本地来源走 journal，见 local.rs）。
+    fn create_issue(&self, repo: &RepoRef, title: &str, body: Option<&str>) -> Result<Issue>;
+    /// 创建 PR（head/base 为远端分支名；本地来源 = 分支即 PR，不支持）。
+    fn create_pull(&self, repo: &RepoRef, head: &str, base: &str, title: &str, body: Option<&str>) -> Result<Pull>;
+    /// 远端分支名清单（PR 创建表单的 head/base 候选；本地 = 本地分支名）。
+    fn remote_branches(&self, repo: &RepoRef) -> Result<Vec<String>>;
 }
 
 /// JSON 编号字段 → 文本口径：字符串直取（Gitee v5 issue "IKCTH7"），

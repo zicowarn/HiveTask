@@ -166,9 +166,11 @@ function nameOf(entry: RepoEntry): string {
 }
 
 function pick(entry: RepoEntry) {
-  if (!entry.path) return; // 仅远端登记（阶段 B）暂不可选
-  repoStore.setCurrent(entry.path);
-  emit("select", entry.path);
+  // 仅远端登记同样可切换（target = remote_url，Issue/PR 走 API）
+  const target = entry.path ?? entry.remoteUrl;
+  if (!target) return;
+  repoStore.setCurrent(target);
+  emit("select", target);
 }
 
 async function pickLocal() {

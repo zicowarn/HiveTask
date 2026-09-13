@@ -300,6 +300,9 @@ export const enUS: Record<MessageKey, string> = {
 
   // Pull request workspace
   "pull.emptySelect": "Select a pull request on the left to see its details",
+  "pull.createBtn": "＋ New PR",
+  "pull.createTitle": "New pull request",
+  "pull.headLabel": "Head branch",
   "pull.emptyRepo": "Choose a local Git repository, then refresh pull requests",
 
   // GitHub reviewDecision values

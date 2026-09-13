@@ -329,22 +329,68 @@ fn add_comment(
     Ok(comments)
 }
 
-/// Create an issue. v1：仅本地仓库（journal `issue.create` + SQLite 双写，
-/// 编号由 meta 水位分配）；远端创建后续接同一通道。
+/// Create an issue——按来源分派：本地仓库走 journal `issue.create` +
+/// SQLite 双写（编号 meta 水位分配）；远端走 Source 写穿透（gh issue
+/// create / REST POST），响应实体回填缓存。
 #[tauri::command]
 fn create_issue(repo_path: String, title: String, body: Option<String>) -> Result<Issue, String> {
     let repo = resolve(&repo_path)?;
-    if repo.platform.as_deref() != Some("local") {
-        return Err("远端 Issue 创建即将支持，当前仅本地仓库可创建".to_string());
+    let issue = match repo.platform.as_deref() {
+        Some("local") => {
+            let workdir = repo
+                .workdir
+                .clone()
+                .ok_or_else(|| "本地仓库缺少工作目录".to_string())?;
+            let mut conn = storage::open(&storage_dir_of(&repo)).map_err(|e| e.to_string())?;
+            journal::sync(&workdir, &mut conn).map_err(|e| e.to_string())?;
+            let author = journal::current_author(&workdir);
+            journal::create_issue(&workdir, &mut conn, &title, body.as_deref(), &author)
+                .map_err(|e| e.to_string())?
+        }
+        _ => {
+            let issue = source::source_for_ref(repo.platform.as_deref(), &repo.host)
+                .create_issue(&repo, &title, body.as_deref())
+                .map_err(|e| e.to_string())?;
+            let conn = storage::open(&storage_dir_of(&repo)).map_err(|e| e.to_string())?;
+            storage::upsert_issue(&conn, &issue, &issue_state_source(&repo)).map_err(|e| e.to_string())?;
+            issue
+        }
+    };
+    Ok(issue)
+}
+
+/// 缓存 data_source 口径（与 storage 列一致：本地 local，其余按平台）。
+fn issue_state_source(repo: &source::RepoRef) -> String {
+    repo.platform.clone().unwrap_or_else(|| "github".to_string())
+}
+
+/// Create a pull request（远端来源；head/base 为远端分支名）。
+#[tauri::command]
+fn create_pull(
+    repo_path: String,
+    head: String,
+    base: String,
+    title: String,
+    body: Option<String>,
+) -> Result<Pull, String> {
+    let repo = resolve(&repo_path)?;
+    if repo.platform.as_deref() == Some("local") {
+        return Err("本地仓库没有 PR——分支即 PR，走本地分支 review".to_string());
     }
-    let workdir = repo
-        .workdir
-        .clone()
-        .ok_or_else(|| "本地仓库缺少工作目录".to_string())?;
-    let mut conn = storage::open(&storage_dir_of(&repo)).map_err(|e| e.to_string())?;
-    journal::sync(&workdir, &mut conn).map_err(|e| e.to_string())?;
-    let author = journal::current_author(&workdir);
-    journal::create_issue(&workdir, &mut conn, &title, body.as_deref(), &author)
+    let pull = source::source_for_ref(repo.platform.as_deref(), &repo.host)
+        .create_pull(&repo, &head, &base, &title, body.as_deref())
+        .map_err(|e| e.to_string())?;
+    let conn = storage::open(&storage_dir_of(&repo)).map_err(|e| e.to_string())?;
+    storage::upsert_pull(&conn, &pull).map_err(|e| e.to_string())?;
+    Ok(pull)
+}
+
+/// 远端分支名清单（PR 创建表单 head/base 候选；本地 = 本地分支）。
+#[tauri::command]
+fn remote_branch_list(repo_path: String) -> Result<Vec<String>, String> {
+    let repo = resolve(&repo_path)?;
+    source::source_for_ref(repo.platform.as_deref(), &repo.host)
+        .remote_branches(&repo)
         .map_err(|e| e.to_string())
 }
 
@@ -477,6 +523,8 @@ pub fn run() {
             fetch_comments,
             add_comment,
             create_issue,
+            create_pull,
+            remote_branch_list,
             set_issue_state,
             projects::project_create,
             projects::project_list,

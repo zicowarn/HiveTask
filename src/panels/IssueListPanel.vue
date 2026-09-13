@@ -10,7 +10,6 @@ import PanelShell from "../workbench/PanelShell.vue";
 import ModeTabs from "../components/ModeTabs.vue";
 import { resolvePanel } from "../workbench/registry";
 import { useIssuesStore } from "../stores/issues";
-import { useRepoStore } from "../stores/repo";
 import { useI18n } from "../i18n";
 import { stateLabel } from "./state-label";
 import type { IssueState } from "../types";
@@ -39,12 +38,6 @@ const states: { value: IssueState }[] = [
   { value: "closed" },
   { value: "all" },
 ];
-
-// 本地 Issue（P3 收官）：仅本地仓库提供创建入口；远端创建走 create_issue
-// 同一通道后续接。
-const repoStore = useRepoStore();
-const { platform } = storeToRefs(repoStore);
-const isLocal = computed(() => platform.value === "local");
 
 const createOpen = ref(false);
 const createTitle = ref("");
@@ -81,7 +74,6 @@ async function submitCreate() {
         {{ loading ? t("common.syncing") : t("common.refresh") }}
       </button>
       <button
-        v-if="isLocal"
         class="refresh-btn create-btn"
         @click="createOpen = !createOpen"
       >
@@ -91,7 +83,7 @@ async function submitCreate() {
 
     <p v-if="error" class="error-banner">{{ error }}</p>
 
-    <div v-if="createOpen && isLocal" class="create-form">
+    <div v-if="createOpen" class="create-form">
       <input
         v-model="createTitle"
         class="create-title"

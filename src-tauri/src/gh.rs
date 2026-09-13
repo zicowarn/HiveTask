@@ -128,6 +128,15 @@ impl Source for GhSource {
     fn repo_visibility(&self, repo: &RepoRef) -> Result<&'static str> {
         repo_visibility(&format!("{}/{}", repo.owner, repo.repo))
     }
+    fn create_issue(&self, repo: &RepoRef, title: &str, body: Option<&str>) -> Result<Issue> {
+        create_issue(&format!("{}/{}", repo.owner, repo.repo), title, body)
+    }
+    fn create_pull(&self, repo: &RepoRef, head: &str, base: &str, title: &str, body: Option<&str>) -> Result<Pull> {
+        create_pull(&format!("{}/{}", repo.owner, repo.repo), head, base, title, body)
+    }
+    fn remote_branches(&self, repo: &RepoRef) -> Result<Vec<String>> {
+        remote_branches(&format!("{}/{}", repo.owner, repo.repo))
+    }
 }
 
 /// 过滤器的 gh 方言（恰好与前端口径一致）。
@@ -407,6 +416,72 @@ pub fn probe_network() -> Result<()> {
     Err(anyhow!("{}", String::from_utf8_lossy(&output.stderr).trim()))
 }
 
+/// 从 `gh issue create` 的输出（issue URL）解析编号。
+fn parse_created_number(output: &str) -> Option<String> {
+    output
+        .trim()
+        .rsplit('/')
+        .next()
+        .and_then(|tail| tail.split('?').next())
+        .and_then(|tail| tail.split('#').next())
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+}
+
+/// 创建 Issue：gh issue create → 解析编号 → view 取全量实体。
+fn create_issue(slug: &str, title: &str, body: Option<&str>) -> Result<Issue> {
+    let mut args = vec![
+        "issue".to_string(),
+        "create".to_string(),
+        "-R".to_string(),
+        slug.to_string(),
+        "--title".to_string(),
+        title.to_string(),
+    ];
+    if let Some(b) = body {
+        args.push("--body".to_string());
+        args.push(b.to_string());
+    }
+    let arg_refs: Vec<&str> = args.iter().map(String::as_str).collect();
+    let out = run_gh(&arg_refs)?;
+    let number = parse_created_number(&out).ok_or_else(|| anyhow!("无法从创建输出解析编号: {}", out.trim()))?;
+    let args = ["issue", "view", &number, "--repo", slug, "--json", ISSUE_LIST_FIELDS];
+    let stdout = run_gh(&args)?;
+    let value: Value = serde_json::from_str(&stdout).context("解析 gh issue view 的 JSON 输出失败")?;
+    Ok(parse_issue_value(&value))
+}
+
+/// 创建 PR：gh pr create → 解析编号 → pr view 取全量。
+fn create_pull(slug: &str, head: &str, base: &str, title: &str, body: Option<&str>) -> Result<Pull> {
+    let mut args = vec![
+        "pr".to_string(),
+        "create".to_string(),
+        "-R".to_string(),
+        slug.to_string(),
+        "--head".to_string(),
+        head.to_string(),
+        "--base".to_string(),
+        base.to_string(),
+        "--title".to_string(),
+        title.to_string(),
+    ];
+    if let Some(b) = body {
+        args.push("--body".to_string());
+        args.push(b.to_string());
+    }
+    let arg_refs: Vec<&str> = args.iter().map(String::as_str).collect();
+    let out = run_gh(&arg_refs)?;
+    let number = parse_created_number(&out).ok_or_else(|| anyhow!("无法从创建输出解析编号: {}", out.trim()))?;
+    fetch_pull_detail(slug, &number)
+}
+
+/// 远端分支名清单（PR 创建表单候选）。
+fn remote_branches(slug: &str) -> Result<Vec<String>> {
+    let args = ["api", &format!("repos/{slug}/branches"), "--jq", ".[].name"];
+    let out = run_gh(&args)?;
+    Ok(out.lines().map(str::trim).filter(|l| !l.is_empty()).map(str::to_string).collect())
+}
+
 /// Close or reopen an issue; returns the fresh entity for store patching.
 fn set_issue_state(slug: &str, number: &str, closed: bool) -> Result<Issue> {
     let verb = if closed { "close" } else { "reopen" };
@@ -578,6 +653,19 @@ mod tests {
         "url": "https://github.com/zicowarn/HiveTask/issues/41"
       }
     ]"#;
+
+    #[test]
+    fn parse_created_number_from_url_output() {
+        assert_eq!(
+            parse_created_number("https://github.com/o/r/issues/123"),
+            Some("123".to_string())
+        );
+        assert_eq!(
+            parse_created_number("https://github.com/o/r/pull/45?ref=abc"),
+            Some("45".to_string())
+        );
+        assert_eq!(parse_created_number(""), None);
+    }
 
     #[test]
     fn parses_gh_issue_list_json() {

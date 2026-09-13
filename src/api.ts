@@ -257,6 +257,12 @@ export const api = {
   ghAuthWithToken: (token: string) => invoke<string>("gh_auth_with_token", { token }),
   ghAuthUser: () => invoke<string | null>("gh_auth_user"),
 
+  // ---- Issue/PR 创建（写穿透）----
+  createPull: (repoPath: string, head: string, base: string, title: string, body?: string) =>
+    invoke<Pull>("create_pull", { repoPath, head, base, title, body: body ?? null }),
+  remoteBranchList: (repoPath: string) =>
+    invoke<string[]>("remote_branch_list", { repoPath }),
+
   // ---- 本地分支 review（PR 工作区本地形态）----
   branchReviewList: (repoPath: string, base: string) =>
     invoke<ReviewBranch[]>("branch_review_list", { repoPath, base }),
