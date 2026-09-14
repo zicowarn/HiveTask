@@ -37,7 +37,9 @@ const modeKey = ref(storedMode);
 watch(modeKey, (key) => localStorage.setItem(MODE_STORAGE_KEY, key));
 
 const activeMode = computed(() => modes.find((m) => m.key === modeKey.value) ?? modes[0]);
-const modeComp = ref<{ collapseAll: () => void; expandAll: () => void } | null>(null);
+const modeComp = ref<{ collapseAll: () => void; expandAll: () => void; refresh: () => void } | null>(null);
+const msTab = ref<"open" | "closed" | "all">("open");
+const isMilestoneMode = computed(() => activeMode.value?.key === "milestone");
 
 const states: { value: IssueState }[] = [
   { value: "open" },
@@ -61,7 +63,6 @@ const milestoneChoices = computed(() => {
   return [...names].sort((a, b) => a.localeCompare(b));
 });
 
-const isMilestoneMode = computed(() => activeMode.value?.key === "milestone");
 
 async function submitCreate() {
   if (!createTitle.value.trim()) return;
@@ -99,7 +100,7 @@ async function submitMilestone() {
       <ModeTabs v-model="modeKey" :modes="modes" />
     </template>
     <div class="list-toolbar">
-      <div class="state-tabs">
+      <div v-if="!isMilestoneMode" class="state-tabs">
         <button
           v-for="s in states"
           :key="s.value"
@@ -108,6 +109,17 @@ async function submitMilestone() {
           @click="store.setState(s.value)"
         >
           {{ stateLabel(s.value) }}
+        </button>
+      </div>
+      <div v-else class="state-tabs">
+        <button
+          v-for="m in (['open', 'closed', 'all'] as const)"
+          :key="m"
+          class="state-tab"
+          :class="{ active: msTab === m }"
+          @click="msTab = m"
+        >
+          {{ stateLabel(m) }}
         </button>
       </div>
       <span class="toolbar-spacer"></span>
@@ -121,7 +133,7 @@ async function submitMilestone() {
         class="refresh-btn"
         @click="modeComp?.expandAll()"
       >{{ t("milestone.expandAll") }}</button>
-      <button class="refresh-btn" :disabled="loading" @click="store.refresh()">
+      <button class="refresh-btn" :disabled="loading" @click="isMilestoneMode ? modeComp?.refresh() : store.refresh()">
         {{ loading ? t("common.syncing") : t("common.refresh") }}
       </button>
       <button class="refresh-btn create-btn" @click="((createOpen = !createOpen), (milestoneOpen = false))">
@@ -203,7 +215,7 @@ async function submitMilestone() {
       </div>
     </div>
 
-    <component :is="activeMode.component" ref="modeComp" />
+    <component :is="activeMode.component" ref="modeComp" :tab="msTab" />
   </PanelShell>
 </template>
 
