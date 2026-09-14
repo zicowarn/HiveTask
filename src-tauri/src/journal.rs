@@ -35,6 +35,9 @@ pub struct Event {
     /// "OPEN" | "CLOSED"（issue.state 事件）。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub state: Option<String>,
+    /// 创建时归属的里程碑（旧事件缺省 None，重放兼容）。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub milestone: Option<String>,
 }
 
 /// 当前作者身份：仓库 git config 的 user.name，缺省 "hivetask"。
@@ -152,7 +155,7 @@ fn apply(conn: &Connection, event: &Event) -> Result<()> {
                     state: "OPEN".to_string(),
                     body: event.body.clone(),
                     author: Some(event.author.clone()),
-                    milestone: None,
+                    milestone: event.milestone.clone(),
                     labels: Vec::new(),
                     assignees: Vec::new(),
                     created_at: Some(event.ts.clone()),
@@ -195,6 +198,7 @@ pub fn create_issue(
     title: &str,
     body: Option<&str>,
     author: &str,
+    milestone: Option<&str>,
 ) -> Result<crate::models::Issue> {
     if title.trim().is_empty() {
         return Err(anyhow!("标题不能为空"));
@@ -209,6 +213,7 @@ pub fn create_issue(
         title: Some(title.trim().to_string()),
         body: body.map(|b| b.trim().to_string()).filter(|b| !b.is_empty()),
         state: None,
+        milestone: milestone.map(|m| m.trim().to_string()).filter(|m| !m.is_empty()),
     };
     append(workdir, &event)?;
     apply(conn, &event)?;
@@ -235,6 +240,7 @@ pub fn add_comment(
         title: None,
         body: Some(body.trim().to_string()),
         state: None,
+        milestone: None,
     };
     append(workdir, &event)?;
     storage::append_comment(conn, "issue", number, Some(author), body.trim(), &event.ts)?;
@@ -258,6 +264,7 @@ pub fn set_issue_state(
         title: None,
         body: None,
         state: Some(state.to_string()),
+        milestone: None,
     };
     append(workdir, &event)?;
     storage::update_issue_state(conn, number, state)?;
@@ -299,7 +306,7 @@ pub(crate) mod tests {
         let mut conn = open_material(&workdir);
 
         // 创建 → 评论 ×2 → 关闭
-        let issue = create_issue(&workdir, &mut conn, "第一条", Some("正文"), "tester").unwrap();
+        let issue = create_issue(&workdir, &mut conn, "第一条", Some("正文"), "tester", None).unwrap();
         assert_eq!(issue.number, "1");
         assert_eq!(issue.title, "第一条");
         add_comment(&workdir, &mut conn, "1", "评论一", "tester").unwrap();
@@ -334,8 +341,8 @@ pub(crate) mod tests {
         let _guard = TEST_LOCK.lock().unwrap();
         let workdir = temp_workdir();
         let mut conn = open_material(&workdir);
-        create_issue(&workdir, &mut conn, "a", None, "t").unwrap();
-        let second = create_issue(&workdir, &mut conn, "b", None, "t").unwrap();
+        create_issue(&workdir, &mut conn, "a", None, "t", None).unwrap();
+        let second = create_issue(&workdir, &mut conn, "b", None, "t", None).unwrap();
         assert_eq!(second.number, "2");
         std::fs::remove_dir_all(&workdir).ok();
     }

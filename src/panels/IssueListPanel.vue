@@ -10,6 +10,10 @@ import PanelShell from "../workbench/PanelShell.vue";
 import ModeTabs from "../components/ModeTabs.vue";
 import { resolvePanel } from "../workbench/registry";
 import { useIssuesStore } from "../stores/issues";
+import { useRepoStore } from "../stores/repo";
+import { api } from "../api";
+import { pushToast } from "../toast";
+import { translateError } from "../gh-errors";
 import { useI18n } from "../i18n";
 import { stateLabel } from "./state-label";
 import type { IssueState } from "../types";
@@ -23,8 +27,9 @@ const def = resolvePanel(PANEL_TYPE);
 const modes = def.modes ?? [];
 
 const store = useIssuesStore();
+const repoStore = useRepoStore();
 const { t } = useI18n();
-const { state, loading, error } = storeToRefs(store);
+const { state, loading, error, issues } = storeToRefs(store);
 
 const storedMode =
   modes.find((m) => m.key === localStorage.getItem(MODE_STORAGE_KEY))?.key ?? modes[0]?.key;
@@ -42,13 +47,47 @@ const states: { value: IssueState }[] = [
 const createOpen = ref(false);
 const createTitle = ref("");
 const createBody = ref("");
+const createMilestone = ref("");
+const milestoneOpen = ref(false);
+const msName = ref("");
+const msDue = ref("");
+const msDesc = ref("");
+
+/** 里程碑选项：来自当前列表已加载的分组（无需额外 API）。 */
+const milestoneChoices = computed(() => {
+  const names = new Set<string>();
+  for (const i of issues.value) if (i.milestone) names.add(i.milestone);
+  return [...names].sort((a, b) => a.localeCompare(b));
+});
+
+const isMilestoneMode = computed(() => activeMode.value?.key === "milestone");
+
 async function submitCreate() {
   if (!createTitle.value.trim()) return;
-  await store.createIssue(createTitle.value, createBody.value || undefined);
+  await store.createIssue(
+    createTitle.value,
+    createBody.value || undefined,
+    createMilestone.value || undefined,
+  );
   if (!store.error) {
     createOpen.value = false;
     createTitle.value = "";
     createBody.value = "";
+    createMilestone.value = "";
+  }
+}
+
+async function submitMilestone() {
+  if (!msName.value.trim()) return;
+  try {
+    await api.createMilestone(repoStore.current ?? "", msName.value, msDue.value || undefined, msDesc.value || undefined);
+    pushToast({ kind: "success", message: t("milestone.createdToast", { name: msName.value }) });
+    milestoneOpen.value = false;
+    msName.value = "";
+    msDue.value = "";
+    msDesc.value = "";
+  } catch (e) {
+    error.value = translateError(String(e));
   }
 }
 </script>
@@ -74,8 +113,16 @@ async function submitCreate() {
       <button class="refresh-btn" :disabled="loading" @click="store.refresh()">
         {{ loading ? t("common.syncing") : t("common.refresh") }}
       </button>
-      <button class="refresh-btn create-btn" @click="createOpen = !createOpen">
+      <button class="refresh-btn create-btn" @click="((createOpen = !createOpen), (milestoneOpen = false))">
         {{ t("issue.createBtn") }}
+      </button>
+      <button
+        v-if="isMilestoneMode"
+        class="refresh-btn create-btn"
+        :class="{ active: milestoneOpen }"
+        @click="((milestoneOpen = !milestoneOpen), (createOpen = false))"
+      >
+        {{ t("milestone.createBtn") }}
       </button>
     </div>
 
@@ -95,6 +142,10 @@ async function submitCreate() {
         :placeholder="t('issue.bodyPlaceholder')"
         rows="3"
       />
+      <select v-model="createMilestone" class="create-milestone" v-if="milestoneChoices.length">
+        <option value="">{{ t("issue.milestoneOptional") }}</option>
+        <option v-for="m in milestoneChoices" :key="m" :value="m">{{ m }}</option>
+      </select>
       <div class="create-actions">
         <button class="create-cancel" @click="createOpen = false">
           {{ t("conn.cancel") }}
@@ -103,6 +154,38 @@ async function submitCreate() {
           class="create-submit"
           :disabled="!createTitle.trim()"
           @click="submitCreate"
+        >
+          {{ t("issue.submit") }}
+        </button>
+      </div>
+    </div>
+
+    <div v-if="milestoneOpen && isMilestoneMode" class="create-form">
+      <input
+        v-model="msName"
+        class="create-title"
+        :placeholder="t('milestone.namePh')"
+        spellcheck="false"
+        @keydown.enter="submitMilestone"
+      />
+      <div class="ms-row">
+        <input v-model="msDue" type="date" class="create-title ms-date" />
+        <input
+          v-model="msDesc"
+          class="create-title"
+          :placeholder="t('milestone.descPh')"
+          spellcheck="false"
+          @keydown.enter="submitMilestone"
+        />
+      </div>
+      <div class="create-actions">
+        <button class="create-cancel" @click="milestoneOpen = false">
+          {{ t("conn.cancel") }}
+        </button>
+        <button
+          class="create-submit"
+          :disabled="!msName.trim()"
+          @click="submitMilestone"
         >
           {{ t("issue.submit") }}
         </button>
@@ -170,6 +253,27 @@ async function submitCreate() {
 .create-btn {
   color: var(--accent);
   border-color: var(--accent);
+}
+.create-btn.active {
+  background: var(--bg-selected);
+}
+.create-milestone {
+  box-sizing: border-box;
+  width: 100%;
+  font-size: 12px;
+  color: var(--text);
+  background: var(--bg-app);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 5px 8px;
+}
+.ms-row {
+  display: flex;
+  gap: 6px;
+}
+.ms-date {
+  flex: none;
+  width: 150px;
 }
 .create-form {
   display: flex;

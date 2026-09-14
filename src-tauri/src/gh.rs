@@ -128,8 +128,11 @@ impl Source for GhSource {
     fn repo_visibility(&self, repo: &RepoRef) -> Result<&'static str> {
         repo_visibility(&format!("{}/{}", repo.owner, repo.repo))
     }
-    fn create_issue(&self, repo: &RepoRef, title: &str, body: Option<&str>) -> Result<Issue> {
-        create_issue(&format!("{}/{}", repo.owner, repo.repo), title, body)
+    fn create_issue(&self, repo: &RepoRef, title: &str, body: Option<&str>, milestone: Option<&str>) -> Result<Issue> {
+        create_issue(&format!("{}/{}", repo.owner, repo.repo), title, body, milestone)
+    }
+    fn create_milestone(&self, repo: &RepoRef, title: &str, due_on: Option<&str>, description: Option<&str>) -> Result<String> {
+        create_milestone(&format!("{}/{}", repo.owner, repo.repo), title, due_on, description)
     }
     fn create_pull(&self, repo: &RepoRef, head: &str, base: &str, title: &str, body: Option<&str>) -> Result<Pull> {
         create_pull(&format!("{}/{}", repo.owner, repo.repo), head, base, title, body)
@@ -428,8 +431,18 @@ fn parse_created_number(output: &str) -> Option<String> {
         .map(str::to_string)
 }
 
+/// 截止日期归一：裸日期（yyyy-mm-dd）补 T00:00:00Z 成 GitHub 要求的
+/// RFC3339；其余原样。
+pub(crate) fn normalize_due_date(d: &str) -> String {
+    if d.len() == 10 && d.as_bytes()[4] == b'-' {
+        format!("{d}T00:00:00Z")
+    } else {
+        d.to_string()
+    }
+}
+
 /// 创建 Issue：gh issue create → 解析编号 → view 取全量实体。
-fn create_issue(slug: &str, title: &str, body: Option<&str>) -> Result<Issue> {
+fn create_issue(slug: &str, title: &str, body: Option<&str>, milestone: Option<&str>) -> Result<Issue> {
     let mut args = vec![
         "issue".to_string(),
         "create".to_string(),
@@ -441,6 +454,10 @@ fn create_issue(slug: &str, title: &str, body: Option<&str>) -> Result<Issue> {
     if let Some(b) = body {
         args.push("--body".to_string());
         args.push(b.to_string());
+    }
+    if let Some(m) = milestone {
+        args.push("--milestone".to_string());
+        args.push(m.to_string());
     }
     let arg_refs: Vec<&str> = args.iter().map(String::as_str).collect();
     let out = run_gh(&arg_refs)?;
@@ -473,6 +490,32 @@ fn create_pull(slug: &str, head: &str, base: &str, title: &str, body: Option<&st
     let out = run_gh(&arg_refs)?;
     let number = parse_created_number(&out).ok_or_else(|| anyhow!("无法从创建输出解析编号: {}", out.trim()))?;
     fetch_pull_detail(slug, &number)
+}
+
+/// 创建里程碑本体（gh api POST 表单字段）。
+fn create_milestone(slug: &str, title: &str, due_on: Option<&str>, description: Option<&str>) -> Result<String> {
+    let mut args = vec![
+        "api".to_string(),
+        format!("repos/{slug}/milestones"),
+        "-f".to_string(),
+        format!("title={title}"),
+    ];
+    if let Some(d) = due_on {
+        args.push("-f".to_string());
+        args.push(format!("due_on={}", normalize_due_date(d)));
+    }
+    if let Some(desc) = description {
+        args.push("-f".to_string());
+        args.push(format!("description={desc}"));
+    }
+    let arg_refs: Vec<&str> = args.iter().map(String::as_str).collect();
+    let out = run_gh(&arg_refs)?;
+    let value: Value = serde_json::from_str(&out).context("解析里程碑创建响应失败")?;
+    Ok(value
+        .get("title")
+        .and_then(Value::as_str)
+        .unwrap_or(title)
+        .to_string())
 }
 
 /// 远端分支名清单（PR 创建表单候选）。
@@ -653,6 +696,12 @@ mod tests {
         "url": "https://github.com/zicowarn/HiveTask/issues/41"
       }
     ]"#;
+
+    #[test]
+    fn normalize_due_date_appends_time() {
+        assert_eq!(normalize_due_date("2026-10-01"), "2026-10-01T00:00:00Z");
+        assert_eq!(normalize_due_date("2026-10-01T08:00:00Z"), "2026-10-01T08:00:00Z");
+    }
 
     #[test]
     fn parse_created_number_from_url_output() {

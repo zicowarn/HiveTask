@@ -71,13 +71,13 @@ export const useIssuesStore = defineStore("issues", () => {
 
   /** Create an issue (local repos only for now; the backend routes by
    * platform and journals `issue.create`). Fresh entity lands at the top. */
-  async function createIssue(title: string, body?: string) {
+  async function createIssue(title: string, body?: string, milestone?: string) {
     const repo = useRepoStore();
     if (!repo.current || !isTauri()) return;
     loading.value = true;
     error.value = null;
     try {
-      const fresh = await api.createIssue(repo.current, title, body);
+      const fresh = await api.createIssue(repo.current, title, body, milestone);
       issues.value = [fresh, ...issues.value];
       cachedCount.value = (cachedCount.value ?? 0) + 1;
       setOnline(true);

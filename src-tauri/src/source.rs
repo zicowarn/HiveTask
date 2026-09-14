@@ -128,7 +128,10 @@ pub trait Source: Send + Sync {
     /// （GHE 企业可见，亦非公开）归一为 private；本地/无平台语义 → Err。
     fn repo_visibility(&self, repo: &RepoRef) -> Result<&'static str>;
     /// 创建 Issue（远端写穿透；本地来源走 journal，见 local.rs）。
-    fn create_issue(&self, repo: &RepoRef, title: &str, body: Option<&str>) -> Result<Issue>;
+    /// milestone = 里程碑名称（按名归属；平台差异由实现内部消化）。
+    fn create_issue(&self, repo: &RepoRef, title: &str, body: Option<&str>, milestone: Option<&str>) -> Result<Issue>;
+    /// 创建里程碑本体（返回平台确认的名称）。本地来源不支持。
+    fn create_milestone(&self, repo: &RepoRef, title: &str, due_on: Option<&str>, description: Option<&str>) -> Result<String>;
     /// 创建 PR（head/base 为远端分支名；本地来源 = 分支即 PR，不支持）。
     fn create_pull(&self, repo: &RepoRef, head: &str, base: &str, title: &str, body: Option<&str>) -> Result<Pull>;
     /// 远端分支名清单（PR 创建表单的 head/base 候选；本地 = 本地分支名）。

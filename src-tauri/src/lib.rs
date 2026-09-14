@@ -333,7 +333,12 @@ fn add_comment(
 /// SQLite 双写（编号 meta 水位分配）；远端走 Source 写穿透（gh issue
 /// create / REST POST），响应实体回填缓存。
 #[tauri::command]
-fn create_issue(repo_path: String, title: String, body: Option<String>) -> Result<Issue, String> {
+fn create_issue(
+    repo_path: String,
+    title: String,
+    body: Option<String>,
+    milestone: Option<String>,
+) -> Result<Issue, String> {
     let repo = resolve(&repo_path)?;
     let issue = match repo.platform.as_deref() {
         Some("local") => {
@@ -344,12 +349,12 @@ fn create_issue(repo_path: String, title: String, body: Option<String>) -> Resul
             let mut conn = storage::open(&storage_dir_of(&repo)).map_err(|e| e.to_string())?;
             journal::sync(&workdir, &mut conn).map_err(|e| e.to_string())?;
             let author = journal::current_author(&workdir);
-            journal::create_issue(&workdir, &mut conn, &title, body.as_deref(), &author)
+            journal::create_issue(&workdir, &mut conn, &title, body.as_deref(), &author, milestone.as_deref())
                 .map_err(|e| e.to_string())?
         }
         _ => {
             let issue = source::source_for_ref(repo.platform.as_deref(), &repo.host)
-                .create_issue(&repo, &title, body.as_deref())
+                .create_issue(&repo, &title, body.as_deref(), milestone.as_deref())
                 .map_err(|e| e.to_string())?;
             let conn = storage::open(&storage_dir_of(&repo)).map_err(|e| e.to_string())?;
             storage::upsert_issue(&conn, &issue, &issue_state_source(&repo)).map_err(|e| e.to_string())?;
@@ -362,6 +367,20 @@ fn create_issue(repo_path: String, title: String, body: Option<String>) -> Resul
 /// 缓存 data_source 口径（与 storage 列一致：本地 local，其余按平台）。
 fn issue_state_source(repo: &source::RepoRef) -> String {
     repo.platform.clone().unwrap_or_else(|| "github".to_string())
+}
+
+/// 创建里程碑本体（远端来源；返回平台确认的名称）。
+#[tauri::command]
+fn create_milestone(
+    repo_path: String,
+    title: String,
+    due_on: Option<String>,
+    description: Option<String>,
+) -> Result<String, String> {
+    let repo = resolve(&repo_path)?;
+    source::source_for_ref(repo.platform.as_deref(), &repo.host)
+        .create_milestone(&repo, &title, due_on.as_deref(), description.as_deref())
+        .map_err(|e| e.to_string())
 }
 
 /// Create a pull request（远端来源；head/base 为远端分支名）。
@@ -461,7 +480,7 @@ fn convert_draft_to_issue(item_id: String, repo_path: String) -> Result<projects
     let mut conn = storage::open(&storage_dir_of(&repo)).map_err(|e| e.to_string())?;
     journal::sync(&workdir, &mut conn).map_err(|e| e.to_string())?;
     let author = journal::current_author(&workdir);
-    let issue = journal::create_issue(&workdir, &mut conn, &title, body.as_deref(), &author)
+    let issue = journal::create_issue(&workdir, &mut conn, &title, body.as_deref(), &author, None)
         .map_err(|e| e.to_string())?;
     // 4. 条目改关联（字段值/排序原位保留）
     let n = app
@@ -524,6 +543,7 @@ pub fn run() {
             add_comment,
             create_issue,
             create_pull,
+            create_milestone,
             remote_branch_list,
             set_issue_state,
             projects::project_create,

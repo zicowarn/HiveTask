@@ -87,11 +87,14 @@ impl Source for LocalSource {
     fn merge_pull(&self, _repo: &RepoRef, _number: &str, _method: MergeMethod) -> Result<Pull> {
         Err(anyhow!("本地仓库没有 Pull Request"))
     }
-    fn create_issue(&self, repo: &RepoRef, title: &str, body: Option<&str>) -> Result<Issue> {
+    fn create_issue(&self, repo: &RepoRef, title: &str, body: Option<&str>, milestone: Option<&str>) -> Result<Issue> {
         let workdir = self.workdir(repo)?;
         let mut conn = crate::storage::open(workdir)?;
         journal::sync(workdir, &mut conn)?;
-        journal::create_issue(workdir, &mut conn, title, body, &journal::current_author(workdir))
+        journal::create_issue(workdir, &mut conn, title, body, &journal::current_author(workdir), milestone)
+    }
+    fn create_milestone(&self, _repo: &RepoRef, _title: &str, _due_on: Option<&str>, _description: Option<&str>) -> Result<String> {
+        Err(anyhow!("本地仓库没有平台里程碑"))
     }
     fn create_pull(&self, _repo: &RepoRef, _head: &str, _base: &str, _title: &str, _body: Option<&str>) -> Result<Pull> {
         Err(anyhow!("本地仓库没有 Pull Request——分支即 PR，走本地分支 review"))

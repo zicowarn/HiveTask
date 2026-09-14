@@ -292,7 +292,12 @@ export const enUS: Record<MessageKey, string> = {
   // Issue workspace
   "issue.emptySelect": "Select an issue on the left to see its details",
   "issue.emptyRepo": "Choose a local Git repository, then refresh issues",
-  "issue.createBtn": "＋ New",
+  "issue.createBtn": "＋ New issue",
+  "issue.milestoneOptional": "Milestone (optional)",
+  "milestone.createBtn": "＋ New milestone",
+  "milestone.namePh": "Milestone name",
+  "milestone.descPh": "Description (optional)",
+  "milestone.createdToast": "Milestone created: {name}",
   "issue.titlePlaceholder": "Title",
   "issue.bodyPlaceholder": "Description (optional)",
   "issue.submit": "Create",

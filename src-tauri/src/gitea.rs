@@ -362,15 +362,44 @@ impl Source for GiteaSource {
         self.fetch_pull_detail(repo, number)
     }
 
-    fn create_issue(&self, repo: &RepoRef, title: &str, body: Option<&str>) -> Result<Issue> {
+    fn create_issue(&self, repo: &RepoRef, title: &str, body: Option<&str>, milestone: Option<&str>) -> Result<Issue> {
         let slug = self.slug_ref(repo);
         let url = self.api(&format!("/repos/{}/{}/issues", slug.owner, slug.repo));
-        let value = self.send_json(
-            reqwest::Method::POST,
-            &url,
-            serde_json::json!({ "title": title, "body": body }),
-        )?;
+        // 里程碑按名归属：REST 需要 id，先从里程碑清单按标题解析
+        let mut payload = serde_json::json!({ "title": title, "body": body });
+        if let Some(name) = milestone {
+            let list_url = self.api(&format!("/repos/{}/{}/milestones?limit=100", slug.owner, slug.repo));
+            let list = self.get(&list_url)?;
+            let id = list
+                .as_array()
+                .and_then(|arr| {
+                    arr.iter()
+                        .find(|m| m.get("title").and_then(Value::as_str).map(|t| t.eq_ignore_ascii_case(name)).unwrap_or(false))
+                        .and_then(|m| m.get("id"))
+                })
+                .and_then(Value::as_i64);
+            match id {
+                Some(mid) => payload["milestone_id"] = Value::from(mid),
+                None => return Err(anyhow!("里程碑不存在: {name}")),
+            }
+        }
+        let value = self.send_json(reqwest::Method::POST, &url, payload)?;
         Ok(map_gitea_issue(&value))
+    }
+
+    fn create_milestone(&self, repo: &RepoRef, title: &str, due_on: Option<&str>, description: Option<&str>) -> Result<String> {
+        let slug = self.slug_ref(repo);
+        let url = self.api(&format!("/repos/{}/{}/milestones", slug.owner, slug.repo));
+        let mut payload = serde_json::json!({ "title": title, "description": description });
+        if let Some(d) = due_on {
+            payload["due_on"] = Value::from(crate::gh::normalize_due_date(d));
+        }
+        let value = self.send_json(reqwest::Method::POST, &url, payload)?;
+        Ok(value
+            .get("title")
+            .and_then(Value::as_str)
+            .unwrap_or(title)
+            .to_string())
     }
 
     fn create_pull(&self, repo: &RepoRef, head: &str, base: &str, title: &str, body: Option<&str>) -> Result<Pull> {

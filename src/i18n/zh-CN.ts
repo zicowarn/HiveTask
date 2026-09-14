@@ -293,7 +293,12 @@ export const zhCN = {
   // Issue workspace
   "issue.emptySelect": "从左侧选择一个 Issue 查看详情",
   "issue.emptyRepo": "先选择一个本地 Git 仓库，然后刷新 Issues",
-  "issue.createBtn": "＋ 新建",
+  "issue.createBtn": "＋ 新建 Issue",
+  "issue.milestoneOptional": "归属里程碑（可选）",
+  "milestone.createBtn": "＋ 新建里程碑",
+  "milestone.namePh": "里程碑名称",
+  "milestone.descPh": "描述（可选）",
+  "milestone.createdToast": "里程碑已创建：{name}",
   "issue.titlePlaceholder": "标题",
   "issue.bodyPlaceholder": "描述（可选）",
   "issue.submit": "创建",
