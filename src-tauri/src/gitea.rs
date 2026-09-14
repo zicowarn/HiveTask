@@ -442,6 +442,8 @@ impl Source for GiteaSource {
                         title: v.get("title").and_then(Value::as_str).unwrap_or_default().to_string(),
                         due_on: v.get("due_on").and_then(Value::as_str).map(str::to_string),
                         state: v.get("state").and_then(Value::as_str).unwrap_or("open").to_string(),
+                        open_issues: v.get("open_issues").and_then(Value::as_i64).unwrap_or(0),
+                        closed_issues: v.get("closed_issues").and_then(Value::as_i64).unwrap_or(0),
                     })
                     .collect()
             })

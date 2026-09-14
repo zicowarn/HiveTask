@@ -104,15 +104,28 @@ impl Source for LocalSource {
         let workdir = self.workdir(repo)?;
         let conn = crate::storage::open(workdir)?;
         let all = crate::storage::list_issues(&conn, "all")?;
-        let mut seen = Vec::new();
-        for name in all.iter().filter_map(|i| i.milestone.clone()) {
-            if !seen.contains(&name) {
-                seen.push(name);
+        let mut seen: Vec<(String, i64, i64)> = Vec::new(); // (title, open, closed)
+        for issue in &all {
+            let Some(name) = issue.milestone.clone() else { continue };
+            let entry = seen.iter_mut().find(|(t, _, _)| t == &name);
+            let closed = (issue.state == "CLOSED") as i64;
+            match entry {
+                Some((_, open_n, closed_n)) => {
+                    *open_n += 1 - closed;
+                    *closed_n += closed;
+                }
+                None => seen.push((name, 1 - closed, closed)),
             }
         }
         Ok(seen
             .into_iter()
-            .map(|title| crate::models::MilestoneInfo { title, due_on: None, state: "open".to_string() })
+            .map(|(title, open_n, closed_n)| crate::models::MilestoneInfo {
+                title,
+                due_on: None,
+                state: if open_n > 0 { "open".to_string() } else { "closed".to_string() },
+                open_issues: open_n,
+                closed_issues: closed_n,
+            })
             .collect())
     }
 

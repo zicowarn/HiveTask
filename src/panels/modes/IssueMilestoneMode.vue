@@ -74,6 +74,8 @@ interface MilestoneMeta {
   title: string;
   dueOn: string | null;
   state: string;
+  openIssues: number;
+  closedIssues: number;
 }
 const metaMap = ref(new Map<string, MilestoneMeta>());
 
@@ -103,9 +105,8 @@ function dueInfo(group: MilestoneGroup): { text: string; overdue: boolean } | nu
   const due = new Date(meta.dueOn);
   if (Number.isNaN(due.getTime())) return null;
   const dateStr = meta.dueOn.slice(0, 10);
-  const done = closedOf(group) === group.issues.length && group.issues.length > 0;
   const overdueDays = Math.ceil((Date.now() - due.getTime()) / 86_400_000);
-  if (overdueDays > 0 && meta.state !== "closed" && !done) {
+  if (overdueDays > 0 && meta.state !== "closed") {
     return { text: t("milestone.overdueBy", { n: overdueDays }), overdue: true };
   }
   return { text: t("milestone.dueBy", { date: dateStr }), overdue: false };
@@ -124,7 +125,14 @@ function isCollapsed(name: string | null): boolean {
   return collapsed.value.has(name ?? "__none__");
 }
 function closedOf(group: MilestoneGroup): number {
+  const meta = metaOf(group);
+  if (meta) return meta.closedIssues;
   return group.issues.filter((i) => i.state === "CLOSED").length;
+}
+function totalOf(group: MilestoneGroup): number {
+  const meta = metaOf(group);
+  if (meta) return meta.openIssues + meta.closedIssues;
+  return group.issues.length;
 }
 
 /** 组内 Issue 的最近更新：绝对日期 + 相对时间；无数据返回 null。 */
@@ -187,9 +195,9 @@ function lastUpdatedOf(group: MilestoneGroup): { date: string; rel: string } | n
           <span class="group-spacer"></span>
           <span
             class="group-tag"
-            :class="{ done: closedOf(group) === group.issues.length && group.issues.length > 0 }"
-            :title="t('milestone.progressTitle', { done: closedOf(group), total: group.issues.length })"
-          >{{ closedOf(group) }}/{{ group.issues.length }}</span>
+            :class="{ done: totalOf(group) > 0 && closedOf(group) === totalOf(group) }"
+            :title="t('milestone.progressTitle', { done: closedOf(group), total: totalOf(group) })"
+          >{{ closedOf(group) }}/{{ totalOf(group) }}</span>
         </header>
         <ul v-if="!isCollapsed(group.name)" class="item-list">
           <IssueRow v-for="issue in group.issues" :key="issue.number" :issue="issue" />

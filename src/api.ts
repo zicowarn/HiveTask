@@ -267,7 +267,10 @@ export const api = {
 
   // ---- 里程碑元数据（组头 Due by / Overdue 数据源）----
   milestoneList: (repoPath: string) =>
-    invoke<Array<{ title: string; dueOn: string | null; state: string }>>("milestone_list", { repoPath }),
+    invoke<Array<{ title: string; dueOn: string | null; state: string; openIssues: number; closedIssues: number }>>(
+      "milestone_list",
+      { repoPath },
+    ),
 
   // ---- 本地分支 review（PR 工作区本地形态）----
   branchReviewList: (repoPath: string, base: string) =>

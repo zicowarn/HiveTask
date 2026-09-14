@@ -133,6 +133,9 @@ pub struct MilestoneInfo {
     pub due_on: Option<String>,
     /// "open" | "closed"。
     pub state: String,
+    /// 平台口径的计数（完成度不随前端筛选变化）。
+    pub open_issues: i64,
+    pub closed_issues: i64,
 }
 
 // ---- 本地分支 review（设计：《本地Issue与本地分支Review》Q3）----
