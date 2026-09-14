@@ -181,11 +181,11 @@ function onThemeChange(event: Event) {
   min-width: 0;
 }
 .setting-name {
-  font-size: 13px;
+  font-size: var(--font-base);
   color: var(--text);
 }
 .setting-desc {
-  font-size: 11px;
+  font-size: var(--font-sm);
   color: var(--text-dim);
 }
 .setting-select {
@@ -196,7 +196,7 @@ function onThemeChange(event: Event) {
   border-radius: 5px;
   background-color: var(--bg-app);
   color: var(--text);
-  font-size: 12px;
+  font-size: var(--font-md);
   padding: 0 22px 0 8px;
   cursor: pointer;
   outline: none;
@@ -217,7 +217,7 @@ function onThemeChange(event: Event) {
   border: 1px solid var(--border);
   background: var(--bg-panel);
   color: var(--text);
-  font-size: 12px;
+  font-size: var(--font-md);
   height: 24px;
   padding: 0 12px;
   border-radius: 5px;

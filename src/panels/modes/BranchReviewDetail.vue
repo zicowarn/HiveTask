@@ -133,7 +133,7 @@ function statusLabel(s: string): string {
 .brd-empty {
   text-align: center;
   color: var(--text-dim);
-  font-size: 12px;
+  font-size: var(--font-md);
   padding: 24px 0;
 }
 .brd-head {
@@ -143,13 +143,13 @@ function statusLabel(s: string): string {
   margin-bottom: 8px;
 }
 .brd-head-branch {
-  font-size: 14px;
+  font-size: var(--font-lg);
   font-weight: 700;
   color: var(--text);
 }
 .brd-arrow,
 .brd-head-base {
-  font-size: 12px;
+  font-size: var(--font-md);
   color: var(--text-dim);
 }
 .brd-merge-btn {
@@ -157,7 +157,7 @@ function statusLabel(s: string): string {
   border: 1px solid var(--success);
   background: transparent;
   color: var(--success);
-  font-size: 12px;
+  font-size: var(--font-md);
   font-weight: 600;
   height: 26px;
   padding: 0 14px;
@@ -174,7 +174,7 @@ function statusLabel(s: string): string {
 }
 .brd-banner {
   padding: 7px 10px;
-  font-size: 12px;
+  font-size: var(--font-md);
   border-radius: 6px;
   margin: 0 0 8px;
 }
@@ -202,7 +202,7 @@ function statusLabel(s: string): string {
   border: none;
   background: transparent;
   color: inherit;
-  font-size: 12px;
+  font-size: var(--font-md);
   text-decoration: underline;
   cursor: pointer;
   padding: 0 2px;
@@ -215,7 +215,7 @@ function statusLabel(s: string): string {
 }
 .brd-h {
   margin: 0 0 6px;
-  font-size: 12px;
+  font-size: var(--font-md);
   color: var(--text-dim);
   font-weight: 600;
 }
@@ -233,7 +233,7 @@ function statusLabel(s: string): string {
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 12px;
+  font-size: var(--font-md);
   padding: 3px 0;
 }
 .brd-oid {
@@ -265,7 +265,7 @@ function statusLabel(s: string): string {
   border: none;
   background: var(--bg-app);
   color: var(--text);
-  font-size: 12px;
+  font-size: var(--font-md);
   padding: 6px 9px;
   cursor: pointer;
   text-align: left;
@@ -276,7 +276,7 @@ function statusLabel(s: string): string {
 .brd-status {
   flex: none;
   font-weight: 700;
-  font-size: 11px;
+  font-size: var(--font-sm);
   width: 16px;
   text-align: center;
 }
@@ -300,7 +300,7 @@ function statusLabel(s: string): string {
   flex: none;
   display: inline-flex;
   gap: 6px;
-  font-size: 11px;
+  font-size: var(--font-sm);
 }
 .adds {
   color: var(--success);
@@ -317,7 +317,7 @@ function statusLabel(s: string): string {
 .brd-patch code {
   display: block;
   font-family: ui-monospace, monospace;
-  font-size: 11px;
+  font-size: var(--font-sm);
   line-height: 1.5;
   padding: 0 10px;
   color: var(--text);
@@ -333,7 +333,7 @@ function statusLabel(s: string): string {
   color: var(--accent);
 }
 .brd-nofiles {
-  font-size: 12px;
+  font-size: var(--font-md);
   color: var(--text-dim);
 }
 </style>

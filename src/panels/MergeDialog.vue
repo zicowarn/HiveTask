@@ -88,7 +88,7 @@ const options: { value: "merge" | "squash" | "rebase"; labelKey: "merge.merge" |
 }
 .merge-title {
   margin: 0 0 14px;
-  font-size: 15px;
+  font-size: var(--font-lg);
   font-weight: 700;
   color: var(--text);
 }
@@ -116,17 +116,17 @@ const options: { value: "merge" | "squash" | "rebase"; labelKey: "merge.merge" |
   min-width: 0;
 }
 .option-label {
-  font-size: 13px;
+  font-size: var(--font-base);
   color: var(--text);
 }
 .option-desc {
-  font-size: 11px;
+  font-size: var(--font-sm);
   color: var(--text-dim);
   line-height: 1.5;
 }
 .merge-hint {
   margin: 12px 0 0;
-  font-size: 11px;
+  font-size: var(--font-sm);
   color: var(--warning);
 }
 .merge-actions {
@@ -139,7 +139,7 @@ const options: { value: "merge" | "squash" | "rebase"; labelKey: "merge.merge" |
   border: 1px solid var(--border);
   background: var(--bg-app);
   color: var(--text);
-  font-size: 12px;
+  font-size: var(--font-md);
   height: 26px;
   padding: 0 16px;
   border-radius: 6px;

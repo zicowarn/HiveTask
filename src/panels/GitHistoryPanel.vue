@@ -304,7 +304,7 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
   border: 1px solid var(--border);
   background: var(--bg-panel);
   color: var(--text);
-  font-size: 12px;
+  font-size: var(--font-md);
   height: 22px;
   padding: 0 12px;
   border-radius: 5px;
@@ -322,7 +322,7 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
 .error-banner {
   margin: 8px 14px 0;
   padding: 8px 10px;
-  font-size: 12px;
+  font-size: var(--font-md);
   color: var(--danger);
   background: var(--danger-banner);
   border: 1px solid var(--danger-banner-border);
@@ -343,12 +343,12 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
   flex-wrap: wrap;
 }
 .strip-label {
-  font-size: 11px;
+  font-size: var(--font-sm);
   color: var(--text-dim);
   flex: none;
 }
 .strip-more {
-  font-size: 11px;
+  font-size: var(--font-sm);
   color: var(--accent);
   cursor: pointer;
   flex: none;
@@ -357,7 +357,7 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
   border: none;
   background: transparent;
   color: var(--text-dim);
-  font-size: 11px;
+  font-size: var(--font-sm);
   cursor: pointer;
   padding: 0 4px;
 }
@@ -372,7 +372,7 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
   border: 1px solid var(--border);
   background: var(--bg-app);
   color: var(--text-dim);
-  font-size: 11px;
+  font-size: var(--font-sm);
   height: 20px;
   padding: 0 8px;
   border-radius: 10px;
@@ -395,7 +395,7 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
   color: var(--accent);
 }
 .ab-badge {
-  font-size: 10px;
+  font-size: var(--font-xs);
   color: var(--warning);
 }
 
@@ -407,7 +407,7 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
   height: 24px;
   padding: 0 12px;
   border-bottom: 1px solid var(--border);
-  font-size: 11px;
+  font-size: var(--font-sm);
   color: var(--text-dim);
 }
 .col-graph {
@@ -444,7 +444,7 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
 .graph-note {
   margin: auto;
   color: var(--text-dim);
-  font-size: 12px;
+  font-size: var(--font-md);
 }
 .log-scroll {
   position: relative;
@@ -481,7 +481,7 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
   display: flex;
   align-items: center;
   gap: 12px;
-  font-size: 11px;
+  font-size: var(--font-sm);
   color: var(--text-dim);
 }
 .detail-hash {
@@ -493,7 +493,7 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
 }
 .detail-message {
   margin: 5px 0 0;
-  font-size: 12px;
+  font-size: var(--font-md);
   color: var(--text);
 }
 .lanes {
@@ -512,13 +512,13 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
 .cell-date,
 .cell-author {
   flex: none;
-  font-size: 11px;
+  font-size: var(--font-sm);
   color: var(--text-dim);
   overflow: hidden;
   text-overflow: ellipsis;
 }
 .cell-message {
-  font-size: 12px;
+  font-size: var(--font-md);
   color: var(--text);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -529,7 +529,7 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
 }
 .ref-chip {
   flex: none;
-  font-size: 10px;
+  font-size: var(--font-xs);
   padding: 0 6px;
   border-radius: 8px;
   border: 1px solid var(--border);
@@ -557,7 +557,7 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
   display: flex;
   align-items: center;
   gap: 12px;
-  font-size: 11px;
+  font-size: var(--font-sm);
   color: var(--text-dim);
 }
 .detail-hash {
@@ -573,7 +573,7 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
   background: var(--bg-panel);
   color: var(--text);
   cursor: pointer;
-  font-size: 11px;
+  font-size: var(--font-sm);
   height: 22px;
   padding: 0 10px;
   border-radius: 5px;
@@ -587,7 +587,7 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
 }
 .detail-message {
   margin: 5px 0 0;
-  font-size: 12px;
+  font-size: var(--font-md);
   color: var(--text);
 }
 </style>

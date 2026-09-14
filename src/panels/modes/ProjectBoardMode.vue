@@ -297,14 +297,14 @@ async function submitConvert(item: ProjectItem, path: string) {
   align-items: center;
   gap: 6px;
   margin: 0;
-  font-size: 12px;
+  font-size: var(--font-md);
   font-weight: 600;
   color: var(--text);
 }
 .col-rename {
   box-sizing: border-box;
   width: 110px;
-  font-size: 12px;
+  font-size: var(--font-md);
   font-family: inherit;
   color: var(--text);
   background: var(--bg-panel);
@@ -320,7 +320,7 @@ async function submitConvert(item: ProjectItem, path: string) {
   border: none;
   background: transparent;
   color: var(--text-dim);
-  font-size: 12px;
+  font-size: var(--font-md);
   cursor: pointer;
   padding: 0 3px;
   border-radius: 4px;
@@ -330,7 +330,7 @@ async function submitConvert(item: ProjectItem, path: string) {
   background: var(--bg-hover);
 }
 .col-btn.plus {
-  font-size: 13px;
+  font-size: var(--font-base);
 }
 .col-dot {
   width: 8px;
@@ -340,7 +340,7 @@ async function submitConvert(item: ProjectItem, path: string) {
 }
 .col-count {
   margin-left: auto;
-  font-size: 10px;
+  font-size: var(--font-xs);
   font-weight: 400;
   color: var(--text-dim);
 }
@@ -366,7 +366,7 @@ async function submitConvert(item: ProjectItem, path: string) {
 }
 .card-title {
   margin: 0 0 4px;
-  font-size: 12px;
+  font-size: var(--font-md);
   color: var(--text);
   word-break: break-word;
 }
@@ -375,7 +375,7 @@ async function submitConvert(item: ProjectItem, path: string) {
   align-items: center;
   gap: 6px;
   margin: 0 0 4px;
-  font-size: 10px;
+  font-size: var(--font-xs);
   color: var(--text-dim);
 }
 .card-src {
@@ -395,7 +395,7 @@ async function submitConvert(item: ProjectItem, path: string) {
   border: none;
   background: transparent;
   color: var(--text-dim);
-  font-size: 10px;
+  font-size: var(--font-xs);
   cursor: pointer;
 }
 .card:hover .card-del {
@@ -414,12 +414,12 @@ async function submitConvert(item: ProjectItem, path: string) {
   border: none;
   background: transparent;
   color: var(--accent);
-  font-size: 11px;
+  font-size: var(--font-sm);
   cursor: pointer;
   padding: 0;
 }
 .card-select {
-  font-size: 11px;
+  font-size: var(--font-sm);
   color: var(--text);
   background: var(--bg-app);
   border: 1px solid var(--border);
@@ -430,7 +430,7 @@ async function submitConvert(item: ProjectItem, path: string) {
   margin: 0;
   text-align: center;
   color: var(--accent);
-  font-size: 12px;
+  font-size: var(--font-md);
 }
 .add-pane {
   position: absolute;
@@ -448,7 +448,7 @@ async function submitConvert(item: ProjectItem, path: string) {
   border: 1px dashed var(--border);
   background: var(--bg-panel);
   color: var(--text-dim);
-  font-size: 16px;
+  font-size: var(--font-lg);
   cursor: pointer;
 }
 .add-toggle:hover {
@@ -475,7 +475,7 @@ async function submitConvert(item: ProjectItem, path: string) {
   border: none;
   background: transparent;
   color: var(--text-dim);
-  font-size: 11px;
+  font-size: var(--font-sm);
   padding: 4px 0;
   border-radius: 4px;
   cursor: pointer;
@@ -488,7 +488,7 @@ async function submitConvert(item: ProjectItem, path: string) {
 .add-input {
   box-sizing: border-box;
   width: 100%;
-  font-size: 12px;
+  font-size: var(--font-md);
   font-family: inherit;
   color: var(--text);
   background: var(--bg-app);
@@ -504,7 +504,7 @@ async function submitConvert(item: ProjectItem, path: string) {
   border: 1px solid var(--accent);
   color: var(--accent);
   background: transparent;
-  font-size: 12px;
+  font-size: var(--font-md);
   font-weight: 600;
   height: 24px;
   border-radius: 5px;

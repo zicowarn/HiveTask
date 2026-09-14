@@ -61,7 +61,7 @@ const kindIcon: Record<string, string> = {
   border-left: 3px solid var(--text-dim);
   border-radius: 8px;
   box-shadow: 0 6px 20px rgba(0, 0, 0, 0.28);
-  font-size: 12px;
+  font-size: var(--font-md);
 }
 .toast.error {
   border-left-color: var(--danger);
@@ -74,7 +74,7 @@ const kindIcon: Record<string, string> = {
 }
 .toast-icon {
   flex: none;
-  font-size: 11px;
+  font-size: var(--font-sm);
   line-height: 1.5;
   color: var(--text-dim);
 }
@@ -98,7 +98,7 @@ const kindIcon: Record<string, string> = {
 }
 .toast-detail {
   margin: 4px 0 0;
-  font-size: 11px;
+  font-size: var(--font-sm);
   line-height: 1.4;
   color: var(--text-dim);
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
@@ -113,7 +113,7 @@ const kindIcon: Record<string, string> = {
   border: none;
   background: transparent;
   color: var(--text-dim);
-  font-size: 11px;
+  font-size: var(--font-sm);
   cursor: pointer;
   padding: 2px 4px;
   border-radius: 4px;

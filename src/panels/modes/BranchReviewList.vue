@@ -71,11 +71,11 @@ onMounted(() => {
   gap: 6px;
 }
 .br-base-label {
-  font-size: 11px;
+  font-size: var(--font-sm);
   color: var(--text-dim);
 }
 .br-base-select {
-  font-size: 12px;
+  font-size: var(--font-md);
   color: var(--text);
   background: var(--bg-app);
   border: 1px solid var(--border);
@@ -83,13 +83,13 @@ onMounted(() => {
   padding: 2px 6px;
 }
 .br-loading {
-  font-size: 11px;
+  font-size: var(--font-sm);
   color: var(--text-dim);
 }
 .br-error {
   margin: 8px 12px 0;
   padding: 8px 10px;
-  font-size: 12px;
+  font-size: var(--font-md);
   color: var(--danger);
   background: var(--danger-banner);
   border: 1px solid var(--danger-banner-border);
@@ -98,7 +98,7 @@ onMounted(() => {
 .br-empty {
   text-align: center;
   color: var(--text-dim);
-  font-size: 12px;
+  font-size: var(--font-md);
   padding: 20px 0;
 }
 .br-rows {
@@ -114,7 +114,7 @@ onMounted(() => {
   gap: 8px;
   padding: 7px 9px;
   border-radius: 6px;
-  font-size: 12px;
+  font-size: var(--font-md);
   color: var(--text);
   cursor: pointer;
 }

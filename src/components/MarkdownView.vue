@@ -39,7 +39,7 @@ const rendered = computed(() => md.render(stripHtmlComments(props.source ?? ""))
 
 <style scoped>
 .markdown-body {
-  font-size: 13px;
+  font-size: var(--font-base);
   line-height: 1.65;
   color: var(--text);
   word-wrap: break-word;
@@ -53,13 +53,13 @@ const rendered = computed(() => md.render(stripHtmlComments(props.source ?? ""))
   font-weight: 600;
 }
 .markdown-body :deep(h1) {
-  font-size: 19px;
+  font-size: var(--font-xl);
 }
 .markdown-body :deep(h2) {
-  font-size: 17px;
+  font-size: var(--font-xl);
 }
 .markdown-body :deep(h3) {
-  font-size: 15px;
+  font-size: var(--font-lg);
 }
 .markdown-body :deep(p) {
   margin: 8px 0;
@@ -91,7 +91,7 @@ const rendered = computed(() => md.render(stripHtmlComments(props.source ?? ""))
 }
 .markdown-body :deep(code) {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 12px;
+  font-size: var(--font-md);
   background: var(--bg-app);
   border: 1px solid var(--border);
   border-radius: 4px;
@@ -109,13 +109,13 @@ const rendered = computed(() => md.render(stripHtmlComments(props.source ?? ""))
   padding: 0;
   border: none;
   background: none;
-  font-size: 12px;
+  font-size: var(--font-md);
   line-height: 1.5;
 }
 .markdown-body :deep(table) {
   border-collapse: collapse;
   margin: 10px 0;
-  font-size: 12px;
+  font-size: var(--font-md);
   display: block;
   overflow-x: auto;
 }

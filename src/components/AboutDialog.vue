@@ -94,16 +94,16 @@ onBeforeUnmount(() => document.removeEventListener("keydown", onKeydown));
 }
 .about-mark {
   color: var(--accent);
-  font-size: 26px;
+  font-size: 22px;
 }
 .about-name {
-  font-size: 21px;
+  font-size: var(--font-xl);
   font-weight: 700;
   color: var(--text);
 }
 .about-description {
   margin: 12px 0 0;
-  font-size: 12px;
+  font-size: var(--font-md);
   line-height: 1.6;
   color: var(--text-dim);
 }
@@ -119,11 +119,11 @@ onBeforeUnmount(() => document.removeEventListener("keydown", onKeydown));
   gap: 2px;
 }
 .row-label {
-  font-size: 12px;
+  font-size: var(--font-md);
   color: var(--text);
 }
 .row-value {
-  font-size: 12px;
+  font-size: var(--font-md);
   color: var(--text-dim);
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 }
@@ -137,13 +137,13 @@ onBeforeUnmount(() => document.removeEventListener("keydown", onKeydown));
   border: 1px solid var(--border);
   border-radius: 6px;
   list-style: none;
-  font-size: 11px;
+  font-size: var(--font-sm);
   line-height: 1.8;
   color: var(--text-dim);
 }
 .about-copyright {
   margin: 14px 0 0;
-  font-size: 11px;
+  font-size: var(--font-sm);
   color: var(--text-dim);
 }
 .about-actions {
@@ -155,7 +155,7 @@ onBeforeUnmount(() => document.removeEventListener("keydown", onKeydown));
   border: 1px solid var(--border);
   background: var(--bg-app);
   color: var(--text);
-  font-size: 12px;
+  font-size: var(--font-md);
   height: 24px;
   padding: 0 16px;
   border-radius: 6px;

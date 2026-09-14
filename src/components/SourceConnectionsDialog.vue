@@ -215,7 +215,7 @@ onBeforeUnmount(() => document.removeEventListener("keydown", onKeydown));
   margin-bottom: 10px;
 }
 .conn-title {
-  font-size: 13px;
+  font-size: var(--font-base);
   font-weight: 700;
   color: var(--text);
 }
@@ -224,13 +224,13 @@ onBeforeUnmount(() => document.removeEventListener("keydown", onKeydown));
   background: transparent;
   color: var(--text-dim);
   cursor: pointer;
-  font-size: 12px;
+  font-size: var(--font-md);
 }
 .conn-close:hover {
   color: var(--text);
 }
 .conn-empty {
-  font-size: 12px;
+  font-size: var(--font-md);
   color: var(--text-dim);
   text-align: center;
   padding: 16px 0;
@@ -248,7 +248,7 @@ onBeforeUnmount(() => document.removeEventListener("keydown", onKeydown));
   border: 1px solid var(--border);
   border-radius: 6px;
   margin-bottom: 6px;
-  font-size: 12px;
+  font-size: var(--font-md);
 }
 .conn-label {
   font-weight: 600;
@@ -261,7 +261,7 @@ onBeforeUnmount(() => document.removeEventListener("keydown", onKeydown));
 }
 .conn-state {
   margin-left: auto;
-  font-size: 10px;
+  font-size: var(--font-xs);
   color: var(--success);
   white-space: nowrap;
 }
@@ -270,7 +270,7 @@ onBeforeUnmount(() => document.removeEventListener("keydown", onKeydown));
   border: 1px solid var(--border);
   background: var(--bg-app);
   color: var(--text);
-  font-size: 11px;
+  font-size: var(--font-sm);
   height: 22px;
   padding: 0 8px;
   border-radius: 5px;
@@ -289,7 +289,7 @@ onBeforeUnmount(() => document.removeEventListener("keydown", onKeydown));
   border: 1px dashed var(--border);
   background: transparent;
   color: var(--text-dim);
-  font-size: 12px;
+  font-size: var(--font-md);
   height: 28px;
   border-radius: 6px;
   cursor: pointer;
@@ -307,7 +307,7 @@ onBeforeUnmount(() => document.removeEventListener("keydown", onKeydown));
 .form-label {
   width: 90px;
   flex: none;
-  font-size: 12px;
+  font-size: var(--font-md);
   color: var(--text);
 }
 /* 下拉与输入框同款扁平样式；select 必须 appearance:none，
@@ -318,7 +318,7 @@ onBeforeUnmount(() => document.removeEventListener("keydown", onKeydown));
   -webkit-appearance: none;
   flex: 1;
   box-sizing: border-box;
-  font-size: 12px;
+  font-size: var(--font-md);
   color: var(--text);
   background-color: var(--bg-app);
   border: 1px solid var(--border);
@@ -342,7 +342,7 @@ onBeforeUnmount(() => document.removeEventListener("keydown", onKeydown));
   border-color: var(--accent);
 }
 .form-note {
-  font-size: 12px;
+  font-size: var(--font-md);
   color: var(--text-dim);
 }
 .conn-actions {

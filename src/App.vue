@@ -386,7 +386,7 @@ onBeforeUnmount(() => {
   padding-bottom: 8px;
 }
 .repo-panel-title {
-  font-size: 13px;
+  font-size: var(--font-base);
   font-weight: 700;
   color: var(--text);
 }
@@ -395,7 +395,7 @@ onBeforeUnmount(() => {
   background: transparent;
   color: var(--text-dim);
   cursor: pointer;
-  font-size: 12px;
+  font-size: var(--font-md);
 }
 .repo-panel-close:hover {
   color: var(--text);
@@ -425,11 +425,11 @@ onBeforeUnmount(() => {
 }
 .brand-mark {
   color: var(--accent);
-  font-size: 16px;
+  font-size: var(--font-lg);
 }
 .brand-name {
   font-weight: 700;
-  font-size: 14px;
+  font-size: var(--font-lg);
 }
 .workspace-tabs {
   display: flex;
@@ -444,7 +444,7 @@ onBeforeUnmount(() => {
   border: none;
   background: transparent;
   color: var(--text-dim);
-  font-size: 12px;
+  font-size: var(--font-md);
   padding: 3px 12px;
   border-radius: 5px;
   cursor: pointer;
@@ -467,7 +467,7 @@ onBeforeUnmount(() => {
   min-width: 0;
 }
 .repo-path {
-  font-size: 12px;
+  font-size: var(--font-md);
   color: var(--text);
   background: var(--bg-app);
   border: 1px solid var(--border);
@@ -479,7 +479,7 @@ onBeforeUnmount(() => {
   white-space: nowrap;
 }
 .repo-origin {
-  font-size: 11px;
+  font-size: var(--font-sm);
   color: var(--text-dim);
   max-width: 200px;
   overflow: hidden;
@@ -487,7 +487,7 @@ onBeforeUnmount(() => {
   white-space: nowrap;
 }
 .repo-hint {
-  font-size: 12px;
+  font-size: var(--font-md);
   color: var(--text-dim);
 }
 /* 头部可见性徽标：锁/开锁 + 短文字（状态栏与列表保持纯图标） */
@@ -495,7 +495,7 @@ onBeforeUnmount(() => {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  font-size: 10px;
+  font-size: var(--font-xs);
   line-height: 1;
   padding: 3px 8px;
   border: 1px solid var(--border);
@@ -517,7 +517,7 @@ onBeforeUnmount(() => {
   border: 1px solid var(--border);
   background: var(--bg-panel);
   color: var(--text);
-  font-size: 12px;
+  font-size: var(--font-md);
   padding: 4px 14px;
   border-radius: 6px;
   cursor: pointer;
@@ -540,7 +540,7 @@ onBeforeUnmount(() => {
 .gh-warning {
   flex: none;
   padding: 7px 14px;
-  font-size: 12px;
+  font-size: var(--font-md);
   color: var(--danger);
   background: var(--danger-banner);
   border-bottom: 1px solid var(--danger-banner-border);

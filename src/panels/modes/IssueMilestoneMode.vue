@@ -202,6 +202,7 @@ function lastUpdatedOf(group: MilestoneGroup): string {
   display: flex;
   align-items: center;
   gap: 6px;
+  min-height: 34px;
   padding: 6px 8px;
   cursor: pointer;
   user-select: none;
@@ -218,12 +219,12 @@ function lastUpdatedOf(group: MilestoneGroup): string {
 }
 .group-updated {
   color: var(--text-dim);
-  font-size: 11px;
+  font-size: var(--font-sm);
   flex: none;
 }
 .group-due {
   color: var(--text-dim);
-  font-size: 11px;
+  font-size: var(--font-sm);
   flex: none;
 }
 .group-due.overdue {
@@ -232,7 +233,7 @@ function lastUpdatedOf(group: MilestoneGroup): string {
 }
 .group-updated {
   color: var(--text-dim);
-  font-size: 11px;
+  font-size: var(--font-sm);
   flex: none;
 }
 .group-spacer {
@@ -242,7 +243,7 @@ function lastUpdatedOf(group: MilestoneGroup): string {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  font-size: 11px;
+  font-size: var(--font-sm);
   color: var(--text-dim);
   flex: none;
 }
@@ -278,9 +279,10 @@ function lastUpdatedOf(group: MilestoneGroup): string {
   padding: 6px 12px;
   background: var(--bg-panel);
   border-bottom: 1px solid var(--border);
-  font-size: 11px;
+  font-size: var(--font-sm);
 }
 .group-name {
+  font-size: var(--font-base);
   font-weight: 600;
   color: var(--text);
   white-space: nowrap;
@@ -305,7 +307,7 @@ function lastUpdatedOf(group: MilestoneGroup): string {
 .unassigned-note {
   margin: 0 0 10px;
   padding: 7px 12px;
-  font-size: 12px;
+  font-size: var(--font-md);
   color: var(--text-dim);
   background: var(--bg-chip);
   border: 1px solid var(--border);
@@ -315,6 +317,6 @@ function lastUpdatedOf(group: MilestoneGroup): string {
   padding: 24px 12px;
   text-align: center;
   color: var(--text-dim);
-  font-size: 12px;
+  font-size: var(--font-md);
 }
 </style>

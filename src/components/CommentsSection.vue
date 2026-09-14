@@ -95,12 +95,12 @@ function timeLabel(iso?: string | null): string {
   margin: 0 0 10px;
   padding-top: 14px;
   border-top: 1px solid var(--border);
-  font-size: 13px;
+  font-size: var(--font-base);
   font-weight: 600;
   color: var(--text);
 }
 .comments-count {
-  font-size: 11px;
+  font-size: var(--font-sm);
   font-weight: 500;
   color: var(--text-dim);
   background: var(--bg-chip);
@@ -108,7 +108,7 @@ function timeLabel(iso?: string | null): string {
   padding: 1px 7px;
 }
 .comments-empty {
-  font-size: 12px;
+  font-size: var(--font-md);
   color: var(--text-dim);
 }
 .comment-list {
@@ -123,7 +123,7 @@ function timeLabel(iso?: string | null): string {
   border: 1px solid var(--border);
   border-radius: 7px;
   margin-bottom: 8px;
-  font-size: 13px;
+  font-size: var(--font-base);
   color: var(--text);
 }
 .comment.pending {
@@ -134,7 +134,7 @@ function timeLabel(iso?: string | null): string {
   align-items: baseline;
   gap: 8px;
   margin-bottom: 5px;
-  font-size: 11px;
+  font-size: var(--font-sm);
 }
 .comment-author {
   font-weight: 600;
@@ -155,7 +155,7 @@ function timeLabel(iso?: string | null): string {
   resize: vertical;
   min-height: 64px;
   font: inherit;
-  font-size: 12px;
+  font-size: var(--font-md);
   line-height: 1.6;
   color: var(--text);
   background: var(--bg-app);
@@ -176,7 +176,7 @@ function timeLabel(iso?: string | null): string {
   border: 1px solid var(--border);
   background: var(--bg-selected);
   color: var(--accent);
-  font-size: 12px;
+  font-size: var(--font-md);
   height: 24px;
   padding: 0 16px;
   border-radius: 6px;

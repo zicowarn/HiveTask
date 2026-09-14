@@ -43,7 +43,7 @@ const { t } = useI18n();
   border: none;
   background: transparent;
   color: var(--text-dim);
-  font-size: 12px;
+  font-size: var(--font-md);
   height: 18px;
   line-height: 18px;
   padding: 0 10px;

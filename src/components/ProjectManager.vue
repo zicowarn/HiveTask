@@ -325,7 +325,7 @@ async function confirmDelete() {
   border: none;
   background: transparent;
   color: var(--text-dim);
-  font-size: 12px;
+  font-size: var(--font-md);
   padding: 3px 8px;
   border-radius: 5px;
   cursor: pointer;
@@ -339,13 +339,13 @@ async function confirmDelete() {
   font-weight: 600;
 }
 .pjmgr-count {
-  font-size: 10px;
+  font-size: var(--font-xs);
   opacity: 0.75;
 }
 .pjmgr-empty {
   text-align: center;
   color: var(--text-dim);
-  font-size: 12px;
+  font-size: var(--font-md);
   padding: 16px 0;
 }
 .pjmgr-list {
@@ -361,7 +361,7 @@ async function confirmDelete() {
   border: 1px solid var(--border);
   border-radius: 6px;
   margin-bottom: 6px;
-  font-size: 12px;
+  font-size: var(--font-md);
   color: var(--text);
   cursor: pointer;
 }
@@ -378,7 +378,7 @@ async function confirmDelete() {
 }
 .pjmgr-desc {
   color: var(--text-dim);
-  font-size: 11px;
+  font-size: var(--font-sm);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -389,7 +389,7 @@ async function confirmDelete() {
   border: none;
   background: transparent;
   color: var(--text-dim);
-  font-size: 11px;
+  font-size: var(--font-sm);
   cursor: pointer;
   padding: 0 3px;
 }
@@ -400,7 +400,7 @@ async function confirmDelete() {
   color: var(--danger);
 }
 .pjmgr-confirm-text {
-  font-size: 11px;
+  font-size: var(--font-sm);
   color: var(--danger);
   flex: 1;
 }
@@ -413,7 +413,7 @@ async function confirmDelete() {
   border: 1px dashed var(--border);
   background: transparent;
   color: var(--text-dim);
-  font-size: 12px;
+  font-size: var(--font-md);
   height: 28px;
   border-radius: 6px;
   cursor: pointer;
@@ -436,7 +436,7 @@ async function confirmDelete() {
 .pjmgr-input {
   box-sizing: border-box;
   width: 100%;
-  font-size: 12px;
+  font-size: var(--font-md);
   font-family: inherit;
   color: var(--text);
   background: var(--bg-panel);
@@ -450,11 +450,11 @@ async function confirmDelete() {
 }
 .pjmgr-bind-head {
   margin: 2px 0 0;
-  font-size: 11px;
+  font-size: var(--font-sm);
   color: var(--text-dim);
 }
 .pjmgr-bind-empty {
-  font-size: 11px;
+  font-size: var(--font-sm);
   color: var(--text-dim);
 }
 .pjmgr-bind-chips {
@@ -472,7 +472,7 @@ async function confirmDelete() {
   border: 1px solid var(--border);
   background: var(--bg-panel);
   color: var(--text);
-  font-size: 11px;
+  font-size: var(--font-sm);
   height: 20px;
   padding: 0 8px;
   border-radius: 5px;
@@ -498,7 +498,7 @@ async function confirmDelete() {
 }
 .pjmgr-online-error {
   margin: 0;
-  font-size: 11px;
+  font-size: var(--font-sm);
   color: var(--danger);
 }
 .pjmgr-online-item {
@@ -506,7 +506,7 @@ async function confirmDelete() {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  font-size: 12px;
+  font-size: var(--font-md);
 }
 .pjmgr-online-name {
   color: var(--text);
@@ -518,7 +518,7 @@ async function confirmDelete() {
   border: 1px solid var(--border);
   background: var(--bg-panel);
   color: var(--text-dim);
-  font-size: 11px;
+  font-size: var(--font-sm);
   height: 20px;
   padding: 0 8px;
   border-radius: 999px;
@@ -538,7 +538,7 @@ async function confirmDelete() {
   border: 1px solid var(--border);
   background: var(--bg-panel);
   color: var(--text);
-  font-size: 12px;
+  font-size: var(--font-md);
   height: 24px;
   padding: 0 12px;
   border-radius: 5px;

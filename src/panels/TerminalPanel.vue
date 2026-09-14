@@ -133,7 +133,7 @@ function restart() {
 .terminal-note {
   margin: auto;
   color: var(--text-dim);
-  font-size: 12px;
+  font-size: var(--font-md);
 }
 .xterm-holder {
   flex: 1;
@@ -147,7 +147,7 @@ function restart() {
   border: 1px solid var(--accent);
   background: var(--bg-selected);
   color: var(--accent);
-  font-size: 12px;
+  font-size: var(--font-md);
   height: 24px;
   padding: 0 14px;
   border-radius: 6px;

@@ -321,7 +321,7 @@ async function remove(entry: RepoEntry) {
   border: none;
   background: transparent;
   color: var(--text-dim);
-  font-size: 12px;
+  font-size: var(--font-md);
   padding: 4px 9px;
   border-radius: 5px;
   cursor: pointer;
@@ -335,7 +335,7 @@ async function remove(entry: RepoEntry) {
   font-weight: 600;
 }
 .tab-count {
-  font-size: 10px;
+  font-size: var(--font-xs);
   opacity: 0.75;
 }
 .tabs-spacer {
@@ -345,7 +345,7 @@ async function remove(entry: RepoEntry) {
   border: 1px solid var(--border);
   background: var(--bg-panel);
   color: var(--text);
-  font-size: 12px;
+  font-size: var(--font-md);
   height: 22px;
   padding: 0 10px;
   border-radius: 5px;
@@ -372,7 +372,7 @@ async function remove(entry: RepoEntry) {
 .online-error {
   margin: 0;
   padding: 6px;
-  font-size: 12px;
+  font-size: var(--font-md);
   color: var(--danger);
 }
 .online-list {
@@ -386,7 +386,7 @@ async function remove(entry: RepoEntry) {
   gap: 8px;
   padding: 5px 6px;
   border-radius: 5px;
-  font-size: 12px;
+  font-size: var(--font-md);
 }
 .online-item:hover {
   background: var(--bg-hover);
@@ -405,7 +405,7 @@ async function remove(entry: RepoEntry) {
 }
 .online-desc {
   color: var(--text-dim);
-  font-size: 11px;
+  font-size: var(--font-sm);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -415,7 +415,7 @@ async function remove(entry: RepoEntry) {
   border: 1px solid var(--border);
   background: var(--bg-panel);
   color: var(--accent);
-  font-size: 11px;
+  font-size: var(--font-sm);
   height: 20px;
   padding: 0 8px;
   border-radius: 5px;
@@ -429,7 +429,7 @@ async function remove(entry: RepoEntry) {
   border: 1px solid var(--border);
   background: var(--bg-app);
   color: var(--text);
-  font-size: 11px;
+  font-size: var(--font-sm);
   height: 22px;
   padding: 0 8px;
   border-radius: 5px;
@@ -466,7 +466,7 @@ async function remove(entry: RepoEntry) {
   border: 1px dashed var(--border);
   background: transparent;
   color: var(--text-dim);
-  font-size: 12px;
+  font-size: var(--font-md);
   height: 28px;
   cursor: pointer;
 }
@@ -490,7 +490,7 @@ async function remove(entry: RepoEntry) {
   flex: none;
 }
 .remote-platform-label {
-  font-size: 11px;
+  font-size: var(--font-sm);
   color: var(--text-dim);
 }
 /* 下拉与输入框同款扁平样式；select 必须 appearance:none，
@@ -499,7 +499,7 @@ async function remove(entry: RepoEntry) {
   appearance: none;
   -webkit-appearance: none;
   box-sizing: border-box;
-  font-size: 12px;
+  font-size: var(--font-md);
   color: var(--text);
   background-color: var(--bg-app);
   border: 1px solid var(--border);
@@ -518,7 +518,7 @@ async function remove(entry: RepoEntry) {
 .remote-input {
   flex: 1;
   box-sizing: border-box;
-  font-size: 12px;
+  font-size: var(--font-md);
   color: var(--text);
   background: var(--bg-app);
   border: 1px solid var(--border);
@@ -534,7 +534,7 @@ async function remove(entry: RepoEntry) {
   padding: 20px;
   text-align: center;
   color: var(--text-dim);
-  font-size: 12px;
+  font-size: var(--font-md);
 }
 .repo-list {
   list-style: none;
@@ -548,7 +548,7 @@ async function remove(entry: RepoEntry) {
   padding: 7px 9px;
   border-radius: 6px;
   cursor: pointer;
-  font-size: 12px;
+  font-size: var(--font-md);
 }
 .repo-item:hover {
   background: var(--bg-hover);
@@ -561,7 +561,7 @@ async function remove(entry: RepoEntry) {
   font-weight: 500;
 }
 .repo-remote-flag {
-  font-size: 10px;
+  font-size: var(--font-xs);
   color: var(--text-dim);
   border: 1px dashed var(--border);
   border-radius: 8px;
@@ -572,7 +572,7 @@ async function remove(entry: RepoEntry) {
   color: var(--text-dim);
 }
 .repo-current {
-  font-size: 10px;
+  font-size: var(--font-xs);
   color: var(--accent);
   border: 1px solid var(--accent);
   border-radius: 8px;
@@ -580,7 +580,7 @@ async function remove(entry: RepoEntry) {
 }
 .repo-meta {
   margin-left: auto;
-  font-size: 11px;
+  font-size: var(--font-sm);
   color: var(--text-dim);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -592,7 +592,7 @@ async function remove(entry: RepoEntry) {
   border: none;
   background: transparent;
   color: var(--text-dim);
-  font-size: 11px;
+  font-size: var(--font-sm);
   cursor: pointer;
   padding: 2px 4px;
   border-radius: 4px;

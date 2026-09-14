@@ -79,12 +79,12 @@ function timeLabel(iso?: string | null): string {
   min-width: 0;
 }
 .item-title {
-  font-size: 13px;
+  font-size: var(--font-base);
   color: var(--text);
   line-height: 1.4;
 }
 .item-meta {
-  font-size: 11px;
+  font-size: var(--font-sm);
   color: var(--text-dim);
 }
 .item-tags {
@@ -93,7 +93,7 @@ function timeLabel(iso?: string | null): string {
   gap: 4px;
 }
 .chip {
-  font-size: 10px;
+  font-size: var(--font-xs);
   padding: 1px 7px;
   border-radius: 10px;
   background: var(--bg-chip);

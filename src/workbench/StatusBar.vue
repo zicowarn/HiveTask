@@ -228,7 +228,7 @@ async function probe() {
   height: 24px;
   background: var(--bg-app);
   border-top: 1px solid var(--border);
-  font-size: 11px;
+  font-size: var(--font-sm);
   color: var(--text-dim);
   user-select: none;
 }
@@ -266,7 +266,7 @@ button.status-cell {
 }
 .cell-mark {
   color: var(--accent);
-  font-size: 11px;
+  font-size: var(--font-sm);
 }
 .repo-cell {
   max-width: 260px;

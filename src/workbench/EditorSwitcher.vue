@@ -101,7 +101,7 @@ onBeforeUnmount(() => {
   border-radius: 6px;
   background: var(--bg-app);
   color: var(--text);
-  font-size: 12px;
+  font-size: var(--font-md);
   line-height: 1;
   padding: 0 7px;
   cursor: pointer;
@@ -119,7 +119,7 @@ onBeforeUnmount(() => {
   white-space: nowrap;
 }
 .btn-caret {
-  font-size: 9px;
+  font-size: var(--font-xs);
   color: var(--text-dim);
   transition: transform 0.15s ease;
 }
@@ -142,7 +142,7 @@ onBeforeUnmount(() => {
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
 }
 .pop-title {
-  font-size: 12px;
+  font-size: var(--font-md);
   color: var(--text);
   padding-bottom: 7px;
   margin-bottom: 8px;
@@ -169,7 +169,7 @@ onBeforeUnmount(() => {
   border: none;
   background: transparent;
   color: var(--text);
-  font-size: 12px;
+  font-size: var(--font-md);
   line-height: 1;
   height: 26px;
   padding: 0 6px;

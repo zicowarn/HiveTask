@@ -50,7 +50,7 @@ const emptyKey = computed(() =>
   align-items: center;
   gap: 8px;
   padding: 8px 12px;
-  font-size: 12px;
+  font-size: var(--font-md);
   color: var(--text-dim);
 }
 .load-row.centered {
@@ -75,7 +75,7 @@ const emptyKey = computed(() =>
   padding: 24px 12px;
   text-align: center;
   color: var(--text-dim);
-  font-size: 12px;
+  font-size: var(--font-md);
   list-style: none;
 }
 </style>

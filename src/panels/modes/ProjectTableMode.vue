@@ -83,7 +83,7 @@ function priorityName(item: ProjectItem): string {
 .tbl {
   width: 100%;
   border-collapse: collapse;
-  font-size: 12px;
+  font-size: var(--font-md);
 }
 th {
   text-align: left;
@@ -107,7 +107,7 @@ tr.ghosty td {
   color: var(--text-dim);
 }
 .cell-select {
-  font-size: 12px;
+  font-size: var(--font-md);
   color: var(--text);
   background: var(--bg-app);
   border: 1px solid var(--border);
@@ -118,7 +118,7 @@ tr.ghosty td {
   display: inline-block;
   padding: 1px 8px;
   border-radius: 999px;
-  font-size: 10px;
+  font-size: var(--font-xs);
   font-weight: 600;
   background: var(--bg-selected);
   color: var(--accent);
@@ -126,7 +126,7 @@ tr.ghosty td {
 .tbl-empty {
   text-align: center;
   color: var(--text-dim);
-  font-size: 12px;
+  font-size: var(--font-md);
   padding: 24px 0;
 }
 </style>

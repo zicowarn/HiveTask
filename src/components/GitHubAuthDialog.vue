@@ -162,7 +162,7 @@ function onKeydown(event: KeyboardEvent) {
 }
 .gha-title {
   margin: 0;
-  font-size: 13px;
+  font-size: var(--font-base);
   color: var(--text);
 }
 .gha-close {
@@ -176,7 +176,7 @@ function onKeydown(event: KeyboardEvent) {
 }
 .gha-desc {
   margin: 0 0 10px;
-  font-size: 12px;
+  font-size: var(--font-md);
   color: var(--text-dim);
 }
 .gha-code-row {
@@ -189,7 +189,7 @@ function onKeydown(event: KeyboardEvent) {
   flex: 1;
   text-align: center;
   font-family: ui-monospace, monospace;
-  font-size: 20px;
+  font-size: var(--font-xl);
   letter-spacing: 3px;
   padding: 8px 0;
   background: var(--bg-app);
@@ -205,7 +205,7 @@ function onKeydown(event: KeyboardEvent) {
   border: 1px solid var(--border);
   background: var(--bg-app);
   color: var(--text);
-  font-size: 12px;
+  font-size: var(--font-md);
   height: 26px;
   padding: 0 10px;
   border-radius: 6px;
@@ -222,12 +222,12 @@ function onKeydown(event: KeyboardEvent) {
   font-weight: 600;
 }
 .gha-waiting {
-  font-size: 12px;
+  font-size: var(--font-md);
   color: var(--text-dim);
 }
 .gha-banner {
   padding: 8px 10px;
-  font-size: 12px;
+  font-size: var(--font-md);
   border-radius: 6px;
   margin: 0 0 10px;
 }

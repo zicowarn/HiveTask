@@ -144,7 +144,7 @@ function timeLabel(iso?: string | null): string {
   border: none;
   background: transparent;
   color: var(--text-dim);
-  font-size: 12px;
+  font-size: var(--font-md);
   height: 22px;
   padding: 0 9px;
   border-radius: 5px;
@@ -162,7 +162,7 @@ function timeLabel(iso?: string | null): string {
   border: 1px solid var(--border);
   background: var(--bg-panel);
   color: var(--text);
-  font-size: 12px;
+  font-size: var(--font-md);
   height: 22px;
   padding: 0 12px;
   border-radius: 5px;
@@ -184,7 +184,7 @@ function timeLabel(iso?: string | null): string {
 .error-banner {
   margin: 8px 14px 0;
   padding: 8px 10px;
-  font-size: 12px;
+  font-size: var(--font-md);
   color: var(--danger);
   background: var(--danger-banner);
   border: 1px solid var(--danger-banner-border);
@@ -232,13 +232,13 @@ function timeLabel(iso?: string | null): string {
   min-width: 0;
 }
 .item-title {
-  font-size: 13px;
+  font-size: var(--font-base);
   color: var(--text);
   line-height: 1.4;
 }
 .draft-badge {
   display: inline-block;
-  font-size: 10px;
+  font-size: var(--font-xs);
   font-weight: 600;
   color: var(--text-dim);
   border: 1px solid var(--border);
@@ -248,19 +248,19 @@ function timeLabel(iso?: string | null): string {
   vertical-align: 1px;
 }
 .item-meta {
-  font-size: 11px;
+  font-size: var(--font-sm);
   color: var(--text-dim);
 }
 .branch-meta {
   display: flex;
   align-items: center;
   gap: 5px;
-  font-size: 11px;
+  font-size: var(--font-sm);
   color: var(--text-dim);
 }
 .branch-meta code {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 10px;
+  font-size: var(--font-xs);
   background: var(--bg-chip);
   border: 1px solid var(--border);
   border-radius: 4px;
@@ -275,7 +275,7 @@ function timeLabel(iso?: string | null): string {
 }
 .decision {
   margin-left: 4px;
-  font-size: 10px;
+  font-size: var(--font-xs);
   padding: 0 6px;
   border-radius: 8px;
 }
@@ -297,7 +297,7 @@ function timeLabel(iso?: string | null): string {
   gap: 4px;
 }
 .chip {
-  font-size: 10px;
+  font-size: var(--font-xs);
   padding: 1px 7px;
   border-radius: 10px;
   background: var(--bg-chip);
@@ -309,7 +309,7 @@ function timeLabel(iso?: string | null): string {
   align-items: center;
   gap: 8px;
   padding: 8px 12px;
-  font-size: 12px;
+  font-size: var(--font-md);
   color: var(--text-dim);
 }
 .load-row.centered {
@@ -334,7 +334,7 @@ function timeLabel(iso?: string | null): string {
   padding: 24px 12px;
   text-align: center;
   color: var(--text-dim);
-  font-size: 12px;
+  font-size: var(--font-md);
   list-style: none;
 }
 </style>

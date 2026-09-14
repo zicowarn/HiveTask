@@ -178,7 +178,7 @@ function removeChip(chip: { kind: string; value: string }) {
 .pj-error {
   margin: 8px 14px 0;
   padding: 8px 10px;
-  font-size: 12px;
+  font-size: var(--font-md);
   color: var(--danger);
   background: var(--danger-banner);
   border: 1px solid var(--danger-banner-border);
@@ -189,7 +189,7 @@ function removeChip(chip: { kind: string; value: string }) {
   display: grid;
   place-items: center;
   color: var(--text-dim);
-  font-size: 12px;
+  font-size: var(--font-md);
 }
 .pj-body {
   display: flex;
@@ -242,7 +242,7 @@ function removeChip(chip: { kind: string; value: string }) {
   display: inline-flex;
   align-items: center;
   gap: 3px;
-  font-size: 11px;
+  font-size: var(--font-sm);
   padding: 1px 4px 1px 7px;
   border-radius: 4px;
   background: var(--bg-selected);
@@ -255,7 +255,7 @@ function removeChip(chip: { kind: string; value: string }) {
   border: none;
   background: transparent;
   color: inherit;
-  font-size: 12px;
+  font-size: var(--font-md);
   cursor: pointer;
   padding: 0 2px;
 }
@@ -265,7 +265,7 @@ function removeChip(chip: { kind: string; value: string }) {
   border: none;
   outline: none;
   background: transparent;
-  font-size: 12px;
+  font-size: var(--font-md);
   font-family: inherit;
   color: var(--text);
 }
@@ -283,7 +283,7 @@ function removeChip(chip: { kind: string; value: string }) {
   border: 1px solid var(--border);
   background: var(--bg-panel);
   color: var(--text);
-  font-size: 12px;
+  font-size: var(--font-md);
   height: 30px;
   padding: 0 12px;
   border-radius: 8px;
@@ -331,7 +331,7 @@ function removeChip(chip: { kind: string; value: string }) {
   border: 1px solid var(--border);
   background: var(--bg-panel);
   color: var(--text-dim);
-  font-size: 12px;
+  font-size: var(--font-md);
   padding: 6px 0;
   border-radius: 8px;
   cursor: pointer;
@@ -345,7 +345,7 @@ function removeChip(chip: { kind: string; value: string }) {
   font-weight: 600;
 }
 .view-seg-icon {
-  font-size: 12px;
+  font-size: var(--font-md);
   line-height: 1;
 }
 .view-row {
@@ -356,7 +356,7 @@ function removeChip(chip: { kind: string; value: string }) {
   border: none;
   background: transparent;
   color: var(--text);
-  font-size: 12px;
+  font-size: var(--font-md);
   padding: 6px 8px;
   border-radius: 6px;
   cursor: pointer;
@@ -395,7 +395,7 @@ function removeChip(chip: { kind: string; value: string }) {
 }
 .view-row-chev {
   color: var(--text-dim);
-  font-size: 14px;
+  font-size: var(--font-lg);
   line-height: 1;
 }
 .view-row-chev.back {

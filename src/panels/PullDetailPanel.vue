@@ -184,7 +184,7 @@ function hasVisibleBody(body?: string | null): boolean {
   flex-wrap: wrap;
 }
 .detail-number {
-  font-size: 13px;
+  font-size: var(--font-base);
   color: var(--text-dim);
 }
 .state-action {
@@ -192,7 +192,7 @@ function hasVisibleBody(body?: string | null): boolean {
   border: 1px solid var(--border);
   background: var(--bg-panel);
   color: var(--text);
-  font-size: 11px;
+  font-size: var(--font-sm);
   height: 22px;
   padding: 0 12px;
   border-radius: 6px;
@@ -218,7 +218,7 @@ function hasVisibleBody(body?: string | null): boolean {
   cursor: default;
 }
 .detail-state {
-  font-size: 11px;
+  font-size: var(--font-sm);
   font-weight: 600;
   padding: 1px 8px;
   border-radius: 10px;
@@ -241,7 +241,7 @@ function hasVisibleBody(body?: string | null): boolean {
   border: 1px solid var(--border);
 }
 .detail-decision {
-  font-size: 11px;
+  font-size: var(--font-sm);
   padding: 1px 8px;
   border-radius: 10px;
 }
@@ -259,7 +259,7 @@ function hasVisibleBody(body?: string | null): boolean {
 }
 .detail-title {
   margin: 8px 0;
-  font-size: 17px;
+  font-size: var(--font-xl);
   font-weight: 600;
   color: var(--text);
   line-height: 1.4;
@@ -269,12 +269,12 @@ function hasVisibleBody(body?: string | null): boolean {
   align-items: center;
   gap: 6px;
   margin-bottom: 8px;
-  font-size: 12px;
+  font-size: var(--font-md);
   color: var(--text-dim);
 }
 .detail-branch code {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 11px;
+  font-size: var(--font-sm);
   background: var(--bg-chip);
   border: 1px solid var(--border);
   border-radius: 4px;
@@ -286,7 +286,7 @@ function hasVisibleBody(body?: string | null): boolean {
   gap: 6px;
 }
 .detail-label {
-  font-size: 11px;
+  font-size: var(--font-sm);
   padding: 2px 9px;
   border-radius: 12px;
   background: var(--bg-chip);
@@ -297,7 +297,7 @@ function hasVisibleBody(body?: string | null): boolean {
   display: flex;
   gap: 12px;
   margin-top: 10px;
-  font-size: 12px;
+  font-size: var(--font-md);
 }
 .stat.additions {
   color: var(--success);
@@ -312,7 +312,7 @@ function hasVisibleBody(body?: string | null): boolean {
 }
 .detail-nobody {
   color: var(--text-dim);
-  font-size: 13px;
+  font-size: var(--font-base);
 }
 .detail-footer {
   flex: none;
@@ -322,14 +322,14 @@ function hasVisibleBody(body?: string | null): boolean {
   gap: 10px;
   padding: 10px 20px;
   border-top: 1px solid var(--border);
-  font-size: 12px;
+  font-size: var(--font-md);
   color: var(--text-dim);
 }
 .open-github {
   border: 1px solid var(--border);
   background: transparent;
   color: var(--accent);
-  font-size: 12px;
+  font-size: var(--font-md);
   padding: 4px 12px;
   border-radius: 6px;
   cursor: pointer;
@@ -341,7 +341,7 @@ function hasVisibleBody(body?: string | null): boolean {
 .detail-empty {
   margin: auto;
   color: var(--text-dim);
-  font-size: 13px;
+  font-size: var(--font-base);
   text-align: center;
 }
 </style>

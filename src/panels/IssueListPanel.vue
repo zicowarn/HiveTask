@@ -216,7 +216,7 @@ async function submitMilestone() {
   border: none;
   background: transparent;
   color: var(--text-dim);
-  font-size: 12px;
+  font-size: var(--font-md);
   height: 22px;
   padding: 0 9px;
   border-radius: 5px;
@@ -235,7 +235,7 @@ async function submitMilestone() {
   border: 1px solid var(--border);
   background: var(--bg-panel);
   color: var(--text);
-  font-size: 12px;
+  font-size: var(--font-md);
   height: 22px;
   padding: 0 12px;
   border-radius: 5px;
@@ -260,7 +260,7 @@ async function submitMilestone() {
 .create-milestone {
   box-sizing: border-box;
   width: 100%;
-  font-size: 12px;
+  font-size: var(--font-md);
   color: var(--text);
   background: var(--bg-app);
   border: 1px solid var(--border);
@@ -289,7 +289,7 @@ async function submitMilestone() {
 .create-body {
   box-sizing: border-box;
   width: 100%;
-  font-size: 12px;
+  font-size: var(--font-md);
   font-family: inherit;
   color: var(--text);
   background: var(--bg-panel);
@@ -313,7 +313,7 @@ async function submitMilestone() {
   border: 1px solid var(--border);
   background: var(--bg-panel);
   color: var(--text);
-  font-size: 12px;
+  font-size: var(--font-md);
   height: 24px;
   padding: 0 12px;
   border-radius: 5px;
@@ -336,7 +336,7 @@ async function submitMilestone() {
 .error-banner {
   margin: 8px 14px 0;
   padding: 8px 10px;
-  font-size: 12px;
+  font-size: var(--font-md);
   color: var(--danger);
   background: var(--danger-banner);
   border: 1px solid var(--danger-banner-border);

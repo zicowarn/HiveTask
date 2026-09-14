@@ -100,7 +100,7 @@ onBeforeUnmount(() => {
   border: none;
   background: transparent;
   color: var(--text-dim);
-  font-size: 12px;
+  font-size: var(--font-md);
   padding: 0 9px;
   border-radius: 5px;
   cursor: pointer;
@@ -135,7 +135,7 @@ onBeforeUnmount(() => {
   border: none;
   background: transparent;
   color: var(--text);
-  font-size: 12px;
+  font-size: var(--font-md);
   height: 26px;
   padding: 0 8px;
   border-radius: 5px;
@@ -161,7 +161,7 @@ onBeforeUnmount(() => {
 }
 .item-shortcut {
   color: var(--text-dim);
-  font-size: 11px;
+  font-size: var(--font-sm);
   margin-left: 18px;
 }
 </style>

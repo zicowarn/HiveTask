@@ -155,7 +155,7 @@ watch(
 }
 .pc-title {
   margin: 0;
-  font-size: 13px;
+  font-size: var(--font-base);
   color: var(--text);
 }
 .pc-close {
@@ -170,7 +170,7 @@ watch(
 .pc-error {
   margin: 0;
   padding: 7px 10px;
-  font-size: 12px;
+  font-size: var(--font-md);
   color: var(--danger);
   background: var(--danger-banner);
   border: 1px solid var(--danger-banner-border);
@@ -185,12 +185,12 @@ watch(
 .pc-label {
   width: 72px;
   flex: none;
-  font-size: 12px;
+  font-size: var(--font-md);
   color: var(--text-dim);
 }
 .pc-select {
   flex: 1;
-  font-size: 12px;
+  font-size: var(--font-md);
   color: var(--text);
   background: var(--bg-app);
   border: 1px solid var(--border);
@@ -201,7 +201,7 @@ watch(
 .pc-textarea {
   box-sizing: border-box;
   width: 100%;
-  font-size: 12px;
+  font-size: var(--font-md);
   font-family: inherit;
   color: var(--text);
   background: var(--bg-app);
@@ -224,7 +224,7 @@ watch(
   border: 1px solid var(--border);
   background: var(--bg-app);
   color: var(--text);
-  font-size: 12px;
+  font-size: var(--font-md);
   height: 26px;
   padding: 0 12px;
   border-radius: 6px;
