@@ -136,6 +136,13 @@ function toggleGroup(name: string | null) {
 function isCollapsed(name: string | null): boolean {
   return collapsed.value.has(name ?? "__none__");
 }
+function collapseAll() {
+  collapsed.value = new Set(groups.value.map((g) => g.name ?? "__none__"));
+}
+function expandAll() {
+  collapsed.value = new Set();
+}
+
 function closedOf(group: MilestoneGroup): number {
   const meta = metaOf(group);
   if (meta) return meta.closedIssues;
@@ -148,6 +155,8 @@ function totalOf(group: MilestoneGroup): number {
 }
 
 /** 组内 Issue 的最近更新：绝对日期 + 相对时间；无数据返回 null。 */
+defineExpose({ collapseAll, expandAll });
+
 function lastUpdatedOf(group: MilestoneGroup): { date: string; rel: string } | null {
   const times = group.issues
     .map((i) => i.updatedAt)

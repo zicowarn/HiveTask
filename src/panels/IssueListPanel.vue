@@ -37,6 +37,7 @@ const modeKey = ref(storedMode);
 watch(modeKey, (key) => localStorage.setItem(MODE_STORAGE_KEY, key));
 
 const activeMode = computed(() => modes.find((m) => m.key === modeKey.value) ?? modes[0]);
+const modeComp = ref<{ collapseAll: () => void; expandAll: () => void } | null>(null);
 
 const states: { value: IssueState }[] = [
   { value: "open" },
@@ -110,6 +111,16 @@ async function submitMilestone() {
         </button>
       </div>
       <span class="toolbar-spacer"></span>
+      <button
+        v-if="isMilestoneMode"
+        class="refresh-btn"
+        @click="modeComp?.collapseAll()"
+      >{{ t("milestone.collapseAll") }}</button>
+      <button
+        v-if="isMilestoneMode"
+        class="refresh-btn"
+        @click="modeComp?.expandAll()"
+      >{{ t("milestone.expandAll") }}</button>
       <button class="refresh-btn" :disabled="loading" @click="store.refresh()">
         {{ loading ? t("common.syncing") : t("common.refresh") }}
       </button>
@@ -192,7 +203,7 @@ async function submitMilestone() {
       </div>
     </div>
 
-    <component :is="activeMode.component" />
+    <component :is="activeMode.component" ref="modeComp" />
   </PanelShell>
 </template>
 
