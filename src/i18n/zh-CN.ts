@@ -297,6 +297,7 @@ export const zhCN = {
   "issue.milestoneOptional": "归属里程碑（可选）",
   "milestone.dueBy": "截止 {date}",
   "milestone.overdueBy": "逾期 {n} 天",
+  "milestone.noCachedIssues": "该里程碑的 Issue 不在本地缓存——点击「刷新」拉取",
   "milestone.toggleGroup": "展开 / 折叠该里程碑",
   "milestone.collapseAll": "折叠全部",
   "milestone.expandAll": "展开全部",

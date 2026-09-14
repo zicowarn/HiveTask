@@ -149,7 +149,8 @@ async function refresh() {
   loading.value = true;
   error.value = null;
   try {
-    await api.refreshIssues(repo, "all");
+    // 大限额：默认 50 条的限量刷新会把老章节 Issue 从缓存清掉
+    await api.refreshIssues(repo, "all", 1000);
   } catch (e) {
     error.value = translateError(String(e));
   }
@@ -206,6 +207,9 @@ function translateError(s: string): string {
         </header>
         <ul v-if="!isCollapsed(group.name)" class="item-list">
           <IssueRow v-for="issue in group.issues" :key="issue.number" :issue="issue" />
+          <li v-if="group.issues.length === 0" class="group-empty-hint">
+            {{ t("milestone.noCachedIssues") }}
+          </li>
         </ul>
       </section>
     </template>
@@ -292,6 +296,11 @@ function translateError(s: string): string {
 }
 .milestone-group ul.item-list {
   padding: 2px 0;
+}
+.group-empty-hint {
+  font-size: var(--font-sm);
+  color: var(--text-dim);
+  padding: 4px 10px 6px 30px;
 }
 .ms-none {
   text-align: center;

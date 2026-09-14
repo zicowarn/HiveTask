@@ -296,6 +296,7 @@ export const enUS: Record<MessageKey, string> = {
   "issue.milestoneOptional": "Milestone (optional)",
   "milestone.dueBy": "Due by {date}",
   "milestone.overdueBy": "Overdue by {n} days",
+  "milestone.noCachedIssues": "Not in local cache — hit Refresh to fetch",
   "milestone.toggleGroup": "Expand / collapse this milestone",
   "milestone.collapseAll": "Collapse all",
   "milestone.expandAll": "Expand all",
