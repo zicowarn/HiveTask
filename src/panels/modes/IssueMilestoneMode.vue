@@ -73,6 +73,20 @@ function isCollapsed(name: string | null): boolean {
 function closedOf(group: MilestoneGroup): number {
   return group.issues.filter((i) => i.state === "CLOSED").length;
 }
+
+/** 组内 Issue 的最近更新（相对时间）；无数据返回空串。 */
+function lastUpdatedOf(group: MilestoneGroup): string {
+  const times = group.issues
+    .map((i) => i.updatedAt)
+    .filter((v): v is string => !!v)
+    .map((v) => new Date(v).getTime())
+    .filter((n) => !Number.isNaN(n));
+  if (times.length === 0) return "";
+  const diffDays = Math.floor((Date.now() - Math.max(...times)) / 86_400_000);
+  if (diffDays <= 0) return t("milestone.updatedToday");
+  if (diffDays === 1) return t("milestone.updatedYesterday");
+  return t("milestone.updatedDaysAgo", { n: diffDays });
+}
 </script>
 
 <template>
@@ -111,6 +125,7 @@ function closedOf(group: MilestoneGroup): number {
             </span>
             <span class="group-count">{{ closedOf(group) }}/{{ group.issues.length }}</span>
           </span>
+          <span v-if="lastUpdatedOf(group)" class="group-updated">{{ lastUpdatedOf(group) }}</span>
         </header>
         <ul v-if="!isCollapsed(group.name)" class="item-list">
           <IssueRow v-for="issue in group.issues" :key="issue.number" :issue="issue" />
@@ -138,6 +153,11 @@ function closedOf(group: MilestoneGroup): number {
 }
 .group-caret.open {
   transform: rotate(90deg);
+}
+.group-updated {
+  color: var(--text-dim);
+  font-size: 11px;
+  flex: none;
 }
 .group-progress {
   margin-left: auto;
