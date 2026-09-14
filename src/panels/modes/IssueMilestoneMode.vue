@@ -8,8 +8,9 @@
  * When the repo has NO milestones in use at all (single fallback group),
  * the grouping is pointless — fall back to a flat list with a note.
  */
-import { computed, ref } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 import EditorIcon from "../../components/EditorIcon.vue";
+import { api, isTauri } from "../../api";
 import { storeToRefs } from "pinia";
 import IssueRow from "../IssueRow.vue";
 import { useIssuesStore } from "../../stores/issues";
@@ -57,6 +58,48 @@ const groups = computed<MilestoneGroup[]>(() => {
 const allUnassigned = computed(
   () => groups.value.length === 1 && groups.value[0].name === null,
 );
+
+// ---- 里程碑元数据（Due by / Overdue 的数据源）----
+interface MilestoneMeta {
+  title: string;
+  dueOn: string | null;
+  state: string;
+}
+const metaMap = ref(new Map<string, MilestoneMeta>());
+
+async function loadMeta() {
+  const repo = useRepoStore();
+  if (!isTauri() || !repo.current) return;
+  try {
+    const list = await api.milestoneList(repo.current);
+    const map = new Map<string, MilestoneMeta>();
+    for (const m of list) map.set(m.title.toLowerCase(), m);
+    metaMap.value = map;
+  } catch {
+    metaMap.value = new Map();
+  }
+}
+onMounted(() => void loadMeta());
+watch(() => repoStore.current, () => void loadMeta());
+
+function metaOf(group: MilestoneGroup): MilestoneMeta | null {
+  return metaMap.value.get((group.name ?? "").toLowerCase()) ?? null;
+}
+
+/** 截止信息：逾期（红）→ 截止日；已关闭里程碑不提示逾期。 */
+function dueInfo(group: MilestoneGroup): { text: string; overdue: boolean } | null {
+  const meta = metaOf(group);
+  if (!meta?.dueOn) return null;
+  const due = new Date(meta.dueOn);
+  if (Number.isNaN(due.getTime())) return null;
+  const dateStr = meta.dueOn.slice(0, 10);
+  const done = closedOf(group) === group.issues.length && group.issues.length > 0;
+  const overdueDays = Math.ceil((Date.now() - due.getTime()) / 86_400_000);
+  if (overdueDays > 0 && meta.state !== "closed" && !done) {
+    return { text: t("milestone.overdueBy", { n: overdueDays }), overdue: true };
+  }
+  return { text: t("milestone.dueBy", { date: dateStr }), overdue: false };
+}
 
 // ---- 可折叠分组（对齐 GitHub 里程碑页的进度语义）----
 const collapsed = ref(new Set<string>());
@@ -116,6 +159,13 @@ function lastUpdatedOf(group: MilestoneGroup): string {
           <span class="group-name" :class="{ unassigned: group.name === null }">
             {{ group.name ?? t("common.unassignedMilestone") }}
           </span>
+          <span
+            v-if="dueInfo(group)"
+            class="group-due"
+            :class="{ overdue: dueInfo(group)!.overdue }"
+          >{{ dueInfo(group)!.text }}</span>
+          <span v-if="lastUpdatedOf(group)" class="group-updated">{{ lastUpdatedOf(group) }}</span>
+          <span class="group-spacer"></span>
           <span class="group-progress" :title="t('milestone.progressTitle', { done: closedOf(group), total: group.issues.length })">
             <span class="group-bar">
               <span
@@ -125,7 +175,6 @@ function lastUpdatedOf(group: MilestoneGroup): string {
             </span>
             <span class="group-count">{{ closedOf(group) }}/{{ group.issues.length }}</span>
           </span>
-          <span v-if="lastUpdatedOf(group)" class="group-updated">{{ lastUpdatedOf(group) }}</span>
         </header>
         <ul v-if="!isCollapsed(group.name)" class="item-list">
           <IssueRow v-for="issue in group.issues" :key="issue.number" :issue="issue" />
@@ -159,13 +208,30 @@ function lastUpdatedOf(group: MilestoneGroup): string {
   font-size: 11px;
   flex: none;
 }
+.group-due {
+  color: var(--text-dim);
+  font-size: 11px;
+  flex: none;
+}
+.group-due.overdue {
+  color: var(--danger);
+  font-weight: 600;
+}
+.group-updated {
+  color: var(--text-dim);
+  font-size: 11px;
+  flex: none;
+}
+.group-spacer {
+  flex: 1;
+}
 .group-progress {
-  margin-left: auto;
   display: inline-flex;
   align-items: center;
   gap: 6px;
   font-size: 11px;
   color: var(--text-dim);
+  flex: none;
 }
 .group-bar {
   width: 64px;

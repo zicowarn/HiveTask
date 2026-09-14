@@ -140,6 +140,9 @@ impl Source for GhSource {
     fn remote_branches(&self, repo: &RepoRef) -> Result<Vec<String>> {
         remote_branches(&format!("{}/{}", repo.owner, repo.repo))
     }
+    fn list_milestones(&self, repo: &RepoRef) -> Result<Vec<crate::models::MilestoneInfo>> {
+        list_milestones(&format!("{}/{}", repo.owner, repo.repo))
+    }
 }
 
 /// 过滤器的 gh 方言（恰好与前端口径一致）。
@@ -490,6 +493,21 @@ fn create_pull(slug: &str, head: &str, base: &str, title: &str, body: Option<&st
     let out = run_gh(&arg_refs)?;
     let number = parse_created_number(&out).ok_or_else(|| anyhow!("无法从创建输出解析编号: {}", out.trim()))?;
     fetch_pull_detail(slug, &number)
+}
+
+/// 里程碑元数据清单（state=all 含已关闭）。
+fn list_milestones(slug: &str) -> Result<Vec<crate::models::MilestoneInfo>> {
+    let args = ["api", &format!("repos/{slug}/milestones?state=all&per_page=100")];
+    let out = run_gh(&args)?;
+    let values: Vec<Value> = serde_json::from_str(&out).context("解析里程碑清单失败")?;
+    Ok(values
+        .iter()
+        .map(|v| crate::models::MilestoneInfo {
+            title: v.get("title").and_then(Value::as_str).unwrap_or_default().to_string(),
+            due_on: v.get("due_on").and_then(Value::as_str).map(str::to_string),
+            state: v.get("state").and_then(Value::as_str).unwrap_or("open").to_string(),
+        })
+        .collect())
 }
 
 /// 创建里程碑本体（gh api POST 表单字段）。

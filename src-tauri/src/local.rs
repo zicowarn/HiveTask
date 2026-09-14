@@ -99,6 +99,23 @@ impl Source for LocalSource {
     fn create_pull(&self, _repo: &RepoRef, _head: &str, _base: &str, _title: &str, _body: Option<&str>) -> Result<Pull> {
         Err(anyhow!("本地仓库没有 Pull Request——分支即 PR，走本地分支 review"))
     }
+    fn list_milestones(&self, repo: &RepoRef) -> Result<Vec<crate::models::MilestoneInfo>> {
+        // 本地里程碑 = Issue 上的纯文本标签（无截止/平台语义）
+        let workdir = self.workdir(repo)?;
+        let conn = crate::storage::open(workdir)?;
+        let all = crate::storage::list_issues(&conn, "all")?;
+        let mut seen = Vec::new();
+        for name in all.iter().filter_map(|i| i.milestone.clone()) {
+            if !seen.contains(&name) {
+                seen.push(name);
+            }
+        }
+        Ok(seen
+            .into_iter()
+            .map(|title| crate::models::MilestoneInfo { title, due_on: None, state: "open".to_string() })
+            .collect())
+    }
+
     fn remote_branches(&self, repo: &RepoRef) -> Result<Vec<String>> {
         let workdir = self.workdir(repo)?;
         Ok(crate::git::branches(workdir.to_str().unwrap_or(""))

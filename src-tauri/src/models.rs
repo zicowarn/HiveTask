@@ -124,6 +124,17 @@ pub struct BranchRow {
     pub behind: i64,
 }
 
+/// 里程碑元数据（list_milestones：PR/看板组头与截止提醒的数据源）。
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MilestoneInfo {
+    pub title: String,
+    /// RFC3339 截止时间；未设 → None。
+    pub due_on: Option<String>,
+    /// "open" | "closed"。
+    pub state: String,
+}
+
 // ---- 本地分支 review（设计：《本地Issue与本地分支Review》Q3）----
 
 /// 相对 base 的分支条目（领先/落后计数；分支名即意图声明，无实体表）。

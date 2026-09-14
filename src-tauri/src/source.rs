@@ -136,6 +136,8 @@ pub trait Source: Send + Sync {
     fn create_pull(&self, repo: &RepoRef, head: &str, base: &str, title: &str, body: Option<&str>) -> Result<Pull>;
     /// 远端分支名清单（PR 创建表单的 head/base 候选；本地 = 本地分支名）。
     fn remote_branches(&self, repo: &RepoRef) -> Result<Vec<String>>;
+    /// 里程碑元数据清单（title/due_on/state）。
+    fn list_milestones(&self, repo: &RepoRef) -> Result<Vec<crate::models::MilestoneInfo>>;
 }
 
 /// JSON 编号字段 → 文本口径：字符串直取（Gitee v5 issue "IKCTH7"），

@@ -426,6 +426,27 @@ impl Source for GiteaSource {
             })
             .unwrap_or_default())
     }
+
+    fn list_milestones(&self, repo: &RepoRef) -> Result<Vec<crate::models::MilestoneInfo>> {
+        let slug = self.slug_ref(repo);
+        let url = self.api(&format!(
+            "/repos/{}/{}/milestones?state=all&limit=100",
+            slug.owner, slug.repo
+        ));
+        let value = self.get(&url)?;
+        Ok(value
+            .as_array()
+            .map(|arr| {
+                arr.iter()
+                    .map(|v| crate::models::MilestoneInfo {
+                        title: v.get("title").and_then(Value::as_str).unwrap_or_default().to_string(),
+                        due_on: v.get("due_on").and_then(Value::as_str).map(str::to_string),
+                        state: v.get("state").and_then(Value::as_str).unwrap_or("open").to_string(),
+                    })
+                    .collect()
+            })
+            .unwrap_or_default())
+    }
 }
 
 #[cfg(test)]

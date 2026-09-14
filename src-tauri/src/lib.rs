@@ -404,6 +404,15 @@ fn create_pull(
     Ok(pull)
 }
 
+/// 里程碑元数据清单（组头 Due by / Overdue 的数据源）。
+#[tauri::command]
+fn milestone_list(repo_path: String) -> Result<Vec<models::MilestoneInfo>, String> {
+    let repo = resolve(&repo_path)?;
+    source::source_for_ref(repo.platform.as_deref(), &repo.host)
+        .list_milestones(&repo)
+        .map_err(|e| e.to_string())
+}
+
 /// 远端分支名清单（PR 创建表单 head/base 候选；本地 = 本地分支）。
 #[tauri::command]
 fn remote_branch_list(repo_path: String) -> Result<Vec<String>, String> {
@@ -545,6 +554,7 @@ pub fn run() {
             create_pull,
             create_milestone,
             remote_branch_list,
+            milestone_list,
             set_issue_state,
             projects::project_create,
             projects::project_list,
