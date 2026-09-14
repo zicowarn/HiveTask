@@ -410,9 +410,9 @@ async function confirmDelete() {
 }
 .pjmgr-new {
   width: 100%;
-  border: 1px dashed var(--border);
-  background: transparent;
-  color: var(--text-dim);
+  border: 1px solid var(--border);
+  background: var(--bg-panel);
+  color: var(--text);
   font-size: var(--font-md);
   height: 28px;
   border-radius: 6px;

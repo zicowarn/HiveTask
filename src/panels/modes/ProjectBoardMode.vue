@@ -445,9 +445,9 @@ async function submitConvert(item: ProjectItem, path: string) {
   width: 28px;
   height: 28px;
   border-radius: 50%;
-  border: 1px dashed var(--border);
+  border: 1px solid var(--border);
   background: var(--bg-panel);
-  color: var(--text-dim);
+  color: var(--text);
   font-size: var(--font-lg);
   cursor: pointer;
 }
