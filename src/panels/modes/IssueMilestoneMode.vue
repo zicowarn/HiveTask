@@ -211,7 +211,9 @@ function translateError(s: string): string {
             class="group-due"
             :class="{ overdue: dueInfo(group)!.overdue }"
           >{{ dueInfo(group)!.text }}</span>
-          <span v-if="lastUpdatedOf(group)" class="group-updated">{{ lastUpdatedOf(group) }}</span>
+          <span v-if="lastUpdatedOf(group)" class="group-updated">
+            {{ t("milestone.updatedPrefix") }} {{ lastUpdatedOf(group)!.date }} · {{ lastUpdatedOf(group)!.rel }}
+          </span>
           <span class="group-spacer"></span>
           <span class="group-count group-tag" :class="{ done: closedOf(group) === totalOf(group) && totalOf(group) > 0 }"
             :title="t('milestone.progressTitle', { done: closedOf(group), total: totalOf(group) })"
