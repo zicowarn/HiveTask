@@ -239,8 +239,8 @@ function lastUpdatedOf(group: MilestoneGroup): { date: string; rel: string } | n
   display: flex;
   align-items: center;
   gap: 6px;
-  min-height: 34px;
-  padding: 6px 8px;
+  min-height: 36px;
+  padding: 4px 8px;
   cursor: pointer;
   user-select: none;
 }
@@ -280,9 +280,10 @@ function lastUpdatedOf(group: MilestoneGroup): { date: string; rel: string } | n
 .group-tag,
 .group-state-badge {
   flex: none;
+  display: inline-flex;
+  align-items: center;
   font-size: var(--font-xs);
   height: 20px;
-  line-height: 18px;
   padding: 0 8px;
   border-radius: 5px;
   border: 1px solid var(--border);
