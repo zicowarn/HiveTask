@@ -6,8 +6,7 @@ defineProps<{ name: string }>();
 <template>
   <svg
     class="editor-icon"
-    width="14"
-    height="14"
+    style="width: var(--icon-size, 14px); height: var(--icon-size, 14px)"
     viewBox="0 0 14 14"
     fill="none"
     stroke="currentColor"
@@ -47,6 +46,9 @@ defineProps<{ name: string }>();
     <template v-else-if="name === 'terminal'">
       <path d="M2.4 3.4 6 7l-3.6 3.6" />
       <path d="M7.6 10.8H12" />
+    </template>
+    <template v-else-if="name === 'chevron'">
+      <path d="M5.2 3.4 9.8 7 5.2 10.6" />
     </template>
     <template v-else-if="name === 'project.board'">
       <rect x="1.8" y="2.2" width="3.4" height="9.6" rx="0.8" />

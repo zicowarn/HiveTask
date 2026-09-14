@@ -117,7 +117,7 @@ function onTypeChange(value: string) {
   border: none;
   background: transparent;
   color: var(--text-dim);
-  font-size: 12px;
+  font-size: var(--icon-size, 14px);
   line-height: 1;
   border-radius: 5px;
   cursor: pointer;

@@ -9,6 +9,7 @@
  * the grouping is pointless — fall back to a flat list with a note.
  */
 import { computed, ref } from "vue";
+import EditorIcon from "../../components/EditorIcon.vue";
 import { storeToRefs } from "pinia";
 import IssueRow from "../IssueRow.vue";
 import { useIssuesStore } from "../../stores/issues";
@@ -93,7 +94,11 @@ function closedOf(group: MilestoneGroup): number {
           :title="t('milestone.toggleGroup')"
           @click="toggleGroup(group.name)"
         >
-          <span class="group-caret" :class="{ open: !isCollapsed(group.name) }">▸</span>
+          <EditorIcon
+            class="group-caret"
+            :class="{ open: !isCollapsed(group.name) }"
+            name="chevron"
+          />
           <span class="group-name" :class="{ unassigned: group.name === null }">
             {{ group.name ?? t("common.unassignedMilestone") }}
           </span>
@@ -129,7 +134,6 @@ function closedOf(group: MilestoneGroup): number {
 }
 .group-caret {
   color: var(--text-dim);
-  font-size: 11px;
   transition: transform 0.12s;
 }
 .group-caret.open {

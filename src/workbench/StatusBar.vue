@@ -307,7 +307,7 @@ button.status-cell {
 /* The ⟳ glyph reads smaller than the filled ● dots at the same font
    size — bump it so the status marks align visually. */
 .sync-mark {
-  font-size: 13px;
+  font-size: var(--icon-size, 14px);
   line-height: 1;
 }
 .gh-cell.ok {

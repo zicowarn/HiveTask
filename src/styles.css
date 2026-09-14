@@ -10,6 +10,8 @@
      variants for the full-width error strips.
    - scrollbar thumb colors, which have no smart default to inherit. */
 :root {
+  /* 图标统一尺寸（EditorIcon 与各内联 SVG 共用） */
+  --icon-size: 14px;
   --bg-app: #1e1f22;
   --bg-panel: #2b2d30;
   --bg-hover: #333539;
