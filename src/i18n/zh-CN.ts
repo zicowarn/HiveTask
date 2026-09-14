@@ -295,6 +295,8 @@ export const zhCN = {
   "issue.emptyRepo": "先选择一个本地 Git 仓库，然后刷新 Issues",
   "issue.createBtn": "＋ 新建 Issue",
   "issue.milestoneOptional": "归属里程碑（可选）",
+  "milestone.toggleGroup": "展开 / 折叠该里程碑",
+  "milestone.progressTitle": "已完成 {done} / 共 {total}",
   "milestone.createBtn": "＋ 新建里程碑",
   "milestone.namePh": "里程碑名称",
   "milestone.descPh": "描述（可选）",

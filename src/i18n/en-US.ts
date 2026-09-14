@@ -294,6 +294,8 @@ export const enUS: Record<MessageKey, string> = {
   "issue.emptyRepo": "Choose a local Git repository, then refresh issues",
   "issue.createBtn": "＋ New issue",
   "issue.milestoneOptional": "Milestone (optional)",
+  "milestone.toggleGroup": "Expand / collapse this milestone",
+  "milestone.progressTitle": "{done} done of {total}",
   "milestone.createBtn": "＋ New milestone",
   "milestone.namePh": "Milestone name",
   "milestone.descPh": "Description (optional)",

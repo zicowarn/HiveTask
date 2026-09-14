@@ -8,7 +8,7 @@
  * When the repo has NO milestones in use at all (single fallback group),
  * the grouping is pointless — fall back to a flat list with a note.
  */
-import { computed } from "vue";
+import { computed, ref } from "vue";
 import { storeToRefs } from "pinia";
 import IssueRow from "../IssueRow.vue";
 import { useIssuesStore } from "../../stores/issues";
@@ -56,6 +56,22 @@ const groups = computed<MilestoneGroup[]>(() => {
 const allUnassigned = computed(
   () => groups.value.length === 1 && groups.value[0].name === null,
 );
+
+// ---- 可折叠分组（对齐 GitHub 里程碑页的进度语义）----
+const collapsed = ref(new Set<string>());
+function toggleGroup(name: string | null) {
+  const key = name ?? "__none__";
+  const next = new Set(collapsed.value);
+  if (next.has(key)) next.delete(key);
+  else next.add(key);
+  collapsed.value = next;
+}
+function isCollapsed(name: string | null): boolean {
+  return collapsed.value.has(name ?? "__none__");
+}
+function closedOf(group: MilestoneGroup): number {
+  return group.issues.filter((i) => i.state === "CLOSED").length;
+}
 </script>
 
 <template>
@@ -71,13 +87,27 @@ const allUnassigned = computed(
     </template>
     <template v-else>
       <section v-for="group in groups" :key="group.name ?? '__none'" class="milestone-group">
-        <header class="group-header">
+        <header
+          class="group-header"
+          role="button"
+          :title="t('milestone.toggleGroup')"
+          @click="toggleGroup(group.name)"
+        >
+          <span class="group-caret" :class="{ open: !isCollapsed(group.name) }">▸</span>
           <span class="group-name" :class="{ unassigned: group.name === null }">
             {{ group.name ?? t("common.unassignedMilestone") }}
           </span>
-          <span class="group-count">{{ group.issues.length }}</span>
+          <span class="group-progress" :title="t('milestone.progressTitle', { done: closedOf(group), total: group.issues.length })">
+            <span class="group-bar">
+              <span
+                class="group-bar-fill"
+                :style="{ width: (group.issues.length ? (closedOf(group) / group.issues.length) * 100 : 0) + '%' }"
+              ></span>
+            </span>
+            <span class="group-count">{{ closedOf(group) }}/{{ group.issues.length }}</span>
+          </span>
         </header>
-        <ul class="item-list">
+        <ul v-if="!isCollapsed(group.name)" class="item-list">
           <IssueRow v-for="issue in group.issues" :key="issue.number" :issue="issue" />
         </ul>
       </section>
@@ -86,6 +116,46 @@ const allUnassigned = computed(
 </template>
 
 <style scoped>
+.group-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  cursor: pointer;
+  user-select: none;
+}
+.group-header:hover {
+  background: var(--bg-hover);
+}
+.group-caret {
+  color: var(--text-dim);
+  font-size: 11px;
+  transition: transform 0.12s;
+}
+.group-caret.open {
+  transform: rotate(90deg);
+}
+.group-progress {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--text-dim);
+}
+.group-bar {
+  width: 64px;
+  height: 5px;
+  border-radius: 3px;
+  background: var(--bg-hover);
+  overflow: hidden;
+}
+.group-bar-fill {
+  display: block;
+  height: 100%;
+  border-radius: 3px;
+  background: var(--success);
+}
 .milestone-scroll {
   overflow-y: auto;
   flex: 1;
