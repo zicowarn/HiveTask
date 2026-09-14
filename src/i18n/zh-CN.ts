@@ -299,6 +299,7 @@ export const zhCN = {
   "milestone.overdueBy": "逾期 {n} 天",
   "milestone.toggleGroup": "展开 / 折叠该里程碑",
   "milestone.progressTitle": "已完成 {done} / 共 {total}",
+  "milestone.updatedPrefix": "更新",
   "milestone.updatedToday": "更新于今天",
   "milestone.updatedYesterday": "更新于昨天",
   "milestone.updatedDaysAgo": "更新于 {n} 天前",

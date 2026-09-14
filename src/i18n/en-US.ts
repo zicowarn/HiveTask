@@ -298,6 +298,7 @@ export const enUS: Record<MessageKey, string> = {
   "milestone.overdueBy": "Overdue by {n} days",
   "milestone.toggleGroup": "Expand / collapse this milestone",
   "milestone.progressTitle": "{done} done of {total}",
+  "milestone.updatedPrefix": "updated",
   "milestone.updatedToday": "updated today",
   "milestone.updatedYesterday": "updated yesterday",
   "milestone.updatedDaysAgo": "updated {n} days ago",

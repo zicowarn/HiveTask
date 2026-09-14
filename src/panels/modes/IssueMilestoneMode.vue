@@ -127,18 +127,23 @@ function closedOf(group: MilestoneGroup): number {
   return group.issues.filter((i) => i.state === "CLOSED").length;
 }
 
-/** 组内 Issue 的最近更新（相对时间）；无数据返回空串。 */
-function lastUpdatedOf(group: MilestoneGroup): string {
+/** 组内 Issue 的最近更新：绝对日期 + 相对时间；无数据返回 null。 */
+function lastUpdatedOf(group: MilestoneGroup): { date: string; rel: string } | null {
   const times = group.issues
     .map((i) => i.updatedAt)
     .filter((v): v is string => !!v)
     .map((v) => new Date(v).getTime())
     .filter((n) => !Number.isNaN(n));
-  if (times.length === 0) return "";
+  if (times.length === 0) return null;
+  const date = new Date(Math.max(...times)).toISOString().slice(0, 10);
   const diffDays = Math.floor((Date.now() - Math.max(...times)) / 86_400_000);
-  if (diffDays <= 0) return t("milestone.updatedToday");
-  if (diffDays === 1) return t("milestone.updatedYesterday");
-  return t("milestone.updatedDaysAgo", { n: diffDays });
+  const rel =
+    diffDays <= 0
+      ? t("milestone.updatedToday")
+      : diffDays === 1
+        ? t("milestone.updatedYesterday")
+        : t("milestone.updatedDaysAgo", { n: diffDays });
+  return { date, rel };
 }
 </script>
 
@@ -176,17 +181,15 @@ function lastUpdatedOf(group: MilestoneGroup): string {
             class="group-due"
             :class="{ overdue: dueInfo(group)!.overdue }"
           >{{ dueInfo(group)!.text }}</span>
-          <span v-if="lastUpdatedOf(group)" class="group-updated">{{ lastUpdatedOf(group) }}</span>
-          <span class="group-spacer"></span>
-          <span class="group-progress" :title="t('milestone.progressTitle', { done: closedOf(group), total: group.issues.length })">
-            <span class="group-bar">
-              <span
-                class="group-bar-fill"
-                :style="{ width: (group.issues.length ? (closedOf(group) / group.issues.length) * 100 : 0) + '%' }"
-              ></span>
-            </span>
-            <span class="group-count">{{ closedOf(group) }}/{{ group.issues.length }}</span>
+          <span v-if="lastUpdatedOf(group)" class="group-updated">
+            {{ t("milestone.updatedPrefix") }} {{ lastUpdatedOf(group)!.date }} · {{ lastUpdatedOf(group)!.rel }}
           </span>
+          <span class="group-spacer"></span>
+          <span
+            class="group-tag"
+            :class="{ done: closedOf(group) === group.issues.length && group.issues.length > 0 }"
+            :title="t('milestone.progressTitle', { done: closedOf(group), total: group.issues.length })"
+          >{{ closedOf(group) }}/{{ group.issues.length }}</span>
         </header>
         <ul v-if="!isCollapsed(group.name)" class="item-list">
           <IssueRow v-for="issue in group.issues" :key="issue.number" :issue="issue" />
@@ -239,26 +242,22 @@ function lastUpdatedOf(group: MilestoneGroup): string {
 .group-spacer {
   flex: 1;
 }
-.group-progress {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-size: var(--font-sm);
-  color: var(--text-dim);
+/* 完成度标签（el-tag 形态）：默认中性，全部完成点亮 success */
+.group-tag {
   flex: none;
+  font-size: var(--font-sm);
+  padding: 0 7px;
+  height: 18px;
+  line-height: 16px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  background: var(--bg-app);
+  color: var(--text-dim);
 }
-.group-bar {
-  width: 64px;
-  height: 5px;
-  border-radius: 3px;
-  background: var(--bg-hover);
-  overflow: hidden;
-}
-.group-bar-fill {
-  display: block;
-  height: 100%;
-  border-radius: 3px;
-  background: var(--success);
+.group-tag.done {
+  border-color: var(--success);
+  color: var(--success);
+  background: color-mix(in srgb, var(--success) 12%, transparent);
 }
 .milestone-scroll {
   overflow-y: auto;
