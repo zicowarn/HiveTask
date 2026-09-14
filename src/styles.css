@@ -12,7 +12,8 @@
 :root {
   /* 图标统一尺寸（EditorIcon 与各内联 SVG 共用） */
   --icon-size: 14px;
-  /* 字号体系（五档，全局唯一口径）：
+  /* 字号体系（五档，全局唯一口径；规范见 AGENTS.md「字号与图标规范」，
+     任何 font-size 禁止裸像素，必须引用以下 token）：
      xs=徽标/pill  sm=次级元信息  md=默认 UI 文本  base=内容主文本  xl=大标题 */
   --font-xs: 10px;
   --font-sm: 11px;
