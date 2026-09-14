@@ -180,7 +180,7 @@ function hasVisibleBody(body?: string | null): boolean {
 .detail-title-row {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   flex-wrap: wrap;
 }
 .detail-number {

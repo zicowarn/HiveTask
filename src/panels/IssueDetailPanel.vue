@@ -130,7 +130,7 @@ function openUrl(url?: string | null) {
 .detail-title-row {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
 }
 .detail-number {
   font-size: var(--font-base);
@@ -209,7 +209,7 @@ function openUrl(url?: string | null) {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 10px;
+  gap: 8px;
   padding: 10px 20px;
   border-top: 1px solid var(--border);
   font-size: var(--font-md);
