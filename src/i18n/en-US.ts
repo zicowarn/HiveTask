@@ -299,8 +299,6 @@ export const enUS: Record<MessageKey, string> = {
   "milestone.toggleGroup": "Expand / collapse this milestone",
   "milestone.collapseAll": "Collapse all",
   "milestone.expandAll": "Expand all",
-  "milestone.stateClosed": "Milestone closed",
-  "milestone.closable": "Closable",
   "milestone.progressTitle": "{done} done of {total}",
   "milestone.updatedPrefix": "updated",
   "milestone.updatedToday": "updated today",

@@ -74,16 +74,6 @@ function totalOf(group: MilestoneGroup): number {
   return group.issues.length;
 }
 
-/** 里程碑状态徽章：closed = 平台已关闭；closable = Issue 全关但本体未关。 */
-function stateBadge(group: MilestoneGroup): { text: string; kind: "closed" | "closable" } | null {
-  const meta = metaMap.value.get(group.name ?? "");
-  if (!meta) return null;
-  if (meta.state === "closed") return { text: t("milestone.stateClosed"), kind: "closed" };
-  if (meta.openIssues === 0 && meta.closedIssues > 0)
-    return { text: t("milestone.closable"), kind: "closable" };
-  return null;
-}
-
 /** 截止信息：逾期（红）→ 截止日；已关闭里程碑不提示逾期。 */
 function dueInfo(group: MilestoneGroup): { text: string; overdue: boolean } | null {
   const meta = metaMap.value.get(group.name ?? "");
@@ -202,11 +192,6 @@ function translateError(s: string): string {
             {{ group.name ?? t("common.unassignedMilestone") }}
           </span>
           <span
-            v-if="stateBadge(group)"
-            class="group-state-badge"
-            :class="stateBadge(group)!.kind"
-          >{{ stateBadge(group)!.text }}</span>
-          <span
             v-if="dueInfo(group)"
             class="group-due"
             :class="{ overdue: dueInfo(group)!.overdue }"
@@ -271,7 +256,6 @@ function translateError(s: string): string {
   font-style: italic;
   color: var(--text-dim);
 }
-.group-state-badge,
 .group-tag {
   flex: none;
   display: inline-flex;
@@ -284,16 +268,10 @@ function translateError(s: string): string {
   background: var(--bg-app);
   color: var(--text-dim);
 }
-.group-state-badge.closable,
 .group-tag.done {
   border-color: var(--success);
   color: var(--success);
   background: color-mix(in srgb, var(--success) 12%, transparent);
-}
-.group-state-badge.closable {
-  border-color: var(--warning);
-  color: var(--warning);
-  background: color-mix(in srgb, var(--warning) 12%, transparent);
 }
 .group-due {
   color: var(--text-dim);

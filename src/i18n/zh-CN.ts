@@ -300,8 +300,6 @@ export const zhCN = {
   "milestone.toggleGroup": "展开 / 折叠该里程碑",
   "milestone.collapseAll": "折叠全部",
   "milestone.expandAll": "展开全部",
-  "milestone.stateClosed": "里程碑已关闭",
-  "milestone.closable": "可关闭",
   "milestone.progressTitle": "已完成 {done} / 共 {total}",
   "milestone.updatedPrefix": "更新",
   "milestone.updatedToday": "更新于今天",
