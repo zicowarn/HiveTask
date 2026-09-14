@@ -45,6 +45,11 @@ const groups = computed<MilestoneGroup[]>(() => {
     if (bucket) bucket.push(issue);
     else byName.set(key, [issue]);
   }
+  // 元数据里程碑并入：当前筛选下 0 条也成组（上下文完整；也解决
+  // 「新建的空里程碑不出现」的断点）
+  for (const title of metaMap.value.keys()) {
+    if (!byName.has(title)) byName.set(title, []);
+  }
 
   const named = [...byName.keys()]
     .filter((name) => name !== "")
@@ -53,6 +58,11 @@ const groups = computed<MilestoneGroup[]>(() => {
   const unassigned = byName.get("");
   return unassigned ? [...named, { name: null, issues: unassigned }] : named;
 });
+
+/** 仓库是否用过里程碑（元数据或任一 Issue 归属）——决定提示条语义。 */
+const hasAnyMilestone = computed(
+  () => metaMap.value.size > 0 || groups.value.some((g) => g.name !== null),
+);
 
 /** 只剩兜底组 = 仓库完全没用里程碑，分组失去意义——回退平铺 + 说明。 */
 const allUnassigned = computed(
@@ -137,8 +147,10 @@ function lastUpdatedOf(group: MilestoneGroup): string {
     {{ t(emptyKey) }}
   </div>
   <div v-else class="milestone-scroll">
-    <p v-if="allUnassigned" class="unassigned-note">{{ t("milestone.noneInUse") }}</p>
-    <template v-if="allUnassigned">
+    <p v-if="allUnassigned && !hasAnyMilestone" class="unassigned-note">
+      {{ t("milestone.noneInUse") }}
+    </p>
+    <template v-if="allUnassigned && !hasAnyMilestone">
       <ul class="item-list">
         <IssueRow v-for="issue in issues" :key="issue.number" :issue="issue" />
       </ul>
@@ -184,6 +196,7 @@ function lastUpdatedOf(group: MilestoneGroup): string {
   </div>
 </template>
 
+<style scoped>
 <style scoped>
 .group-header {
   display: flex;
