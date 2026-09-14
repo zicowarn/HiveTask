@@ -58,7 +58,7 @@ async function submitCreate() {
     <template v-if="modes.length > 1" #switcher>
       <ModeTabs v-model="modeKey" :modes="modes" />
     </template>
-    <template #actions>
+    <div class="list-toolbar">
       <div class="state-tabs">
         <button
           v-for="s in states"
@@ -70,16 +70,14 @@ async function submitCreate() {
           {{ stateLabel(s.value) }}
         </button>
       </div>
+      <span class="toolbar-spacer"></span>
       <button class="refresh-btn" :disabled="loading" @click="store.refresh()">
         {{ loading ? t("common.syncing") : t("common.refresh") }}
       </button>
-      <button
-        class="refresh-btn create-btn"
-        @click="createOpen = !createOpen"
-      >
+      <button class="refresh-btn create-btn" @click="createOpen = !createOpen">
         {{ t("issue.createBtn") }}
       </button>
-    </template>
+    </div>
 
     <p v-if="error" class="error-banner">{{ error }}</p>
 
@@ -116,6 +114,16 @@ async function submitCreate() {
 </template>
 
 <style scoped>
+.list-toolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 6px 10px;
+}
+.toolbar-spacer {
+  flex: 1;
+}
 .state-tabs {
   display: flex;
   flex-wrap: wrap;

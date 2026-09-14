@@ -47,7 +47,7 @@ function timeLabel(iso?: string | null): string {
 
 <template>
   <PanelShell :leaf-id="leafId" :panel-type="panelType">
-    <template v-if="!isLocal" #actions>
+    <div v-if="!isLocal" class="list-toolbar">
       <div class="state-tabs">
         <button
           v-for="s in states"
@@ -59,20 +59,15 @@ function timeLabel(iso?: string | null): string {
           {{ stateLabel(s.value) }}
         </button>
       </div>
+      <span class="toolbar-spacer"></span>
       <button class="refresh-btn" :disabled="loading" @click="store.refresh()">
         {{ loading ? t("common.syncing") : t("common.refresh") }}
       </button>
       <button class="refresh-btn create-btn" @click="createOpen = true">
         {{ t("pull.createBtn") }}
       </button>
-    </template>
+    </div>
 
-    <PullCreateDialog
-      :open="createOpen"
-      :repo-path="repoStore.current ?? ''"
-      @close="createOpen = false"
-      @created="onCreated"
-    />
 
     <p v-if="error && !isLocal" class="error-banner">{{ error }}</p>
 
@@ -119,10 +114,26 @@ function timeLabel(iso?: string | null): string {
         {{ t(repoStore.current ? "common.empty" : "pull.emptyRepo") }}
       </li>
     </ul>
+    <PullCreateDialog
+      :open="createOpen"
+      :repo-path="repoStore.current ?? ''"
+      @close="createOpen = false"
+      @created="onCreated"
+    />
   </PanelShell>
 </template>
 
 <style scoped>
+.list-toolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 6px 10px;
+}
+.toolbar-spacer {
+  flex: 1;
+}
 .state-tabs {
   display: flex;
   flex-wrap: wrap;
