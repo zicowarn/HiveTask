@@ -259,20 +259,6 @@ function lastUpdatedOf(group: MilestoneGroup): { date: string; rel: string } | n
   font-size: var(--font-sm);
   flex: none;
 }
-.group-state-badge {
-  flex: none;
-  font-size: var(--font-xs);
-  padding: 0 6px;
-  height: 16px;
-  line-height: 14px;
-  border-radius: 4px;
-  border: 1px solid var(--border);
-  color: var(--text-dim);
-}
-.group-state-badge.closable {
-  color: var(--warning);
-  border-color: var(--warning);
-}
 .group-due {
   color: var(--text-dim);
   font-size: var(--font-sm);
@@ -291,13 +277,14 @@ function lastUpdatedOf(group: MilestoneGroup): { date: string; rel: string } | n
   flex: 1;
 }
 /* 完成度标签（el-tag 形态）：默认中性，全部完成点亮 success */
-.group-tag {
+.group-tag,
+.group-state-badge {
   flex: none;
-  font-size: var(--font-sm);
-  padding: 0 7px;
-  height: 18px;
-  line-height: 16px;
-  border-radius: 4px;
+  font-size: var(--font-xs);
+  height: 20px;
+  line-height: 18px;
+  padding: 0 8px;
+  border-radius: 5px;
   border: 1px solid var(--border);
   background: var(--bg-app);
   color: var(--text-dim);
@@ -306,6 +293,10 @@ function lastUpdatedOf(group: MilestoneGroup): { date: string; rel: string } | n
   border-color: var(--success);
   color: var(--success);
   background: color-mix(in srgb, var(--success) 12%, transparent);
+}
+.group-state-badge.closable {
+  border-color: var(--warning);
+  color: var(--warning);
 }
 .milestone-scroll {
   overflow-y: auto;
