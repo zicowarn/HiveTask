@@ -98,6 +98,18 @@ function metaOf(group: MilestoneGroup): MilestoneMeta | null {
   return metaMap.value.get((group.name ?? "").toLowerCase()) ?? null;
 }
 
+/** 里程碑本体状态徽章：
+ * closed = 平台上已关闭的里程碑；
+ * closable = Issue 已全部关闭但里程碑未关——提示去平台关闭（GitHub 同款提醒场景）。 */
+function stateBadge(group: MilestoneGroup): { text: string; kind: "closed" | "closable" } | null {
+  const meta = metaOf(group);
+  if (!meta) return null;
+  const total = meta.openIssues + meta.closedIssues;
+  if (meta.state === "closed") return { text: t("milestone.stateClosed"), kind: "closed" };
+  if (total > 0 && meta.openIssues === 0) return { text: t("milestone.closable"), kind: "closable" };
+  return null;
+}
+
 /** 截止信息：逾期（红）→ 截止日；已关闭里程碑不提示逾期。 */
 function dueInfo(group: MilestoneGroup): { text: string; overdue: boolean } | null {
   const meta = metaOf(group);
@@ -185,6 +197,11 @@ function lastUpdatedOf(group: MilestoneGroup): { date: string; rel: string } | n
             {{ group.name ?? t("common.unassignedMilestone") }}
           </span>
           <span
+            v-if="stateBadge(group)"
+            class="group-state-badge"
+            :class="stateBadge(group)!.kind"
+          >{{ stateBadge(group)!.text }}</span>
+          <span
             v-if="dueInfo(group)"
             class="group-due"
             :class="{ overdue: dueInfo(group)!.overdue }"
@@ -232,6 +249,20 @@ function lastUpdatedOf(group: MilestoneGroup): { date: string; rel: string } | n
   color: var(--text-dim);
   font-size: var(--font-sm);
   flex: none;
+}
+.group-state-badge {
+  flex: none;
+  font-size: var(--font-xs);
+  padding: 0 6px;
+  height: 16px;
+  line-height: 14px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+}
+.group-state-badge.closable {
+  color: var(--warning);
+  border-color: var(--warning);
 }
 .group-due {
   color: var(--text-dim);

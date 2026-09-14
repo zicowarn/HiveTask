@@ -297,6 +297,8 @@ export const enUS: Record<MessageKey, string> = {
   "milestone.dueBy": "Due by {date}",
   "milestone.overdueBy": "Overdue by {n} days",
   "milestone.toggleGroup": "Expand / collapse this milestone",
+  "milestone.stateClosed": "Milestone closed",
+  "milestone.closable": "Closable",
   "milestone.progressTitle": "{done} done of {total}",
   "milestone.updatedPrefix": "updated",
   "milestone.updatedToday": "updated today",
