@@ -127,7 +127,7 @@ describe("菜单/快捷键 → 面板（全局入口）", () => {
     host.remove();
   });
 
-  it("store 下发 search：左栏切到搜索视图", async () => {
+  it("store 下发 search：弹出搜索浮层", async () => {
     vi.resetModules();
     const { createApp, h, nextTick } = await import("vue");
     const { useI18n } = await import("../src/i18n");
@@ -149,7 +149,7 @@ describe("菜单/快捷键 → 面板（全局入口）", () => {
 
     store.runCommand("search");
     await waitForDom(() => {
-      expect(host.querySelector(".kb-search"), "应切到搜索视图").not.toBeNull();
+      expect(host.querySelector(".sp"), "应弹出搜索浮层").not.toBeNull();
     });
 
     app.unmount();
