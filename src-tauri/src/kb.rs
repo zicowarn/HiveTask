@@ -372,9 +372,15 @@ pub fn kb_search(
 /// 结构性优势（③适配：能力来自平台）。
 ///
 /// 只在 macOS 上可用；其它平台返回错误，前端退化成"用默认应用打开"。
+/// ⚠️ 必须是 **async**：Tauri 的同步命令跑在主线程上，而 qlmanage 对未知二进制
+/// 会**永久挂起**（实测：200KB 随机 .bin，20 秒无任何输出）—— 同步等待它 =
+/// 整个应用冻结（用户实测"点开 bin 程序直接卡死"）。丢到阻塞线程池 + 带超时击杀。
 #[tauri::command]
-pub fn kb_thumbnail(root: String, rel: String, size: Option<u32>) -> Result<tauri::ipc::Response, String> {
-    thumbnail_bytes(&root, &rel, size.unwrap_or(640)).map(tauri::ipc::Response::new)
+pub async fn kb_thumbnail(root: String, rel: String, size: Option<u32>) -> Result<tauri::ipc::Response, String> {
+    let bytes = tauri::async_runtime::spawn_blocking(move || thumbnail_bytes(&root, &rel, size.unwrap_or(640)))
+        .await
+        .map_err(|e| format!("预览任务失败：{e}"))?;
+    Ok(tauri::ipc::Response::new(bytes?))
 }
 
 /// 命令的实现体（抽出来给单测直接调 —— `Response` 不便在测试里取字节）。
@@ -400,25 +406,50 @@ pub fn thumbnail_bytes(root: &str, rel: &str, size: u32) -> Result<Vec<u8>, Stri
         let out_dir = std::env::temp_dir().join(format!("hivetask-thumb-{}-{}", std::process::id(), stamp));
         std::fs::create_dir_all(&out_dir).map_err(|e| e.to_string())?;
 
-        let output = std::process::Command::new("/usr/bin/qlmanage")
+        // ⚠️ 不能用 `.output()`（无限等）：qlmanage 对不认识的文件会挂起不退出。
+        // 轮询 try_wait，超时（8s）就杀掉进程——"没有预览图"是可接受的，卡死不可接受。
+        const QL_TIMEOUT_MS: u64 = 8_000;
+        let child = std::process::Command::new("/usr/bin/qlmanage")
             .arg("-t") // 缩略图模式
             .arg("-s")
             .arg(size.to_string())
             .arg("-o")
             .arg(&out_dir)
             .arg(&abs)
-            .output();
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn();
 
-        let output = match output {
-            Ok(output) => output,
+        let mut child = match child {
+            Ok(child) => child,
             Err(error) => {
                 let _ = std::fs::remove_dir_all(&out_dir);
                 return Err(format!("调用系统预览失败：{error}"));
             }
         };
-        if !output.status.success() {
-            let _ = std::fs::remove_dir_all(&out_dir);
-            return Err("系统未能生成预览图".into());
+        let started = std::time::Instant::now();
+        let status = loop {
+            match child.try_wait() {
+                Ok(Some(status)) => break Ok(status),
+                Ok(None) if started.elapsed().as_millis() as u64 >= QL_TIMEOUT_MS => {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    break Err("超时".to_string());
+                }
+                Ok(None) => std::thread::sleep(std::time::Duration::from_millis(50)),
+                Err(error) => break Err(error.to_string()),
+            }
+        };
+        match status {
+            Ok(status) if status.success() => {}
+            Ok(_) => {
+                let _ = std::fs::remove_dir_all(&out_dir);
+                return Err("系统未能生成预览图".into());
+            }
+            Err(reason) => {
+                let _ = std::fs::remove_dir_all(&out_dir);
+                return Err(format!("系统预览未完成（{reason}）"));
+            }
         }
         // 输出文件名 = 原文件名 + ".png"
         let file_name = abs.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
@@ -521,11 +552,20 @@ pub fn read_bytes_in(root: &str, rel: &str) -> Result<Vec<u8>> {
 
 /// 读取文本：探测编码与 BOM、统一换行风格回传。
 #[tauri::command]
-pub fn kb_read_text(root: String, rel: String) -> Result<TextFile, String> {
-    read_text_in(&root, &rel).map_err(|e| e.to_string())
+pub fn kb_read_text(root: String, rel: String, encoding: Option<String>) -> Result<TextFile, String> {
+    read_text_in_forced(&root, &rel, encoding.as_deref()).map_err(|e| e.to_string())
 }
 
 pub fn read_text_in(root: &str, rel: &str) -> Result<TextFile> {
+    read_text_in_forced(root, rel, None)
+}
+
+/// `force_encoding`：用户在状态栏手动指定的编码（覆盖自动探测）。
+///
+/// 为什么要有：探测是启发式，短文件/混合内容会猜错（比如 GBK 被猜成 BIG5）。
+/// 用户眼睛看到乱码时，手动指定是最快的自救；保存链路会用这里返回的编码回写，
+/// 所以顺带获得了"转码另存"的能力。
+pub fn read_text_in_forced(root: &str, rel: &str, force_encoding: Option<&str>) -> Result<TextFile> {
     let root_abs = root_path(root)?;
     let abs = resolve_in_root(&root_abs, rel)?;
     let meta = std::fs::metadata(&abs).context("文件不存在")?;
@@ -539,7 +579,40 @@ pub fn read_text_in(root: &str, rel: &str) -> Result<TextFile> {
     if is_binary(&bytes) {
         bail!("二进制文件，无法作为文本打开");
     }
-    let (text, encoding, bom) = decode_bytes(&bytes);
+    let (text, encoding, bom) = match force_encoding {
+        Some(label) => {
+            // 显式指定的编码必须是认识的；BOM 处理保持一致（有 BOM 就剥掉）
+            let enc = encoding_rs::Encoding::for_label(label.as_bytes())
+                .ok_or_else(|| anyhow!("不认识的编码：{label}"))?;
+            let mut offset = 0;
+            let bom = bytes.starts_with(&[0xEF, 0xBB, 0xBF]) && enc == encoding_rs::UTF_8;
+            if bytes.starts_with(&[0xEF, 0xBB, 0xBF]) {
+                offset = 3;
+            } else if bytes.starts_with(&[0xFF, 0xFE]) && enc == encoding_rs::UTF_16LE {
+                offset = 2;
+            } else if bytes.starts_with(&[0xFE, 0xFF]) && enc == encoding_rs::UTF_16BE {
+                offset = 2;
+            }
+            // fatal=false：错误字节替换成 U+FFFD 并如实上报，让用户知道"这个编码对不上"
+            let (text, _, had_errors) = enc.decode(&bytes[offset..]);
+            let eol = if text.contains("\r\n") { "\r\n" } else { "\n" };
+            let mut result = TextFile {
+                text: text.into_owned(),
+                encoding: enc.name().to_string(),
+                bom,
+                eol: eol.into(),
+                size: bytes.len() as u64,
+                mtime_ms: 0,
+            };
+            let meta = std::fs::metadata(&abs).context("读取文件信息失败")?;
+            result.mtime_ms = mtime_ms(&meta);
+            if had_errors {
+                result.text = format!("⚠️ 按 {label} 解码时存在无法映射的字节（显示为 \u{FFFD}）——这个编码可能不对。\n\n{}", result.text);
+            }
+            return Ok(result);
+        }
+        None => decode_bytes(&bytes),
+    };
     let eol = if text.contains("\r\n") { "\r\n" } else { "\n" };
     Ok(TextFile {
         text,
@@ -819,6 +892,29 @@ mod kb_tests {
     }
 
     #[test]
+    fn forced_encoding_overrides_detection_and_reports_errors() {
+        let root = temp_root("forced-enc");
+        let root_str = root.to_string_lossy().to_string();
+        // "中文测试" 的 GBK 字节
+        let gbk_bytes: Vec<u8> = vec![0xD6, 0xD0, 0xCE, 0xC4, 0xB2, 0xE2, 0xCA, 0xD4];
+        std::fs::write(root.join("a.txt"), &gbk_bytes).unwrap();
+
+        // 强制按 GBK：与探测结果一致，正常解码
+        let as_gbk = read_text_in_forced(&root_str, "a.txt", Some("gbk")).unwrap();
+        assert_eq!(as_gbk.text, "中文测试");
+        assert_eq!(as_gbk.encoding, "GBK");
+
+        // 强制按错误编码（Latin-1）：不报错但产出乱码字节映射（用户自己会看出来并换）
+        let as_latin = read_text_in_forced(&root_str, "a.txt", Some("windows-1252")).unwrap();
+        assert_eq!(as_latin.encoding, "windows-1252");
+        assert_ne!(as_latin.text, "中文测试");
+
+        // 不认识的编码名 → 明确报错
+        assert!(read_text_in_forced(&root_str, "a.txt", Some("not-a-codepage")).is_err());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
     fn thumbnail_uses_system_quick_look_and_respects_sandbox() {
         let root = temp_root("thumb");
         let root_str = root.to_string_lossy().to_string();
@@ -832,8 +928,9 @@ mod kb_tests {
         ];
         std::fs::write(root.join("pic.png"), &png).unwrap();
 
-        // 沙箱：根外的路径必须被拒（不能靠它去读整块磁盘）
-        assert!(kb_thumbnail(root_str.clone(), "../outside.png".into(), None).is_err());
+        // 沙箱：根外的路径必须被拒（不能靠它去读整块磁盘）。
+        // 走实现体（thumbnail_bytes）而不是命令包装 —— 后者现在是 async。
+        assert!(thumbnail_bytes(&root_str, "../outside.png", 128).is_err());
 
         // 正常路径：拿到的是 PNG 字节（Quick Look 的产物）
         match thumbnail_bytes(&root_str, "pic.png", 128) {

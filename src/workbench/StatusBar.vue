@@ -19,6 +19,7 @@ import { useIssuesStore } from "../stores/issues";
 import { usePullsStore } from "../stores/pulls";
 import { useProjectsStore } from "../stores/projects";
 import { useKnowledgeStore } from "../stores/knowledge";
+import DropdownMenu from "../components/DropdownMenu.vue";
 import { useSyncMetaStore } from "../stores/sync-meta";
 import { netOnline, probeNow } from "../net";
 import { useI18n } from "../i18n";
@@ -180,6 +181,14 @@ const kbLanguage = computed(() => {
 });
 
 /** 分页文档的页码（如「第 3 / 62 页」）——点击可输入页码回车跳转。 */
+/** 候选编码（名字用 ICU 规范名，与 kb_read_text 返回的一致，选项本身不翻译）。 */
+const ENCODING_CHOICES = ["UTF-8", "GBK", "GB18030", "BIG5", "Shift_JIS", "EUC-KR", "UTF-16LE", "UTF-16BE"];
+const encodingOptions = computed(() => {
+  const current = knowledge.activeText?.encoding ?? "";
+  const ordered = [current, ...ENCODING_CHOICES.filter((name) => name !== current)];
+  return ordered.map((name) => ({ value: name, label: name === current ? `${name}（自动探测）` : name }));
+});
+
 const kbPageEditing = ref(false);
 const kbPageDraft = ref("");
 const kbPageInput = ref<HTMLInputElement | null>(null);
@@ -305,8 +314,25 @@ async function probe() {
             @blur="commitPageJump"
           />
         </span>
-        <span v-if="knowledge.activeText" class="status-cell" :title="t('kb.encodingTip')">
-          {{ knowledge.activeText.encoding }}
+        <span v-if="knowledge.activeText" class="status-cell kb-enc-cell">
+          <!-- 编码切换（③适配，用户点名要；OFV 无此能力——它不回写也没有切换 UI）：
+               选一个编码 → 按它重新解码当前文件；保存链路按此编码回写（= 转码另存） -->
+          <DropdownMenu
+            :options="encodingOptions"
+            :model-value="knowledge.activeText.encoding"
+            @update:model-value="knowledge.requestEncoding(String($event))"
+          >
+            <template #trigger="{ open, toggle }">
+              <button
+                class="kb-enc"
+                :class="{ open }"
+                :title="t('kb.encodingSwitchTip')"
+                @click="toggle"
+              >
+                {{ knowledge.activeText.encoding }}
+              </button>
+            </template>
+          </DropdownMenu>
         </span>
         <span v-if="knowledge.activeText" class="status-cell" :title="t('kb.eolTip')">{{ kbEol }}</span>
         <span v-if="kbSize" class="status-cell">{{ kbSize }}</span>
@@ -384,6 +410,22 @@ async function probe() {
   min-width: 0;
 }
 /* Cells are full-height so hover highlight reads like VS Code segments. */
+.kb-enc-cell {
+  display: inline-flex;
+  align-items: center;
+}
+.kb-enc {
+  padding: 0 4px;
+  border: none;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: var(--font-sm);
+  cursor: pointer;
+}
+.kb-enc:hover,
+.kb-enc.open {
+  color: var(--text);
+}
 .kb-section-cell {
   max-width: 220px;
   overflow: hidden;

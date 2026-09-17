@@ -24,6 +24,7 @@ import { EDITOR_COMMAND_GROUPS } from "../components/markdown-tools";
 import { CONTEXT_MENU_GROUPS } from "./editor/commands";
 import { commandByKey } from "../components/markdown-tools";
 import { pushToast } from "../toast";
+import { confirmAction } from "../confirm";
 import { resolvePreview } from "./preview/registry";
 import "./preview"; // 注册各格式插件（副作用导入）
 import {
@@ -551,6 +552,53 @@ watch([rel, () => store.jumpToLine, editorRef], async () => {
     pre.scrollTop = Math.max(0, (target.line - 3) * lineHeight);
   }
 });
+
+/**
+ * 状态栏切换编码 → 按指定编码重新解码当前文件。
+ *
+ * 三个来源的动作都落到这里：状态栏的 DropdownMenu、（未来的）菜单项。
+ * Markdown 有未保存改动时先确认 —— 重读会覆盖草稿；确认文案把后果说清。
+ * 重新读到的 `meta.encoding` 就是用户选的编码，⌘S 保存链路会按它回写（= 转码另存）。
+ */
+watch(
+  () => store.encodingRequest,
+  async (encoding) => {
+    const base = store.root;
+    const target = rel.value;
+    if (!encoding || !base || !target) return;
+    if (kind.value === "markdown" && mdDirty.value) {
+      const ok = await confirmAction(t("kb.encodingReloadDirty"), {
+        title: t("kb.encodingSwitch"),
+        okLabel: t("kb.encodingReloadOk"),
+        cancelLabel: t("common.cancel"),
+      });
+      if (!ok) {
+        store.clearEncodingRequest();
+        return;
+      }
+    }
+    store.clearEncodingRequest();
+    try {
+      loading.value = true;
+      const loaded = await api.kbReadText(base, target, encoding);
+      if (rel.value !== target) return; // 期间用户切走了
+      store.dropBuffer(target);
+      text.value = loaded;
+      mdDraft.value = loaded.text;
+      mdDirty.value = false;
+      store.setBuffer(target, { text: loaded.text, meta: loaded, dirty: false });
+      store.setActiveText(loaded);
+      pushToast(
+        { kind: "success", message: t("kb.encodingSwitched", { encoding: loaded.encoding }) },
+        2500,
+      );
+    } catch (e) {
+      error.value = String(e);
+    } finally {
+      loading.value = false;
+    }
+  },
+);
 
 /** 状态栏点了页码 → 跳到那一页。 */
 watch(

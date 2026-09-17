@@ -156,3 +156,51 @@ describe("菜单/快捷键 → 面板（全局入口）", () => {
     host.remove();
   });
 });
+
+describe("编码切换（状态栏 → 面板）", () => {
+  it("请求编码 → 面板按新编码重读并更新缓冲（保存将按新编码写回）", async () => {
+    vi.resetModules();
+    const { createApp, nextTick } = await import("vue");
+    const { useI18n } = await import("../src/i18n");
+    useI18n().setLocale("zh-CN");
+    const reads: (string | undefined)[] = [];
+    vi.doMock("../src/api", () => ({
+      isTauri: () => true,
+      api: {
+        kbStat: async () => ({ exists: true, kind: "file", size: 8, mtimeMs: 1 }),
+        kbReadText: async (_root: string, rel: string, encoding?: string) => {
+          reads.push(encoding);
+          return { text: `按 ${encoding ?? "auto"} 解码`, encoding: encoding ?? "UTF-8", bom: false, eol: "\n", size: 8, mtimeMs: 1 };
+        },
+        kbReadBytes: async () => new ArrayBuffer(8),
+        kbListDir: async () => [],
+      },
+    }));
+    const { default: KnowledgePreview } = await import("../src/knowledge/KnowledgePreview.vue");
+    const { useKnowledgeStore } = await import("../src/stores/knowledge");
+    const pinia = createPinia();
+    setActivePinia(pinia);
+    const store = useKnowledgeStore();
+    store.root = "/tmp/kb";
+    store.selected = "a.md";
+
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const app = createApp(KnowledgePreview);
+    app.use(pinia);
+    app.mount(host);
+    for (let i = 0; i < 6; i += 1) await nextTick();
+
+    store.requestEncoding("GBK");
+    await waitForDom(() => {
+      expect(reads, "应带 GBK 参数重读").toContain("GBK");
+    });
+    expect(store.encodingRequest, "消费后清零").toBeNull();
+    expect(store.activeText?.encoding).toBe("GBK");
+    expect(store.buffers["a.md"]?.text).toContain("按 GBK 解码");
+
+    app.unmount();
+    host.remove();
+    vi.doUnmock("../src/api");
+  });
+});

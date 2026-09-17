@@ -105,6 +105,8 @@ export const useKnowledgeStore = defineStore("knowledge", () => {
    * 面板消费后清零 —— 与 `pageJump` 同一套模式。
    */
   const pendingCommand = ref<"quickOpen" | "search" | null>(null);
+  /** 状态栏请求"按此编码重新加载当前文件"（预览面板消费后清零）。 */
+  const encodingRequest = ref<string | null>(null);
   /** 编辑器光标位置（行/列）——状态栏用；非 Markdown 或未聚焦时为 null。 */
   const cursor = ref<{ line: number; col: number } | null>(null);
   /** 编辑器缩进宽度（空格数）——状态栏按 VS Code 口径显示。 */
@@ -438,6 +440,14 @@ export const useKnowledgeStore = defineStore("knowledge", () => {
 
   function clearCommand(): void {
     pendingCommand.value = null;
+  }
+
+  function requestEncoding(encoding: string): void {
+    encodingRequest.value = encoding;
+  }
+
+  function clearEncodingRequest(): void {
+    encodingRequest.value = null;
   }
 
   function setActiveText(value: KbText | null): void {
@@ -821,6 +831,9 @@ export const useKnowledgeStore = defineStore("knowledge", () => {
     pendingCommand,
     runCommand,
     clearCommand,
+    encodingRequest,
+    requestEncoding,
+    clearEncodingRequest,
     selection,
     focusRel,
     moveFocus,

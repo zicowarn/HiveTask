@@ -230,7 +230,8 @@ export const api = {
   kbSearch: (root: string, query: string, showIgnored = false, maxHits?: number) =>
     invoke<KbSearchResult>("kb_search", { root, query, showIgnored, maxHits }),
   kbStat: (root: string, rel = "") => invoke<KbStat>("kb_stat", { root, rel }),
-  kbReadText: (root: string, rel: string) => invoke<KbText>("kb_read_text", { root, rel }),
+  kbReadText: (root: string, rel: string, encoding?: string) =>
+    invoke<KbText>("kb_read_text", { root, rel, encoding }),
   /** 二进制预览：Rust 侧用 ipc::Response 回原始字节，这里拿到的是 ArrayBuffer。 */
   kbReadBytes: (root: string, rel: string) => invoke<ArrayBuffer>("kb_read_bytes", { root, rel }),
   /** 保编码回写；返回写入后的 mtime。mtime 不符（外部改动）→ 报错。 */
