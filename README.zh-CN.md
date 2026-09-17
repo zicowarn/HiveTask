@@ -114,6 +114,7 @@ HiveTask/
 ├── src/                     # Vue 前端
 │   ├── workbench/           #   SplitPane 分栏布局原语
 │   ├── panels/              #   Issue / PR 列表与详情面板
+│   ├── knowledge/           #   知识库工作区（文件树 + CM6 编辑器/预览）
 │   ├── stores/              #   Pinia store（仓库、Issue/PR、同步、设置）
 │   ├── api.ts               #   Tauri command 的类型化封装
 │   └── types.ts
@@ -122,12 +123,32 @@ HiveTask/
 │   ├── gh.rs                # GitHub 来源（gh CLI 调用与 JSON 解析）
 │   ├── git.rs               # git2-rs 提交历史与分支
 │   ├── pty.rs               # 集成终端 PTY
+│   ├── kb.rs                #   知识库文件接口（沙箱 + 编码 + 外部打开）
 │   ├── storage.rs           # SQLite 迁移与缓存
 │   ├── models.rs            # 共享数据模型
 │   └── migrations/          # 版本化 SQL 迁移
 ├── index.html
 └── package.json
 ```
+
+## 致谢
+
+本项目站在别人的工作之上。**带许可义务**的致谢统一记在
+[THIRD-PARTY.md](./THIRD-PARTY.md)（第三方声明的唯一事实源）。简述：
+
+- **编辑器栈（Markdown 即时渲染）** —— 从 **[SoloMD](https://github.com/zhitongblog/solomd)**
+  （MIT，© 2026 xiangdong li）**逐文件对照移植并按我们的规范改写**：输入法组字守卫、记号显隐、
+  行内/块级渲染，以及文件树的实现思路。
+- **资源管理器度量与行为** —— 参照 **[Visual Studio Code](https://github.com/microsoft/vscode)**
+  （MIT，© Microsoft）：树行高、缩进步长、页签形态；其中四枚动作图标原样取自
+  **[@vscode/codicons](https://github.com/microsoft/vscode-codicons)**（**CC BY 4.0**）。
+- **公式与图表** —— **[KaTeX](https://katex.org)**（代码 MIT；**字体 SIL OFL 1.1**）与
+  **[Mermaid](https://mermaid.js.org)**（MIT），全部本地渲染、无远程服务。
+- **编辑器内核** —— **[CodeMirror 6](https://codemirror.net)**（MIT）。
+- **预览蓝图** —— **[open-file-viewer](https://github.com/xushanpei/open-file-viewer)**
+  （MIT）：各格式预览插件逐文件对照移植（18 个插件覆盖其全格式面），其默认 CDN 路径全部改由随包资源承担；
+  OFD / XPS / LRC / DXF 为自研解析，逐格式对照见 [`docs/kb-preview-formats.md`](./docs/kb-preview-formats.md)。
+- **评估未采用** —— MarkText/muya、Vditor、headless-tree（结论留在 THIRD-PARTY.md，避免重复评估）。
 
 ## 许可证
 

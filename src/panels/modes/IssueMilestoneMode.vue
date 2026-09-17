@@ -7,26 +7,24 @@
  *   元数据重载；不与列表模式共用状态筛选。
  * - 未归属任何里程碑的 Issue 归入「未设置里程碑」兜底组（恒显于末位）。
  * - 折叠状态会话内记忆，支持一键全收/全展。
+ * - 组头交互对齐 master-detail：单击组头 → 选中里程碑（右栏派生渲染
+ *   详情）；折叠收进 caret 热区（兜底组无本体，仅折叠）。
  */
 import { computed, onMounted, ref, watch } from "vue";
 import EditorIcon from "../../components/EditorIcon.vue";
 import IssueRow from "../IssueRow.vue";
 import { api, isTauri } from "../../api";
 import { useRepoStore } from "../../stores/repo";
+import { useIssuesStore } from "../../stores/issues";
+import { translateError } from "../../gh-errors";
 import { useI18n } from "../../i18n";
 import type { Issue } from "../../types";
 
 const props = defineProps<{ tab: "open" | "closed" | "all" }>();
 
 const repoStore = useRepoStore();
+const issuesStore = useIssuesStore();
 const { t } = useI18n();
-
-interface MilestoneMeta {
-  dueOn: string | null;
-  state: string;
-  openIssues: number;
-  closedIssues: number;
-}
 
 interface MilestoneGroup {
   name: string | null;
@@ -35,7 +33,9 @@ interface MilestoneGroup {
 
 
 const allIssues = ref<Issue[]>([]);
-const metaMap = ref(new Map<string, MilestoneMeta>());
+// 里程碑元数据来自 store（每仓库缓存，组头与右栏详情共享）；远端调用
+// 只发生在首访/手动刷新，mode 挂载与点组头都只是同步读取。
+const metaMap = computed(() => new Map(issuesStore.milestones.map((m) => [m.title, m])));
 const collapsed = ref(new Set<string>());
 const loading = ref(false);
 const error = ref<string | null>(null);
@@ -107,7 +107,7 @@ function lastUpdatedOf(group: MilestoneGroup): { date: string; rel: string } | n
   return { date, rel };
 }
 
-// ---- 折叠 ----
+// ---- 折叠与选中 ----
 function toggleGroup(name: string | null) {
   const key = name ?? "__none__";
   const next = new Set(collapsed.value);
@@ -118,6 +118,14 @@ function toggleGroup(name: string | null) {
 function isCollapsed(name: string | null): boolean {
   return collapsed.value.has(name ?? "__none__");
 }
+/** 组头单击：有本体的里程碑 → 选中（右栏出详情）；兜底组 → 折叠。 */
+function onHeaderClick(name: string | null) {
+  if (name === null) toggleGroup(name);
+  else issuesStore.selectMilestone(name);
+}
+function isSelected(name: string | null): boolean {
+  return name !== null && issuesStore.selectedMilestone === name;
+}
 function collapseAll() {
   collapsed.value = new Set(groups.value.map((g) => g.name ?? "__none__"));
 }
@@ -127,16 +135,15 @@ function expandAll() {
 defineExpose({ collapseAll, expandAll, refresh });
 
 // ---- 数据 ----
-async function load() {
+async function load(forceMeta = false) {
   const repo = repoStore.current;
   if (!isTauri() || !repo) return;
   loading.value = true;
   try {
     allIssues.value = await api.listCachedIssues(repo, "all");
-    const list = await api.milestoneList(repo);
-    metaMap.value = new Map(list.map((m) => [m.title, m]));
+    await issuesStore.loadMilestones(repo, forceMeta);
   } catch (e) {
-    error.value = String(e);
+    error.value = translateError(String(e));
   } finally {
     loading.value = false;
   }
@@ -154,17 +161,18 @@ async function refresh() {
   } catch (e) {
     error.value = translateError(String(e));
   }
-  await load();
+  await load(true);
   loading.value = false;
 }
 
 onMounted(() => void load());
-watch(() => repoStore.current, () => void load());
-
-function translateError(s: string): string {
-  // 与全局 gh-errors 转译同源的轻量包装（避免循环依赖的冗余导入）
-  return s;
-}
+watch(
+  () => repoStore.current,
+  () => {
+    issuesStore.selectMilestone(null); // 仓库已切换，旧选中主体随之失效
+    void load();
+  },
+);
 </script>
 
 <template>
@@ -181,14 +189,23 @@ function translateError(s: string): string {
         <header
           class="group-header"
           role="button"
-          :title="t('milestone.toggleGroup')"
-          @click="toggleGroup(group.name)"
+          :class="{ selected: isSelected(group.name) }"
+          :title="group.name === null ? t('milestone.toggleGroup') : t('milestone.selectGroup')"
+          @click="onHeaderClick(group.name)"
         >
-          <EditorIcon
-            class="group-caret"
-            :class="{ open: !isCollapsed(group.name) }"
-            name="chevron"
-          />
+          <span
+            class="group-caret-zone"
+            role="button"
+            :title="t('milestone.toggleGroup')"
+            @click.stop="toggleGroup(group.name)"
+            @keydown.enter.stop.prevent="toggleGroup(group.name)"
+          >
+            <EditorIcon
+              class="group-caret"
+              :class="{ open: !isCollapsed(group.name) }"
+              name="chevron"
+            />
+          </span>
           <span class="group-name" :class="{ unassigned: group.name === null }">
             {{ group.name ?? t("common.unassignedMilestone") }}
           </span>
@@ -239,6 +256,19 @@ function translateError(s: string): string {
   background: var(--bg-app);
 }
 .group-header:hover {
+  background: var(--bg-hover);
+}
+.group-header.selected {
+  background: var(--bg-selected);
+}
+.group-caret-zone {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.group-caret-zone:hover {
   background: var(--bg-hover);
 }
 .group-caret {

@@ -125,7 +125,8 @@ HiveTask/
 ├── src/                     # Vue frontend
 │   ├── workbench/           #   SplitPane layout primitives
 │   ├── panels/              #   Issue / PR list and detail panels
-│   ├── stores/              #   Pinia stores (repo, issues/PRs, sync, settings)
+│   ├── knowledge/           #   Knowledge workspace (file tree + CM6 editor/preview)
+│   ├── stores/              #   Pinia stores (repo, issues/PRs, sync, settings, knowledge)
 │   ├── api.ts               #   Typed Tauri command bindings
 │   └── types.ts
 ├── src-tauri/src/
@@ -133,12 +134,34 @@ HiveTask/
 │   ├── gh.rs                # GitHub source (gh CLI invocation and JSON parsing)
 │   ├── git.rs               # git2-rs commit history and branches
 │   ├── pty.rs               # Integrated terminal PTY
+│   ├── kb.rs                # Knowledge workspace file API (sandbox + encoding + external open)
 │   ├── storage.rs           # SQLite migrations and cache
 │   ├── models.rs            # Shared data models
 │   └── migrations/          # Versioned SQL migrations
 ├── index.html
 └── package.json
 ```
+
+## Acknowledgements
+
+HiveTask stands on other people's work. The credits that carry **license obligations**
+are recorded in [THIRD-PARTY.md](./THIRD-PARTY.md) — the single source of truth for
+third-party notices. In short:
+
+- **Editor stack (Markdown live preview)** — ported file-by-file with modifications from
+  **[SoloMD](https://github.com/zhitongblog/solomd)** (MIT, © 2026 xiangdong li): the IME
+  composition guard, marker hiding, inline/block rendering, and the file-tree approach.
+- **Explorer metrics & behaviour** — **[Visual Studio Code](https://github.com/microsoft/vscode)**
+  (MIT, © Microsoft): tree row height, indent step, tab strip shape; four action icons are used
+  verbatim from **[@vscode/codicons](https://github.com/microsoft/vscode-codicons)** (**CC BY 4.0**).
+- **Math & diagrams** — **[KaTeX](https://katex.org)** (code MIT; **fonts SIL OFL 1.1**) and
+  **[Mermaid](https://mermaid.js.org)** (MIT), both rendered locally with no remote services.
+- **Editor engine** — **[CodeMirror 6](https://codemirror.net)** (MIT).
+- **Preview blueprint** — **[open-file-viewer](https://github.com/xushanpei/open-file-viewer)**
+  (MIT) for the per-format preview plugins (18 plugins covering its full format surface), with all of its
+  default CDN paths replaced by bundled assets. OFD / XPS / LRC / DXF are our own parsers; the per-format
+  breakdown is in [`docs/kb-preview-formats.md`](./docs/kb-preview-formats.md).
+- **Evaluated, not adopted** — MarkText/muya, Vditor, headless-tree (kept on record in THIRD-PARTY.md).
 
 ## License
 

@@ -11,6 +11,8 @@ export interface Toast {
   kind: "error" | "info" | "success";
   message: string;
   detail?: string;
+  /** 可选动作（如移动后的「撤销」）。点了即执行并关掉这条提示。 */
+  action?: { label: string; run: () => void };
 }
 
 export const toasts = ref<Toast[]>([]);

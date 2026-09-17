@@ -8,12 +8,11 @@ import { computed, ref, watch } from "vue";
 import { storeToRefs } from "pinia";
 import PanelShell from "../workbench/PanelShell.vue";
 import ModeTabs from "../components/ModeTabs.vue";
+import IssueCreateDialog from "./IssueCreateDialog.vue";
+import MilestoneCreateDialog from "./MilestoneCreateDialog.vue";
 import { resolvePanel } from "../workbench/registry";
 import { useIssuesStore } from "../stores/issues";
 import { useRepoStore } from "../stores/repo";
-import { api } from "../api";
-import { pushToast } from "../toast";
-import { translateError } from "../gh-errors";
 import { useI18n } from "../i18n";
 import { stateLabel } from "./state-label";
 import type { IssueState } from "../types";
@@ -29,12 +28,25 @@ const modes = def.modes ?? [];
 const store = useIssuesStore();
 const repoStore = useRepoStore();
 const { t } = useI18n();
-const { state, loading, error, issues } = storeToRefs(store);
+const { state, loading, error } = storeToRefs(store);
+
+// 标签目录随仓库加载（Issue 列表/详情 chip 着色 + 创建对话框选择器共享）
+watch(
+  () => repoStore.current,
+  (repo) => {
+    if (repo) void store.loadLabels(repo);
+  },
+  { immediate: true },
+);
 
 const storedMode =
   modes.find((m) => m.key === localStorage.getItem(MODE_STORAGE_KEY))?.key ?? modes[0]?.key;
 const modeKey = ref(storedMode);
-watch(modeKey, (key) => localStorage.setItem(MODE_STORAGE_KEY, key));
+watch(modeKey, (key) => {
+  localStorage.setItem(MODE_STORAGE_KEY, key);
+  // 里程碑选中主体只存在于里程碑模式上下文，切走即清除（右栏回落 issue 详情）
+  if (key !== "milestone") store.selectMilestone(null);
+});
 
 const activeMode = computed(() => modes.find((m) => m.key === modeKey.value) ?? modes[0]);
 const modeComp = ref<{ collapseAll: () => void; expandAll: () => void; refresh: () => void } | null>(null);
@@ -47,51 +59,9 @@ const states: { value: IssueState }[] = [
   { value: "all" },
 ];
 
-const createOpen = ref(false);
-const createTitle = ref("");
-const createBody = ref("");
-const createMilestone = ref("");
-const milestoneOpen = ref(false);
-const msName = ref("");
-const msDue = ref("");
-const msDesc = ref("");
-
-/** 里程碑选项：来自当前列表已加载的分组（无需额外 API）。 */
-const milestoneChoices = computed(() => {
-  const names = new Set<string>();
-  for (const i of issues.value) if (i.milestone) names.add(i.milestone);
-  return [...names].sort((a, b) => a.localeCompare(b));
-});
-
-
-async function submitCreate() {
-  if (!createTitle.value.trim()) return;
-  await store.createIssue(
-    createTitle.value,
-    createBody.value || undefined,
-    createMilestone.value || undefined,
-  );
-  if (!store.error) {
-    createOpen.value = false;
-    createTitle.value = "";
-    createBody.value = "";
-    createMilestone.value = "";
-  }
-}
-
-async function submitMilestone() {
-  if (!msName.value.trim()) return;
-  try {
-    await api.createMilestone(repoStore.current ?? "", msName.value, msDue.value || undefined, msDesc.value || undefined);
-    pushToast({ kind: "success", message: t("milestone.createdToast", { name: msName.value }) });
-    milestoneOpen.value = false;
-    msName.value = "";
-    msDue.value = "";
-    msDesc.value = "";
-  } catch (e) {
-    error.value = translateError(String(e));
-  }
-}
+// 新建入口统一为对话框（与 PR 创建同构）：mode 感知的两个开关互斥。
+const issueCreateOpen = ref(false);
+const milestoneCreateOpen = ref(false);
 </script>
 
 <template>
@@ -133,17 +103,21 @@ async function submitMilestone() {
         class="refresh-btn"
         @click="modeComp?.expandAll()"
       >{{ t("milestone.expandAll") }}</button>
-      <button class="refresh-btn" :disabled="loading" @click="isMilestoneMode ? modeComp?.refresh() : store.refresh()">
+      <button
+        class="refresh-btn"
+        :disabled="loading"
+        :title="isMilestoneMode ? t('milestone.refreshHint') : t('issue.refreshHint')"
+        @click="isMilestoneMode ? modeComp?.refresh() : store.refresh()"
+      >
         {{ loading ? t("common.syncing") : t("common.refresh") }}
       </button>
-      <button class="refresh-btn create-btn" @click="((createOpen = !createOpen), (milestoneOpen = false))">
+      <button class="refresh-btn create-btn" @click="((issueCreateOpen = true), (milestoneCreateOpen = false))">
         {{ t("issue.createBtn") }}
       </button>
       <button
         v-if="isMilestoneMode"
         class="refresh-btn create-btn"
-        :class="{ active: milestoneOpen }"
-        @click="((milestoneOpen = !milestoneOpen), (createOpen = false))"
+        @click="((milestoneCreateOpen = true), (issueCreateOpen = false))"
       >
         {{ t("milestone.createBtn") }}
       </button>
@@ -151,71 +125,10 @@ async function submitMilestone() {
 
     <p v-if="error" class="error-banner">{{ error }}</p>
 
-    <div v-if="createOpen" class="create-form">
-      <input
-        v-model="createTitle"
-        class="create-title"
-        :placeholder="t('issue.titlePlaceholder')"
-        spellcheck="false"
-        @keydown.enter="submitCreate"
-      />
-      <textarea
-        v-model="createBody"
-        class="create-body"
-        :placeholder="t('issue.bodyPlaceholder')"
-        rows="3"
-      />
-      <select v-model="createMilestone" class="create-milestone" v-if="milestoneChoices.length">
-        <option value="">{{ t("issue.milestoneOptional") }}</option>
-        <option v-for="m in milestoneChoices" :key="m" :value="m">{{ m }}</option>
-      </select>
-      <div class="create-actions">
-        <button class="create-cancel" @click="createOpen = false">
-          {{ t("conn.cancel") }}
-        </button>
-        <button
-          class="create-submit"
-          :disabled="!createTitle.trim()"
-          @click="submitCreate"
-        >
-          {{ t("issue.submit") }}
-        </button>
-      </div>
-    </div>
-
-    <div v-if="milestoneOpen && isMilestoneMode" class="create-form">
-      <input
-        v-model="msName"
-        class="create-title"
-        :placeholder="t('milestone.namePh')"
-        spellcheck="false"
-        @keydown.enter="submitMilestone"
-      />
-      <div class="ms-row">
-        <input v-model="msDue" type="date" class="create-title ms-date" />
-        <input
-          v-model="msDesc"
-          class="create-title"
-          :placeholder="t('milestone.descPh')"
-          spellcheck="false"
-          @keydown.enter="submitMilestone"
-        />
-      </div>
-      <div class="create-actions">
-        <button class="create-cancel" @click="milestoneOpen = false">
-          {{ t("conn.cancel") }}
-        </button>
-        <button
-          class="create-submit"
-          :disabled="!msName.trim()"
-          @click="submitMilestone"
-        >
-          {{ t("issue.submit") }}
-        </button>
-      </div>
-    </div>
-
     <component :is="activeMode.component" ref="modeComp" :tab="msTab" />
+
+    <IssueCreateDialog :open="issueCreateOpen" @close="issueCreateOpen = false" />
+    <MilestoneCreateDialog :open="milestoneCreateOpen" @close="milestoneCreateOpen = false" />
   </PanelShell>
 </template>
 
@@ -279,82 +192,6 @@ async function submitMilestone() {
 }
 .create-btn.active {
   background: var(--bg-selected);
-}
-.create-milestone {
-  box-sizing: border-box;
-  width: 100%;
-  font-size: var(--font-md);
-  color: var(--text);
-  background: var(--bg-app);
-  border: 1px solid var(--border);
-  border-radius: 5px;
-  padding: 5px 8px;
-}
-.ms-row {
-  display: flex;
-  gap: 6px;
-}
-.ms-date {
-  flex: none;
-  width: 150px;
-}
-.create-form {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  margin: 8px 10px;
-  padding: 10px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--bg-app);
-}
-.create-title,
-.create-body {
-  box-sizing: border-box;
-  width: 100%;
-  font-size: var(--font-md);
-  font-family: inherit;
-  color: var(--text);
-  background: var(--bg-panel);
-  border: 1px solid var(--border);
-  border-radius: 5px;
-  padding: 6px 8px;
-  outline: none;
-  resize: vertical;
-}
-.create-title:focus,
-.create-body:focus {
-  border-color: var(--accent);
-}
-.create-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
-}
-.create-cancel,
-.create-submit {
-  border: 1px solid var(--border);
-  background: var(--bg-panel);
-  color: var(--text);
-  font-size: var(--font-md);
-  height: 24px;
-  padding: 0 12px;
-  border-radius: 5px;
-  cursor: pointer;
-}
-.create-submit {
-  color: var(--accent);
-  border-color: var(--accent);
-  font-weight: 600;
-}
-.create-submit:disabled {
-  opacity: 0.5;
-  cursor: default;
-}
-.create-cancel:hover,
-.create-submit:not(:disabled):hover {
-  border-color: var(--accent);
-  color: var(--accent);
 }
 .error-banner {
   margin: 8px 14px 0;

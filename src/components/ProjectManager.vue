@@ -6,7 +6,8 @@
  * active connection (with 线上列表 lookup). Works directly against the
  * projects store; the host dialog just toggles visibility.
  */
-import { computed, onMounted, ref } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
+import { translateError } from "../gh-errors";
 import { storeToRefs } from "pinia";
 import { useProjectsStore } from "../stores/projects";
 import { api } from "../api";
@@ -84,6 +85,11 @@ interface OnlineRepo {
 const onlineOpen = ref(false);
 const onlineLoading = ref(false);
 const onlineRepos = ref<OnlineRepo[]>([]);
+/** 线上 ProjectsV2 清单（远端页签的「刷新」拉这个——对话框语境是项目）。 */
+const onlineProjects = ref<{ number: number; title: string; url: string; closed: boolean }[]>([]);
+/** 线上**仓库**清单面板（创建表单里的登记入口；与页签行的「刷新项目」用途不同）。 */
+const onlineReposOpen = ref(false);
+const importing = ref<number | null>(null);
 const onlineError = ref<string | null>(null);
 
 function isRegistered(url: string): boolean {
@@ -112,9 +118,14 @@ function toggleChoose(id: string) {
   else next.add(id);
   chosenRepoIds.value = next;
 }
-async function toggleOnline() {
-  onlineOpen.value = !onlineOpen.value;
-  if (onlineOpen.value) await fetchOnline();
+async function toggleOnlineRepos() {
+  onlineReposOpen.value = !onlineReposOpen.value;
+  if (onlineReposOpen.value) {
+    onlineOpen.value = true;
+    await fetchOnline();
+  } else {
+    onlineOpen.value = false;
+  }
 }
 async function fetchOnline() {
   const conn = activeConnection.value;
@@ -124,14 +135,16 @@ async function fetchOnline() {
   try {
     onlineRepos.value = await api.remoteRepoList(conn.platform, conn.host);
   } catch (e) {
-    onlineError.value = String(e);
+    onlineError.value = translateError(String(e));
     onlineRepos.value = [];
   } finally {
     onlineLoading.value = false;
   }
 }
 /** 线上仓库勾选 = 登记（未登记时）+ 绑定：一步进项目。 */
-async function chooseOnline(repo: OnlineRepo) {
+/** 登记线上仓库（对齐「切换仓库」对话框的同名动作：只登记）；
+ * 登记后自动勾选该仓库，省一步——绑定与否仍由下方 chips 决定。 */
+async function registerOnline(repo: OnlineRepo) {
   const conn = activeConnection.value;
   if (!conn) return;
   const existing = allRepos.value.find(
@@ -164,7 +177,7 @@ async function submitCreate() {
     onlineOpen.value = false;
     onlineRepos.value = [];
   } catch (e) {
-    store.error = String(e);
+    store.error = translateError(String(e));
   } finally {
     creating.value = false;
   }
@@ -178,6 +191,51 @@ async function submitRename() {
   await store.rename(renaming.value, renameName.value);
   renaming.value = null;
 }
+/** 页签行「刷新」：拉取该接入的**线上项目清单**并展开面板（对话框语境是项目）。 */
+async function onTabRefresh() {
+  onlineOpen.value = true;
+  await fetchOnlineProjects();
+}
+/** 线上项目清单（GitHub ProjectsV2；scope 不足时把指引显示在面板里）。 */
+async function fetchOnlineProjects() {
+  onlineProjects.value = [];
+  if (activeConnection.value?.platform !== "github") {
+    onlineError.value = t("project.onlineProjectsGithubOnly");
+    return;
+  }
+  onlineLoading.value = true;
+  onlineError.value = null;
+  try {
+    onlineProjects.value = await api.remoteProjectList(50);
+  } catch (e) {
+    onlineError.value = translateError(String(e));
+  } finally {
+    onlineLoading.value = false;
+  }
+}
+/** 已导入判定：本地项目的平台绑定 ref 与线上 url 对应。 */
+function importedProjectId(url: string): string | undefined {
+  return projects.value.find((p) => p.platformRef === url)?.id;
+}
+/** 导入：建本地项目并记录平台绑定（同名不冲突——用户可视需要改名）。 */
+async function importOnlineProject(rp: { number: number; title: string; url: string }) {
+  importing.value = rp.number;
+  try {
+    await store.importRemote({
+      name: rp.title,
+      connectionId: activeConnection.value?.id ?? null,
+      platformKind: "github",
+      platformHost: activeConnection.value?.host ?? "github.com",
+      platformRef: rp.url,
+    });
+  } finally {
+    importing.value = null;
+  }
+}
+watch(activeTab, () => {
+  onlineOpen.value = false;
+  onlineRepos.value = [];
+});
 const confirmingDelete = ref<string | null>(null);
 async function confirmDelete() {
   if (!confirmingDelete.value) return;
@@ -198,7 +256,43 @@ async function confirmDelete() {
       >
         {{ tab.label }} <span class="pjmgr-count">{{ tab.count }}</span>
       </button>
+      <span class="pjmgr-tabs-spacer"></span>
+      <!-- 远端接入页签：刷新线上仓库清单（与「切换仓库」对话框同位同款；本地页签无此按钮） -->
+      <button
+        v-if="activeConnection"
+        class="pjmgr-online-toggle"
+        :class="{ open: onlineOpen }"
+        :disabled="onlineLoading"
+        :title="t('repo.refreshOnline')"
+        @click="onTabRefresh"
+      >{{ onlineLoading ? t("list.loading") : t("common.refresh") }}</button>
     </div>
+
+      <div v-if="activeConnection && onlineOpen" class="pjmgr-online-wrap">
+        <div class="pjmgr-online">
+          <p v-if="onlineError" class="pjmgr-online-error">{{ onlineError }}</p>
+          <p v-else-if="onlineLoading" class="pjmgr-bind-empty">{{ t("list.loading") }}</p>
+          <p v-else-if="onlineProjects.length === 0" class="pjmgr-bind-empty">
+            {{ t("project.onlineProjectsEmpty") }}
+          </p>
+          <div v-for="rp in onlineProjects" :key="rp.number" class="pjmgr-online-item">
+            <span class="pjmgr-online-name">{{ rp.title }}</span>
+            <span class="pjmgr-online-num">#{{ rp.number }}</span>
+            <span v-if="rp.closed" class="pjmgr-online-num">{{ t("project.onlineClosed") }}</span>
+            <button
+              v-if="importedProjectId(rp.url)"
+              class="pjmgr-chip chosen"
+              disabled
+            >{{ t("project.onlineImported") }}</button>
+            <button
+              v-else
+              class="pjmgr-chip"
+              :disabled="importing === rp.number"
+              @click="importOnlineProject(rp)"
+            >{{ importing === rp.number ? t("list.loading") : t("project.onlineImport") }}</button>
+          </div>
+        </div>
+      </div>
 
     <p v-if="projects.length === 0 && !createOpen" class="pjmgr-empty">{{ t("project.empty") }}</p>
     <p v-else-if="visibleProjects.length === 0" class="pjmgr-empty">{{ t("project.tabEmpty") }}</p>
@@ -227,6 +321,7 @@ async function confirmDelete() {
         </template>
         <template v-else>
           <span class="pjmgr-name">{{ p.displayName }}</span>
+          <span v-if="p.platformRef" class="pjmgr-online-num">{{ t("project.onlineBound") }}</span>
           <span v-if="p.description" class="pjmgr-desc">{{ p.description }}</span>
           <button
             class="pjmgr-rowbtn"
@@ -262,7 +357,7 @@ async function confirmDelete() {
         @keydown.enter="submitCreate"
       />
       <p class="pjmgr-bind-head">{{ t("project.bindRepos") }}</p>
-      <div v-if="tabRepoChoices.length === 0 && !onlineOpen" class="pjmgr-bind-empty">
+      <div v-if="tabRepoChoices.length === 0" class="pjmgr-bind-empty">
         {{ t("project.bindEmpty") }}
       </div>
       <div v-else class="pjmgr-bind-chips">
@@ -279,7 +374,7 @@ async function confirmDelete() {
         <button
           class="pjmgr-online-toggle"
           :disabled="onlineLoading"
-          @click="toggleOnline"
+          @click="toggleOnlineRepos"
         >{{ onlineLoading ? t("list.loading") : onlineOpen ? "× " + t("repo.refreshOnline") : t("repo.refreshOnline") }}</button>
         <div v-if="onlineOpen" class="pjmgr-online">
           <p v-if="onlineError" class="pjmgr-online-error">{{ onlineError }}</p>
@@ -288,13 +383,11 @@ async function confirmDelete() {
           </p>
           <div v-for="r in onlineRepos" :key="r.url" class="pjmgr-online-item">
             <span class="pjmgr-online-name">{{ r.fullName }}</span>
-            <button
-              class="pjmgr-chip"
-              :class="{ chosen: isRegistered(r.url) && chosenRepoIds.has(allRepos.find((x) => x.remoteUrl?.replace(/\.git$/, '') === r.url.replace(/\.git$/, ''))?.id ?? '') }"
-              :disabled="onlineLoading"
-              @click="chooseOnline(r)"
-            >
-              {{ isRegistered(r.url) ? t("project.bind") : t("project.bindRegister") }}
+            <button v-if="isRegistered(r.url)" class="pjmgr-chip done" disabled>
+              ✓ {{ t("repo.registered") }}
+            </button>
+            <button v-else class="pjmgr-chip" :disabled="onlineLoading" @click="registerOnline(r)">
+              {{ t("repo.register") }}
             </button>
           </div>
         </div>
@@ -313,6 +406,9 @@ async function confirmDelete() {
 <style scoped>
 .pjmgr {
   padding: 8px;
+}
+.pjmgr-tabs-spacer {
+  flex: 1;
 }
 .pjmgr-tabs {
   display: flex;
@@ -466,6 +562,10 @@ async function confirmDelete() {
   display: flex;
   flex-direction: column;
   gap: 4px;
+}
+.pjmgr-chip.done {
+  color: var(--text-dim);
+  cursor: default;
 }
 .pjmgr-online-toggle {
   align-self: flex-start;

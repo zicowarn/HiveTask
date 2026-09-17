@@ -19,6 +19,8 @@
   --font-sm: 11px;
   --font-md: 12px;
   --font-base: 13px;
+  /* 平台对齐档：GitHub 表格单元格/输入等用 14px，逐项照抄时引用此档 */
+  --font-lg: 14px;
   --font-xl: 17px;
   --bg-app: #1e1f22;
   --bg-panel: #2b2d30;
@@ -40,6 +42,20 @@
   --danger-soft: rgba(248, 113, 113, 0.12);
   --danger-banner: rgba(248, 113, 113, 0.08);
   --danger-banner-border: rgba(248, 113, 113, 0.3);
+  /* 选项色板浅底（新建/编辑选项对话框的方块色板底）：light 为平台实测
+     Primer *-0 值；dark 用同色低透明度混面板底，语义一致（③适配）。 */
+  --tint-gray: color-mix(in srgb, #59636e 16%, var(--bg-panel));
+  --tint-blue: color-mix(in srgb, #0969da 16%, var(--bg-panel));
+  --tint-green: color-mix(in srgb, #1a7f37 16%, var(--bg-panel));
+  --tint-yellow: color-mix(in srgb, #9a6700 16%, var(--bg-panel));
+  --tint-orange: color-mix(in srgb, #bc4c00 16%, var(--bg-panel));
+  --tint-red: color-mix(in srgb, #d1242f 16%, var(--bg-panel));
+  --tint-pink: color-mix(in srgb, #bf3989 16%, var(--bg-panel));
+  --tint-purple: color-mix(in srgb, #8250df 16%, var(--bg-panel));
+  /* 主按钮（平台 Save/Create 绿实心）：light 为平台实测 #1F883D 系 */
+  --btn-primary: #238636;
+  --btn-primary-hover: #29903b;
+  --btn-primary-border: rgba(240, 246, 252, 0.1);
   --scrollbar-thumb: #45484d;
   --scrollbar-thumb-hover: #55585e;
 
@@ -69,6 +85,19 @@
   --danger-soft: rgba(207, 34, 46, 0.12);
   --danger-banner: rgba(207, 34, 46, 0.08);
   --danger-banner-border: rgba(207, 34, 46, 0.35);
+  /* 选项色板浅底：平台实测值（Primer *-0），逐项照抄 */
+  --tint-gray: #f6f8fa;
+  --tint-blue: #ddf4ff;
+  --tint-green: #dafbe1;
+  --tint-yellow: #fff8c5;
+  --tint-orange: #fff1e5;
+  --tint-red: #ffebe9;
+  --tint-pink: #ffeff7;
+  --tint-purple: #fbefff;
+  /* 主按钮：平台实测（Save #20883D → 规范值 #1F883D，边 #1A7F37 系） */
+  --btn-primary: #1f883d;
+  --btn-primary-hover: #1a7f37;
+  --btn-primary-border: rgba(31, 35, 40, 0.15);
   --scrollbar-thumb: #c6cbd2;
   --scrollbar-thumb-hover: #b1b8c0;
 
@@ -116,4 +145,24 @@ body {
 
 button {
   font-family: inherit;
+}
+
+/* 拖拽时跟随光标的幽灵（挂在 body 上；用 fixed 定位，不参与布局） */
+.tree-drag-ghost {
+  position: fixed;
+  z-index: 3000;
+  pointer-events: none;
+  padding: 2px 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-panel);
+  color: var(--text);
+  font-size: var(--font-sm);
+  box-shadow: 0 2px 8px rgb(0 0 0 / 25%);
+}
+
+/* 拖拽文件树期间：禁文本选择 + 抓取光标（否则拖过标签会选中文字，手感毛躁） */
+body.tree-dragging {
+  user-select: none;
+  cursor: grabbing;
 }

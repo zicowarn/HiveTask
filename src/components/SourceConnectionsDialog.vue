@@ -6,6 +6,7 @@
  */
 import { computed, onMounted, ref } from "vue";
 import EditorIcon from "./EditorIcon.vue";
+import DropdownMenu from "./DropdownMenu.vue";
 import { api, isTauri } from "../api";
 import { useI18n } from "../i18n";
 import { reportError } from "../gh-errors";
@@ -147,9 +148,12 @@ onBeforeUnmount(() => document.removeEventListener("keydown", onKeydown));
       <template v-else>
         <div class="form-row">
           <label class="form-label">{{ t("conn.type") }}</label>
-          <select v-model="form.platform" class="form-select" @change="onPlatformChange">
-            <option v-for="p in PLATFORMS" :key="p.value" :value="p.value">{{ p.label }}</option>
-          </select>
+          <DropdownMenu
+            class="form-select"
+            :options="PLATFORMS.map((p) => ({ value: p.value, label: p.label }))"
+            :model-value="form.platform"
+            @update:model-value="((form.platform = $event as string), onPlatformChange())"
+          />
         </div>
         <div class="form-row">
           <label class="form-label">{{ t("conn.labelField") }}</label>
@@ -327,15 +331,9 @@ onBeforeUnmount(() => document.removeEventListener("keydown", onKeydown));
   padding: 0 8px;
   outline: none;
 }
+/* 下拉：统一 DropdownMenu 组件（AGENTS.md 下拉菜单规范） */
 .form-select {
-  padding-right: 24px;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 10 10'%3E%3Cpath d='M2 3.5L5 6.5L8 3.5' fill='none' stroke='%239aa0a8' stroke-width='1.4' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
-  background-repeat: no-repeat;
-  background-position: right 8px center;
-  background-size: 8px;
-}
-[data-theme="light"] .form-select {
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 10 10'%3E%3Cpath d='M2 3.5L5 6.5L8 3.5' fill='none' stroke='%23656d76' stroke-width='1.4' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  width: 100%;
 }
 .form-input:focus,
 .form-select:focus {

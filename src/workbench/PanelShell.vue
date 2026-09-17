@@ -98,6 +98,10 @@ function onTypeChange(value: string) {
 .panel-switcher {
   display: flex;
   align-items: center;
+  /* 知识库的文件页签会横向溢出：让这一格承担剩余宽度并**优先收缩**，
+     从而 Editor 切换器（flex: none）永远保持原尺寸、间隙不被吃掉 */
+  min-width: 0;
+  flex: 1 1 auto;
 }
 .panel-header-right {
   margin-left: auto;
@@ -105,6 +109,15 @@ function onTypeChange(value: string) {
   align-items: center;
   gap: 10px;
   min-width: 0;
+  /* 右侧动作不可被页签条挤压（知识库的页签多起来时，动作按钮的文字曾被挤成两行） */
+  flex: none;
+}
+.panel-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+  white-space: nowrap;
 }
 .layout-actions {
   display: flex;
@@ -133,12 +146,6 @@ function onTypeChange(value: string) {
 }
 .close-btn:hover:not(:disabled) {
   color: var(--danger);
-}
-.panel-actions {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
 }
 .panel-body {
   flex: 1;

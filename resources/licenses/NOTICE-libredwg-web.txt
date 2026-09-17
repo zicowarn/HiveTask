@@ -1,0 +1,15 @@
+libredwg-web（DWG 解析，WebAssembly 构建）
+==========================================
+
+本目录下的 libredwg-web.wasm 来自 npm 包 @mlightcad/libredwg-web（0.7.10），
+是对 LibreDWG 的 WebAssembly 构建与 JS 封装，用于 HiveTask 知识库的 DWG 图纸预览。
+
+  上游：https://github.com/mlightcad/libredwg   （LibreDWG）
+  打包：https://github.com/mlightcad/libredwg-web
+  许可：GNU General Public License v3.0（全文见同目录 LICENSE-GPL-3.0.txt）
+
+HiveTask 整体以 AGPL-3.0-only 发布（见仓库根 LICENSE）。GPL-3.0 的组件可与
+AGPL-3.0 的程序结合分发（AGPL-3.0 第 13 条），结合后的整体仍以 AGPL-3.0 提供，
+对应源代码可从本仓库获取。
+
+本文件与 LICENSE-GPL-3.0.txt 必须随分发产物一起提供。

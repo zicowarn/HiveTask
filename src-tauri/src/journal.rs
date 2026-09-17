@@ -22,7 +22,8 @@ pub const REF: &str = "refs/hivetask/issues";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Event {
-    /// "issue.create" | "issue.comment" | "issue.state"
+    /// "issue.create" | "issue.comment" | "issue.state" | "issue.edit"
+    /// | "issue.labels" | "issue.assignees" | "issue.milestone"
     pub action: String,
     pub number: String,
     pub author: String,
@@ -35,6 +36,12 @@ pub struct Event {
     /// "OPEN" | "CLOSED"（issue.state 事件）。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub state: Option<String>,
+    /// 整体替换的标签（issue.labels 事件；None = 不改）。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub labels: Option<Vec<String>>,
+    /// 整体替换的负责人（issue.assignees 事件；None = 不改）。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub assignees: Option<Vec<String>>,
     /// 创建时归属的里程碑（旧事件缺省 None，重放兼容）。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub milestone: Option<String>,
@@ -186,6 +193,44 @@ fn apply(conn: &Connection, event: &Event) -> Result<()> {
                 .ok_or_else(|| anyhow!("issue.state 事件缺少 state"))?;
             storage::update_issue_state(conn, &event.number, &state)?;
         }
+        "issue.edit" => {
+            // 编辑 = 覆写物化视图的标题/正文（last-writer-wins，与平台口径一致）。
+            let title = event
+                .title
+                .clone()
+                .ok_or_else(|| anyhow!("issue.edit 事件缺少 title"))?;
+            conn.execute(
+                "UPDATE issues SET title = ?1, body = ?2, synced_at = datetime('now') WHERE number = ?3",
+                (title, event.body.clone(), event.number.clone()),
+            )?;
+        }
+        "issue.labels" => {
+            let labels = event
+                .labels
+                .clone()
+                .ok_or_else(|| anyhow!("issue.labels 事件缺少 labels"))?;
+            conn.execute(
+                "UPDATE issues SET labels = ?1, synced_at = datetime('now') WHERE number = ?2",
+                (serde_json::json!(labels).to_string(), event.number.clone()),
+            )?;
+        }
+        "issue.assignees" => {
+            let assignees = event
+                .assignees
+                .clone()
+                .ok_or_else(|| anyhow!("issue.assignees 事件缺少 assignees"))?;
+            conn.execute(
+                "UPDATE issues SET assignees = ?1, synced_at = datetime('now') WHERE number = ?2",
+                (serde_json::json!(assignees).to_string(), event.number.clone()),
+            )?;
+        }
+        "issue.milestone" => {
+            // milestone 为 None = 清除归属（列置 NULL）。
+            conn.execute(
+                "UPDATE issues SET milestone = ?1, synced_at = datetime('now') WHERE number = ?2",
+                (event.milestone.clone(), event.number.clone()),
+            )?;
+        }
         other => anyhow::bail!("未知事件类型: {other}"),
     }
     Ok(())
@@ -213,6 +258,8 @@ pub fn create_issue(
         title: Some(title.trim().to_string()),
         body: body.map(|b| b.trim().to_string()).filter(|b| !b.is_empty()),
         state: None,
+        labels: None,
+        assignees: None,
         milestone: milestone.map(|m| m.trim().to_string()).filter(|m| !m.is_empty()),
     };
     append(workdir, &event)?;
@@ -240,6 +287,8 @@ pub fn add_comment(
         title: None,
         body: Some(body.trim().to_string()),
         state: None,
+        labels: None,
+        assignees: None,
         milestone: None,
     };
     append(workdir, &event)?;
@@ -264,12 +313,119 @@ pub fn set_issue_state(
         title: None,
         body: None,
         state: Some(state.to_string()),
+        labels: None,
+        assignees: None,
         milestone: None,
     };
     append(workdir, &event)?;
     storage::update_issue_state(conn, number, state)?;
     storage::get_issue(conn, number)?
         .ok_or_else(|| anyhow!("issue #{number} 不存在"))
+}
+
+/// 编辑标题/正文（journal + 物化双写）并返回更新后的实体。
+pub fn edit_issue(
+    workdir: &Path,
+    conn: &mut Connection,
+    number: &str,
+    title: &str,
+    body: Option<&str>,
+    author: &str,
+) -> Result<crate::models::Issue> {
+    if title.trim().is_empty() {
+        return Err(anyhow!("标题不能为空"));
+    }
+    let event = Event {
+        action: "issue.edit".to_string(),
+        number: number.to_string(),
+        author: author.to_string(),
+        ts: crate::appdb::chrono_like_now(),
+        title: Some(title.trim().to_string()),
+        body: body.map(|b| b.trim().to_string()).filter(|b| !b.is_empty()),
+        state: None,
+        labels: None,
+        assignees: None,
+        milestone: None,
+    };
+    append(workdir, &event)?;
+    apply(conn, &event)?;
+    storage::get_issue(conn, number)?
+        .ok_or_else(|| anyhow!("issue #{number} 不存在"))
+}
+
+/// 整体替换标签（本地 Issue；append → 物化视图 → 回读）。
+pub fn set_issue_labels(
+    workdir: &Path,
+    conn: &mut Connection,
+    number: &str,
+    labels: &[String],
+    author: &str,
+) -> Result<crate::models::Issue> {
+    let event = Event {
+        action: "issue.labels".to_string(),
+        number: number.to_string(),
+        author: author.to_string(),
+        ts: crate::appdb::chrono_like_now(),
+        title: None,
+        body: None,
+        state: None,
+        labels: Some(labels.to_vec()),
+        assignees: None,
+        milestone: None,
+    };
+    append(workdir, &event)?;
+    apply(conn, &event)?;
+    storage::get_issue(conn, number)?.ok_or_else(|| anyhow!("issue #{number} 不存在"))
+}
+
+/// 整体替换负责人（本地 Issue）。
+pub fn set_issue_assignees(
+    workdir: &Path,
+    conn: &mut Connection,
+    number: &str,
+    assignees: &[String],
+    author: &str,
+) -> Result<crate::models::Issue> {
+    let event = Event {
+        action: "issue.assignees".to_string(),
+        number: number.to_string(),
+        author: author.to_string(),
+        ts: crate::appdb::chrono_like_now(),
+        title: None,
+        body: None,
+        state: None,
+        labels: None,
+        assignees: Some(assignees.to_vec()),
+        milestone: None,
+    };
+    append(workdir, &event)?;
+    apply(conn, &event)?;
+    storage::get_issue(conn, number)?.ok_or_else(|| anyhow!("issue #{number} 不存在"))
+}
+
+/// 设置/清除里程碑归属（本地 = Issue 上的纯文本标签；None = 清除）。
+pub fn set_issue_milestone(
+    workdir: &Path,
+    conn: &mut Connection,
+    number: &str,
+    milestone: Option<&str>,
+    author: &str,
+) -> Result<crate::models::Issue> {
+    let event = Event {
+        action: "issue.milestone".to_string(),
+        number: number.to_string(),
+        author: author.to_string(),
+        ts: crate::appdb::chrono_like_now(),
+        title: None,
+        body: None,
+        state: None,
+        labels: None,
+        assignees: None,
+        milestone: milestone.map(|m| m.trim().to_string()).filter(|m| !m.is_empty()),
+    };
+    append(workdir, &event)?;
+    apply(conn, &event)?;
+    storage::get_issue(conn, number)?.ok_or_else(|| anyhow!("issue #{number} 不存在"))
 }
 
 #[cfg(test)]
@@ -332,6 +488,53 @@ pub(crate) mod tests {
         let repo = Repository::open(&workdir).unwrap();
         assert!(repo.find_reference(REF).is_ok());
         assert_eq!(read_events(&repo).unwrap().len(), 4);
+
+        std::fs::remove_dir_all(&workdir).ok();
+    }
+
+    /// 标签 / 负责人 / 里程碑三个编辑事件：写入生效 + 清空 + 物化丢失后重放恢复。
+    #[test]
+    fn field_edit_events_replay() {
+        let _guard = TEST_LOCK.lock().unwrap();
+        let workdir = temp_workdir();
+        let mut conn = open_material(&workdir);
+
+        create_issue(&workdir, &mut conn, "字段编辑", None, "tester", None).unwrap();
+        set_issue_labels(
+            &workdir,
+            &mut conn,
+            "1",
+            &["bug".to_string(), "docs".to_string()],
+            "tester",
+        )
+        .unwrap();
+        set_issue_assignees(&workdir, &mut conn, "1", &["alice".to_string()], "tester").unwrap();
+        set_issue_milestone(&workdir, &mut conn, "1", Some("v1.0"), "tester").unwrap();
+
+        let issue = storage::get_issue(&conn, "1").unwrap().unwrap();
+        assert_eq!(issue.labels, vec!["bug".to_string(), "docs".to_string()]);
+        assert_eq!(issue.assignees, vec!["alice".to_string()]);
+        assert_eq!(issue.milestone.as_deref(), Some("v1.0"));
+
+        // 清空（空数组 / None）同样落事件
+        set_issue_labels(&workdir, &mut conn, "1", &[], "tester").unwrap();
+        set_issue_milestone(&workdir, &mut conn, "1", None, "tester").unwrap();
+        let issue = storage::get_issue(&conn, "1").unwrap().unwrap();
+        assert!(issue.labels.is_empty());
+        assert!(issue.milestone.is_none());
+
+        // 物化丢失 → sync 全量重放，最终态一致（重放幂等）
+        storage::reset_issue_material(&conn).unwrap();
+        storage::meta_set(&conn, "journal_applied", "").unwrap();
+        sync(&workdir, &mut conn).unwrap();
+        let replayed = storage::get_issue(&conn, "1").unwrap().unwrap();
+        assert!(replayed.labels.is_empty());
+        assert_eq!(replayed.assignees, vec!["alice".to_string()]);
+        assert!(replayed.milestone.is_none());
+
+        // 事件数：create + labels×2 + assignees + milestone×2 = 6
+        let repo = Repository::open(&workdir).unwrap();
+        assert_eq!(read_events(&repo).unwrap().len(), 6);
 
         std::fs::remove_dir_all(&workdir).ok();
     }

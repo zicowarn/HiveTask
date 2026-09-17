@@ -124,11 +124,15 @@ pub struct BranchRow {
     pub behind: i64,
 }
 
-/// 里程碑元数据（list_milestones：PR/看板组头与截止提醒的数据源）。
+/// 里程碑元数据（list_milestones：PR/看板组头、里程碑详情的数据源）。
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MilestoneInfo {
+    /// 平台侧里程碑编号（GitHub number / Gitea id；在线链接与稳定 key 用）。
+    pub number: i64,
     pub title: String,
+    /// Markdown 描述；未设 → None。
+    pub description: Option<String>,
     /// RFC3339 截止时间；未设 → None。
     pub due_on: Option<String>,
     /// "open" | "closed"。
@@ -136,6 +140,18 @@ pub struct MilestoneInfo {
     /// 平台口径的计数（完成度不随前端筛选变化）。
     pub open_issues: i64,
     pub closed_issues: i64,
+    /// 网页地址（在线打开）；Gitea 里程碑对象无此字段 → None。
+    pub html_url: Option<String>,
+}
+
+/// 仓库标签（创建 Issue 的候选清单；Gitea 创建需 id，GitHub 传名）。
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LabelInfo {
+    pub id: i64,
+    pub name: String,
+    /// 主题色（hex，不含 # 前缀的归一由前端处理）；未设 → None。
+    pub color: Option<String>,
 }
 
 // ---- 本地分支 review（设计：《本地Issue与本地分支Review》Q3）----

@@ -5,6 +5,7 @@
  * base 分支按 repo 记忆（localStorage），默认 main → master → 首个分支。
  */
 import { defineStore } from "pinia";
+import { translateError } from "../gh-errors";
 import { computed, ref, watch } from "vue";
 import { api, isTauri, type BranchReviewDiff, type ReviewBranch } from "../api";
 import { useRepoStore } from "./repo";
@@ -85,7 +86,7 @@ export const useBranchReviewStore = defineStore("branch-review", () => {
     try {
       diff.value = await api.branchReviewDiff(repo, base.value, selected.value);
     } catch (e) {
-      error.value = String(e);
+      error.value = translateError(String(e));
       diff.value = null;
     } finally {
       loading.value = false;
@@ -102,7 +103,7 @@ export const useBranchReviewStore = defineStore("branch-review", () => {
       await loadBranches();
       await loadDiff();
     } catch (e) {
-      error.value = String(e);
+      error.value = translateError(String(e));
     } finally {
       loading.value = false;
     }

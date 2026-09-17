@@ -6,19 +6,56 @@
  * owning modules (i18n / theme / settings store); there is no separate
  * save step. 来源连接管理在独立对话框（SourceConnectionsDialog）。
  */
-import { computed, onMounted, ref } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 import { useI18n, type LocaleChoice } from "../../i18n";
 import { useTheme, type ThemeChoice } from "../../theme";
 import { useSettingsStore } from "../../stores/settings";
 import SourceConnectionsDialog from "../../components/SourceConnectionsDialog.vue";
 import GitHubAuthDialog from "../../components/GitHubAuthDialog.vue";
+import DropdownMenu from "../../components/DropdownMenu.vue";
 import { api, isTauri } from "../../api";
+import { useKnowledgeStore } from "../../stores/knowledge";
+import EditorIcon from "../../components/EditorIcon.vue";
 
 const { t, localeChoice, setLocale } = useI18n();
 const { theme, setTheme } = useTheme();
 const settings = useSettingsStore();
 
 const connectionsOpen = ref(false);
+
+// ---- 打开方式（知识库「默认应用打开」用哪个应用；存 app.db，由 Rust 读）----
+const knowledge = useKnowledgeStore();
+const openAppDraft = ref("");
+const openAppSaving = ref(false);
+onMounted(() => {
+  void knowledge.loadOpenWith();
+});
+watch(
+  () => knowledge.openWith,
+  (prefs) => {
+    openAppDraft.value = prefs.defaultApp;
+  },
+  { immediate: true, deep: true },
+);
+/** 失焦/回车提交：空串 = 系统默认程序。 */
+async function commitOpenApp(): Promise<void> {
+  const value = openAppDraft.value.trim();
+  if (value === knowledge.openWith.defaultApp) return;
+  openAppSaving.value = true;
+  try {
+    await knowledge.saveOpenWith({ ...knowledge.openWith, defaultApp: value });
+  } finally {
+    openAppSaving.value = false;
+  }
+}
+/** 原生选择器挑应用（macOS 选 .app / Windows 选 .exe / Linux 选可执行文件）。 */
+async function pickOpenApp(): Promise<void> {
+  if (!isTauri()) return;
+  const picked = await api.kbPickApp();
+  if (!picked) return;
+  openAppDraft.value = picked;
+  await commitOpenApp();
+}
 
 // ---- GitHub 账户（Device Flow 登录；凭据归 gh 托管）----
 const ghLogin = ref<string | null>(null);
@@ -72,11 +109,11 @@ const languageChoices: { value: "zh-CN" | "en-US"; label: string }[] = [
   { value: "en-US", label: "English" },
 ];
 
-function onLocaleChange(event: Event) {
-  setLocale((event.target as HTMLSelectElement).value as LocaleChoice);
+function onLocaleChange(value: string | string[]) {
+  setLocale(value as LocaleChoice);
 }
-function onThemeChange(event: Event) {
-  setTheme((event.target as HTMLSelectElement).value as ThemeChoice);
+function onThemeChange(value: string | string[]) {
+  setTheme(value as ThemeChoice);
 }
 </script>
 
@@ -87,10 +124,12 @@ function onThemeChange(event: Event) {
         <span class="setting-name">{{ t("settings.language") }}</span>
         <span class="setting-desc">{{ t("settings.languageDesc") }}</span>
       </div>
-      <select class="setting-select" :value="localeChoice" @change="onLocaleChange">
-        <option v-for="l in languageChoices" :key="l.value" :value="l.value">{{ l.label }}</option>
-        <option value="system">{{ t("lang.system") }}</option>
-      </select>
+      <DropdownMenu
+        class="setting-dd"
+        :options="[...languageChoices, { value: 'system', label: t('lang.system') }]"
+        :model-value="localeChoice"
+        @update:model-value="onLocaleChange"
+      />
     </div>
 
     <div class="setting-row">
@@ -98,11 +137,12 @@ function onThemeChange(event: Event) {
         <span class="setting-name">{{ t("settings.theme") }}</span>
         <span class="setting-desc">{{ t("settings.themeDesc") }}</span>
       </div>
-      <select class="setting-select" :value="theme" @change="onThemeChange">
-        <option v-for="c in themeChoices" :key="c.value" :value="c.value">
-          {{ t(c.labelKey) }}
-        </option>
-      </select>
+      <DropdownMenu
+        class="setting-dd"
+        :options="themeChoices.map((c) => ({ value: c.value, label: t(c.labelKey) }))"
+        :model-value="theme"
+        @update:model-value="onThemeChange"
+      />
     </div>
 
     <div class="setting-row">
@@ -130,9 +170,28 @@ function onThemeChange(event: Event) {
         <span class="setting-name">{{ t("settings.terminalShell") }}</span>
         <span class="setting-desc">{{ t("settings.terminalShellDesc") }}</span>
       </div>
-      <select class="setting-select" v-model="settings.terminalShell">
-        <option v-for="c in shellChoices" :key="c.value" :value="c.value">{{ c.label }}</option>
-      </select>
+      <DropdownMenu class="setting-dd" :options="shellChoices" v-model="settings.terminalShell" />
+    </div>
+
+    <div class="setting-row">
+      <div class="setting-text">
+        <span class="setting-name">{{ t("settings.openWith") }}</span>
+        <span class="setting-desc">{{ t("settings.openWithDesc") }}</span>
+      </div>
+      <div class="setting-open-with">
+        <input
+          v-model="openAppDraft"
+          class="setting-input"
+          :placeholder="t('settings.openWithPlaceholder')"
+          spellcheck="false"
+          @keydown.enter="commitOpenApp"
+          @blur="commitOpenApp"
+        />
+        <button class="setting-btn" :disabled="openAppSaving || !isTauri()" @click="pickOpenApp">
+          <EditorIcon name="o.file-directory" />
+          {{ t("settings.openWithPick") }}
+        </button>
+      </div>
     </div>
 
     <div class="setting-row">
@@ -188,30 +247,9 @@ function onThemeChange(event: Event) {
   font-size: var(--font-sm);
   color: var(--text-dim);
 }
-.setting-select {
-  appearance: none;
-  -webkit-appearance: none;
-  height: 22px;
-  border: 1px solid var(--border);
-  border-radius: 5px;
-  background-color: var(--bg-app);
-  color: var(--text);
-  font-size: var(--font-md);
-  padding: 0 22px 0 8px;
-  cursor: pointer;
-  outline: none;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 10 10'%3E%3Cpath d='M2 3.5L5 6.5L8 3.5' fill='none' stroke='%239aa0a8' stroke-width='1.4' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
-  background-repeat: no-repeat;
-  background-position: right 6px center;
-  background-size: 8px;
-}
-.setting-select:hover,
-.setting-select:focus-visible {
-  border-color: var(--accent);
-}
-/* Same chevron swap as PanelShell: the data URI can't read CSS vars. */
-[data-theme="light"] .setting-select {
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 10 10'%3E%3Cpath d='M2 3.5L5 6.5L8 3.5' fill='none' stroke='%23656d76' stroke-width='1.4' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+/* 设置行的统一下拉（DropdownMenu 组件），宽度对齐原生 select 时代 */
+.setting-dd {
+  width: 110px;
 }
 .setting-btn {
   border: 1px solid var(--border);
@@ -226,6 +264,31 @@ function onThemeChange(event: Event) {
 .setting-btn:hover {
   border-color: var(--accent);
   color: var(--accent);
+}
+.setting-btn:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+/* 「打开方式」：应用名输入 + 原生选择器并排（宽度上限，免得太长挤掉说明文字） */
+.setting-open-with {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+}
+.setting-input {
+  width: 190px;
+  height: 24px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--bg-app);
+  color: var(--text);
+  font-size: var(--font-md);
+  outline: none;
+}
+.setting-input:focus {
+  border-color: var(--accent);
 }
 .setting-check {
   width: 15px;

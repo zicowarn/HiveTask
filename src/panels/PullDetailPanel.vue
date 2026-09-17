@@ -11,6 +11,7 @@ import { useI18n } from "../i18n";
 import { openExternalUrl } from "../open-url";
 import { reviewLabel } from "./review-label";
 import { stateLabel } from "./state-label";
+import { openOnLabel } from "./platform-label";
 import { useCloseReopen } from "./close-reopen";
 import MergeDialog from "./MergeDialog.vue";
 import BranchReviewDetail from "./modes/BranchReviewDetail.vue";
@@ -24,6 +25,8 @@ const { t } = useI18n();
 
 /** 本地仓库 → 分支 review 详情（PR 的本地投影）。 */
 const isLocal = computed(() => repo.platform === "local");
+
+const openBtnLabel = computed(() => openOnLabel(repo.platform));
 
 const {
   armed: closeArmed,
@@ -151,8 +154,12 @@ function hasVisibleBody(body?: string | null): boolean {
             　·　{{ t("common.reviewers", { name: selected.reviewers.join(", ") }) }}
           </template>
         </div>
-        <button v-if="selected.url" class="open-github" @click="openExternalUrl(selected.url)">
-          {{ t("common.openInGithub") }}
+        <button
+          v-if="selected.url && openBtnLabel"
+          class="open-github"
+          @click="openExternalUrl(selected.url)"
+        >
+          {{ openBtnLabel }}
         </button>
       </footer>
     </template>

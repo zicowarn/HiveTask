@@ -73,7 +73,23 @@ CSS 变量，因此在 `[data-theme="light"]` 下覆盖 `background-image` 换�
 - **状态栏单元格**：全高、hover 反白高亮；可点击的用 `button.status-cell`
   （语言轮换、仓库切换），只读的用 `span`。示范：`StatusBar.vue`。
 
-## 4. 待统一（技术债登记处）
+## 4. 下拉菜单
+
+**规则：全应用唯一下拉形态 = `src/components/DropdownMenu.vue`。** 禁止
+原生 `<select>`（系统渐变弹层、语言不随应用 i18n）与自绘 `*-menu` 变体。
+
+- 触发器：22px 描边小盒 + 右 chevron（语言选择器原 `setting-select` 的
+  观感，组件已内置亮暗 chevron 适配）；
+- 面板：`--bg-panel` 纯色 + 1px 边框 + 浅投影，✓ 勾选行，`--bg-hover`
+  悬停；无渐变；
+- 单选即选即关；`multiple` 保持展开；外部点击 / Esc 关闭组件自管；
+- 例外：`input[type=date]` / `input[type=color]` 为系统原生控件。
+
+示范：`src/components/DropdownMenu.vue`（组件本体）、
+`SettingsBasicMode.vue`（单选三例）、`IssueCreateDialog.vue` 侧栏
+（多选 + 色点选项）。
+
+## 5. 待统一（技术债登记处）
 
 - [ ] ☀/☾ 主题按钮仍是字符符号（字形尚饱满，暂可接受）→ 换 Octicons
       sun/moon-16，随主题切换图标。

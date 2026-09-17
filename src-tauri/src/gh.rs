@@ -89,6 +89,35 @@ fn run_gh(args: &[&str]) -> Result<String> {
     Ok(String::from_utf8_lossy(&output.stdout).into_owned())
 }
 
+/// 与 run_gh 同，但把 body 写进子进程 stdin（`gh api graphql --input -`）。
+/// GraphQL 的 variables 是嵌套对象，只能整包 JSON 传——`-f variables=…` 传的是字符串，
+/// 服务端会以 `Variable $input … was provided invalid value` 拒绝。
+fn run_gh_stdin(args: &[&str], body: &str) -> Result<String> {
+    use std::io::Write;
+    let gh = find_gh().ok_or_else(|| {
+        anyhow!("找不到 gh CLI，请先安装并执行 `gh auth login`（macOS: brew install gh）")
+    })?;
+    let mut child = Command::new(gh)
+        .args(args)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .with_context(|| "启动 gh 失败".to_string())?;
+    child
+        .stdin
+        .as_mut()
+        .ok_or_else(|| anyhow!("无法写入 gh stdin"))?
+        .write_all(body.as_bytes())
+        .context("写入 gh stdin 失败")?;
+    let output = child.wait_with_output().context("等待 gh 结束失败")?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        return Err(anyhow!("gh 退出码 {:?}: {stderr}", output.status.code()));
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+}
+
 pub fn gh_version() -> Option<String> {
     let gh = find_gh()?;
     let output = Command::new(gh).arg("--version").output().ok()?;
@@ -116,8 +145,14 @@ impl Source for GhSource {
     fn add_comment(&self, repo: &RepoRef, kind: Kind, number: &str, body: &str) -> Result<Vec<Comment>> {
         add_comment(&format!("{}/{}", repo.owner, repo.repo), kind, number, body)
     }
-    fn set_issue_state(&self, repo: &RepoRef, number: &str, closed: bool) -> Result<Issue> {
-        set_issue_state(&format!("{}/{}", repo.owner, repo.repo), number, closed)
+    fn set_issue_state(&self, repo: &RepoRef, number: &str, closed: bool, reason: Option<&str>) -> Result<Issue> {
+        set_issue_state(&format!("{}/{}", repo.owner, repo.repo), number, closed, reason)
+    }
+    fn set_issue_locked(&self, repo: &RepoRef, number: &str, locked: bool) -> Result<()> {
+        set_issue_locked(&format!("{}/{}", repo.owner, repo.repo), number, locked)
+    }
+    fn delete_issue(&self, repo: &RepoRef, number: &str) -> Result<()> {
+        delete_issue(&format!("{}/{}", repo.owner, repo.repo), number)
     }
     fn set_pull_state(&self, repo: &RepoRef, number: &str, closed: bool) -> Result<Pull> {
         set_pull_state(&format!("{}/{}", repo.owner, repo.repo), number, closed)
@@ -128,8 +163,29 @@ impl Source for GhSource {
     fn repo_visibility(&self, repo: &RepoRef) -> Result<&'static str> {
         repo_visibility(&format!("{}/{}", repo.owner, repo.repo))
     }
-    fn create_issue(&self, repo: &RepoRef, title: &str, body: Option<&str>, milestone: Option<&str>) -> Result<Issue> {
-        create_issue(&format!("{}/{}", repo.owner, repo.repo), title, body, milestone)
+    fn create_issue(&self, repo: &RepoRef, title: &str, body: Option<&str>, milestone: Option<&str>, labels: &[String], assignees: &[String]) -> Result<Issue> {
+        create_issue(&format!("{}/{}", repo.owner, repo.repo), title, body, milestone, labels, assignees)
+    }
+    fn list_labels(&self, repo: &RepoRef) -> Result<Vec<crate::models::LabelInfo>> {
+        list_labels(&format!("{}/{}", repo.owner, repo.repo))
+    }
+    fn list_assignees(&self, repo: &RepoRef) -> Result<Vec<String>> {
+        list_assignees(&format!("{}/{}", repo.owner, repo.repo))
+    }
+    fn create_label(&self, repo: &RepoRef, name: &str, color: &str) -> Result<crate::models::LabelInfo> {
+        create_label(&format!("{}/{}", repo.owner, repo.repo), name, color)
+    }
+    fn update_issue(&self, repo: &RepoRef, number: &str, title: &str, body: Option<&str>) -> Result<Issue> {
+        update_issue(&format!("{}/{}", repo.owner, repo.repo), number, title, body)
+    }
+    fn update_issue_milestone(&self, repo: &RepoRef, number: &str, milestone: Option<&str>) -> Result<Issue> {
+        update_issue_milestone(&format!("{}/{}", repo.owner, repo.repo), number, milestone)
+    }
+    fn update_issue_labels(&self, repo: &RepoRef, number: &str, labels: &[String]) -> Result<Issue> {
+        update_issue_labels(&format!("{}/{}", repo.owner, repo.repo), number, labels)
+    }
+    fn update_issue_assignees(&self, repo: &RepoRef, number: &str, assignees: &[String]) -> Result<Issue> {
+        update_issue_assignees(&format!("{}/{}", repo.owner, repo.repo), number, assignees)
     }
     fn create_milestone(&self, repo: &RepoRef, title: &str, due_on: Option<&str>, description: Option<&str>) -> Result<String> {
         create_milestone(&format!("{}/{}", repo.owner, repo.repo), title, due_on, description)
@@ -142,6 +198,12 @@ impl Source for GhSource {
     }
     fn list_milestones(&self, repo: &RepoRef) -> Result<Vec<crate::models::MilestoneInfo>> {
         list_milestones(&format!("{}/{}", repo.owner, repo.repo))
+    }
+    fn set_milestone_state(&self, repo: &RepoRef, number: i64, closed: bool) -> Result<crate::models::MilestoneInfo> {
+        set_milestone_state(&format!("{}/{}", repo.owner, repo.repo), number, closed)
+    }
+    fn update_milestone(&self, repo: &RepoRef, number: i64, title: &str, description: Option<&str>, due_on: Option<&str>) -> Result<crate::models::MilestoneInfo> {
+        update_milestone(&format!("{}/{}", repo.owner, repo.repo), number, title, description, due_on)
     }
 }
 
@@ -379,6 +441,305 @@ fn merge_pull(slug: &str, number: &str, method: MergeMethod) -> Result<Pull> {
 
 /// 线上仓库清单（gh 托管账户，`gh repo list`）——「刷新从线上查找」的
 /// GitHub 实现。url 即 https 仓库地址，可直接用于仅远端登记。
+/// 线上 ProjectsV2 清单（GitHub Projects）：viewer 名下按最近更新排序。
+/// 需要 token 具备 `read:project` scope——缺失时把官方提示透传为可读错误。
+pub fn list_user_projects(limit: u32) -> Result<Vec<RemoteProject>> {
+    let limit = limit.clamp(1, 100).to_string();
+    let query = format!(
+        "query{{viewer{{projectsV2(first:{limit},orderBy:{{field:UPDATED_AT,direction:DESC}}){{totalCount nodes{{number title url closed}}}}}}}}"
+    );
+    let stdout = run_gh(&["api", "graphql", "-f", &format!("query={query}")])?;
+    let v: Value = serde_json::from_str(&stdout).context("解析 gh api graphql 的 JSON 输出失败")?;
+    if let Some(errs) = v.get("errors") {
+        let msg = errs
+            .as_array()
+            .and_then(|a| a.first())
+            .and_then(|e| e.get("message"))
+            .and_then(|m| m.as_str())
+            .unwrap_or("未知 GraphQL 错误");
+        if msg.contains("read:project") {
+            anyhow::bail!("当前 gh 凭据缺少 read:project 授权：请在 GitHub → Settings → Developer settings → Personal access tokens 为 gh 的令牌勾选 read:project 后重试");
+        }
+        anyhow::bail!("拉取线上项目失败：{msg}");
+    }
+    let nodes = v
+        .pointer("/data/viewer/projectsV2/nodes")
+        .and_then(Value::as_array)
+        .context("GraphQL 返回缺少 projectsV2.nodes")?;
+    Ok(nodes
+        .iter()
+        .filter_map(|n| {
+            Some(RemoteProject {
+                number: n.get("number")?.as_i64()? as u32,
+                title: n.get("title")?.as_str()?.to_string(),
+                url: n.get("url")?.as_str()?.to_string(),
+                closed: n.get("closed")?.as_bool()?,
+            })
+        })
+        .collect())
+}
+
+/// 线上 ProjectsV2 项目条目（清单用；绑定/导入在后续迭代）。
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoteProject {
+    pub number: u32,
+    pub title: String,
+    pub url: String,
+    pub closed: bool,
+}
+
+/// 线上 ProjectsV2 的条目（Issue/PR 引用 + 单选字段值名）。
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoteProjectItem {
+    /// "zicowarn/PDFReferencev17CN"；草稿条目为 None。
+    pub repo_full_name: Option<String>,
+    pub number: Option<u32>,
+    pub title: Option<String>,
+    pub state: Option<String>,
+    /// 字段名 → 值（单选给选项名如 "Done"/"P0"；数字/文本/日期给其文本形式）。
+    pub values: std::collections::BTreeMap<String, String>,
+}
+
+/// 线上 ProjectsV2 的单选字段定义（列设置的真源：名称 + 选项 + 颜色/说明）。
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoteProjectField {
+    /// 线上字段 id（发布本地列时需要）。
+    pub id: Option<String>,
+    pub name: String,
+    /// 线上字段类型（SINGLE_SELECT / NUMBER / TEXT / DATE …）；单选字段为 None（由 options 判定）。
+    pub data_type: Option<String>,
+    pub options: Vec<RemoteFieldOption>,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoteFieldOption {
+    pub name: String,
+    /// 平台色名（GRAY/BLUE/GREEN/YELLOW/ORANGE/RED/PINK/PURPLE）。
+    pub color: String,
+    pub description: Option<String>,
+}
+
+/// 项目快照：条目 + 字段定义（列设置）一次拉齐。
+pub struct ProjectSnapshot {
+    pub items: Vec<RemoteProjectItem>,
+    pub fields: Vec<RemoteProjectField>,
+}
+
+/// 拉取线上 ProjectsV2 的条目（owner_kind = "user" | "org"）。
+pub fn fetch_project_items(
+    owner_kind: &str,
+    owner: &str,
+    number: u32,
+    limit: u32,
+) -> Result<ProjectSnapshot> {
+    let limit = limit.clamp(1, 200);
+    let owner_field = if owner_kind == "org" { "organization" } else { "user" };
+    let query = format!(
+        "query{{ {owner_field}(login:\"{owner}\"){{ projectV2(number:{number}){{ items(first:{limit}){{ nodes{{ \
+         content{{ ... on Issue {{ number title state repository{{ nameWithOwner }} }} \
+                   ... on PullRequest {{ number title state repository{{ nameWithOwner }} }} \
+                   ... on DraftIssue {{ title }} }} \
+         fieldValues(first:30){{ nodes{{ \
+           ... on ProjectV2ItemFieldSingleSelectValue {{ name field{{ ... on ProjectV2SingleSelectField {{ name }} }} }} \
+           ... on ProjectV2ItemFieldNumberValue {{ number field{{ ... on ProjectV2FieldCommon {{ name }} }} }} \
+           ... on ProjectV2ItemFieldTextValue {{ text field{{ ... on ProjectV2FieldCommon {{ name }} }} }} \
+           ... on ProjectV2ItemFieldDateValue {{ date field{{ ... on ProjectV2FieldCommon {{ name }} }} }} \
+         }} }} }} }} \
+         fields(first:30){{ nodes{{ \
+           ... on ProjectV2SingleSelectField {{ id name options{{ name color description }} }} \
+           ... on ProjectV2FieldCommon {{ id name dataType }} \
+         }} }} }} }} }}"
+    );
+    let stdout = run_gh(&["api", "graphql", "-f", &format!("query={query}")])?;
+    let v: Value = serde_json::from_str(&stdout).context("解析 gh api graphql 的 JSON 输出失败")?;
+    if let Some(errs) = v.get("errors") {
+        let msg = errs
+            .as_array()
+            .and_then(|a| a.first())
+            .and_then(|e| e.get("message"))
+            .and_then(|m| m.as_str())
+            .unwrap_or("未知 GraphQL 错误");
+        if msg.contains("read:project") {
+            anyhow::bail!("当前 gh 凭据缺少 read:project 授权：在 GitHub 为 gh 令牌勾选该权限后重试");
+        }
+        anyhow::bail!("拉取项目条目失败：{msg}");
+    }
+    let fields = v
+        .pointer(&format!("/data/{owner_field}/projectV2/fields/nodes"))
+        .and_then(Value::as_array)
+        .map(|ns| {
+            ns.iter()
+                .filter_map(|f| {
+                    let name = f.get("name")?.as_str()?.to_string();
+                    // 单选字段有 options；数字/文本/日期字段没有（空表）
+                    let options = f
+                        .get("options")
+                        .and_then(Value::as_array)
+                        .map(Vec::as_slice)
+                        .unwrap_or(&[])
+                        .iter()
+                        .filter_map(|o| {
+                            Some(RemoteFieldOption {
+                                name: o.get("name")?.as_str()?.to_string(),
+                                color: o.get("color").and_then(Value::as_str).unwrap_or("GRAY").to_string(),
+                                description: o
+                                    .get("description")
+                                    .and_then(Value::as_str)
+                                    .filter(|d| !d.trim().is_empty())
+                                    .map(str::to_string),
+                            })
+                        })
+                        .collect::<Vec<_>>();
+                    Some(RemoteProjectField {
+                        id: f.get("id").and_then(Value::as_str).map(str::to_string),
+                        name,
+                        data_type: f.get("dataType").and_then(Value::as_str).map(str::to_string),
+                        options,
+                    })
+                })
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    let nodes = v
+        .pointer(&format!("/data/{owner_field}/projectV2/items/nodes"))
+        .and_then(Value::as_array)
+        .context("GraphQL 返回缺少 items.nodes")?;
+    Ok(snapshot(nodes, fields))
+}
+
+/// 组装快照（条目 + 字段）。
+fn snapshot(nodes: &[Value], fields: Vec<RemoteProjectField>) -> ProjectSnapshot {
+    let items = nodes
+        .iter()
+        .map(|n| {
+            let content = n.get("content").unwrap_or(&Value::Null);
+            let mut values = std::collections::BTreeMap::new();
+            if let Some(fv) = content
+                .get("fieldValues")
+                .or_else(|| n.get("fieldValues"))
+                .and_then(|f| f.get("nodes"))
+                .and_then(Value::as_array)
+            {
+                for item in fv {
+                    let field = match item.pointer("/field/name").and_then(Value::as_str) {
+                        Some(f) => f,
+                        None => continue,
+                    };
+                    // 单选给选项名；数字给数值（2.0 → "2"）；文本/日期给原文
+                    let value = item
+                        .get("name")
+                        .and_then(Value::as_str)
+                        .map(str::to_string)
+                        .or_else(|| {
+                            item.get("number").and_then(Value::as_f64).map(|n| {
+                                if n.fract() == 0.0 {
+                                    format!("{}", n as i64)
+                                } else {
+                                    format!("{n}")
+                                }
+                            })
+                        })
+                        .or_else(|| item.get("text").and_then(Value::as_str).map(str::to_string))
+                        .or_else(|| item.get("date").and_then(Value::as_str).map(str::to_string));
+                    if let Some(val) = value {
+                        values.insert(field.to_string(), val);
+                    }
+                }
+            }
+            RemoteProjectItem {
+                repo_full_name: content
+                    .pointer("/repository/nameWithOwner")
+                    .and_then(Value::as_str)
+                    .map(str::to_string),
+                number: content.get("number").and_then(Value::as_i64).map(|n| n as u32),
+                title: content.get("title").and_then(Value::as_str).map(str::to_string),
+                state: content.get("state").and_then(Value::as_str).map(str::to_string),
+                values,
+            }
+        })
+        .collect();
+    ProjectSnapshot { items, fields }
+}
+
+/// 把一组单选选项发布到线上项目字段（整表替换：updateProjectV2Field）。
+/// 需要 `project` 写权限（read:project 不够）——不足时给可读指引。
+pub fn publish_field_options(
+    owner_kind: &str,
+    owner: &str,
+    number: u32,
+    field_name: &str,
+    options: &[(String, String, Option<String>)],
+) -> Result<()> {
+    let owner_field = if owner_kind == "org" { "organization" } else { "user" };
+    // ① 找线上字段 id
+    let q = format!(
+        "query{{ {owner_field}(login:\"{owner}\"){{ projectV2(number:{number}){{ fields(first:20){{ nodes{{ ... on ProjectV2SingleSelectField {{ id name }} }} }} }} }} }}"
+    );
+    let out = run_gh(&["api", "graphql", "-f", &format!("query={q}")])?;
+    let v: Value = serde_json::from_str(&out).context("解析字段查询失败")?;
+    let field_id = v
+        .pointer(&format!("/data/{owner_field}/projectV2/fields/nodes"))
+        .and_then(Value::as_array)
+        .and_then(|ns| {
+            ns.iter().find(|n| {
+                n.get("name")
+                    .and_then(Value::as_str)
+                    .map(|m| m.eq_ignore_ascii_case(field_name))
+                    .unwrap_or(false)
+            })
+        })
+        .and_then(|n| n.get("id"))
+        .and_then(Value::as_str)
+        .map(str::to_string)
+        .ok_or_else(|| anyhow::anyhow!("线上项目没有名为 {field_name} 的字段"))?;
+
+    // ② 整表替换选项
+    let opts = options
+        .iter()
+        .map(|(name, color, desc)| {
+            serde_json::json!({
+                "name": name,
+                "color": color,
+                "description": desc.clone().unwrap_or_default(),
+            })
+        })
+        .collect::<Vec<_>>();
+    let payload = serde_json::json!({
+        "query": "mutation($input: UpdateProjectV2FieldInput!){ updateProjectV2Field(input: $input){ projectV2Field { ... on ProjectV2SingleSelectField { id } } } }",
+        "variables": { "input": { "fieldId": field_id, "singleSelectOptions": opts } }
+    });
+    let body = serde_json::to_string(&payload).context("序列化发布请求失败")?;
+    let out = run_gh_stdin(&["api", "graphql", "--input", "-"], &body).map_err(|e| {
+        let msg = e.to_string();
+        if msg.contains("scope") || msg.contains("INSUFFICIENT_SCOPES") {
+            anyhow::anyhow!(
+                "发布列需要 gh 令牌的 project 权限：执行 `gh auth refresh -h github.com -s project` 后重试"
+            )
+        } else {
+            e
+        }
+    })?;
+    if let Ok(v2) = serde_json::from_str::<Value>(&out) {
+        if let Some(errs) = v2.get("errors") {
+            let msg = errs
+                .as_array()
+                .and_then(|a| a.first())
+                .and_then(|e| e.get("message"))
+                .and_then(|m| m.as_str())
+                .unwrap_or("未知 GraphQL 错误");
+            if msg.contains("project") && (msg.contains("scope") || msg.contains("INSUFFICIENT")) {
+                anyhow::bail!("发布列需要 project 写权限：请为 gh 令牌补 project scope 后重试");
+            }
+            anyhow::bail!("发布列失败：{msg}");
+        }
+    }
+    Ok(())
+}
+
 pub fn list_user_repos(limit: u32) -> Result<Vec<crate::source::RemoteRepoInfo>> {
     let limit = limit.clamp(1, 200).to_string();
     let args = [
@@ -445,7 +806,7 @@ pub(crate) fn normalize_due_date(d: &str) -> String {
 }
 
 /// 创建 Issue：gh issue create → 解析编号 → view 取全量实体。
-fn create_issue(slug: &str, title: &str, body: Option<&str>, milestone: Option<&str>) -> Result<Issue> {
+fn create_issue(slug: &str, title: &str, body: Option<&str>, milestone: Option<&str>, labels: &[String], assignees: &[String]) -> Result<Issue> {
     let mut args = vec![
         "issue".to_string(),
         "create".to_string(),
@@ -462,6 +823,15 @@ fn create_issue(slug: &str, title: &str, body: Option<&str>, milestone: Option<&
         args.push("--milestone".to_string());
         args.push(m.to_string());
     }
+    // gh 的 --label/--assignee 接受逗号分隔清单
+    if !labels.is_empty() {
+        args.push("--label".to_string());
+        args.push(labels.join(","));
+    }
+    if !assignees.is_empty() {
+        args.push("--assignee".to_string());
+        args.push(assignees.join(","));
+    }
     let arg_refs: Vec<&str> = args.iter().map(String::as_str).collect();
     let out = run_gh(&arg_refs)?;
     let number = parse_created_number(&out).ok_or_else(|| anyhow!("无法从创建输出解析编号: {}", out.trim()))?;
@@ -469,6 +839,144 @@ fn create_issue(slug: &str, title: &str, body: Option<&str>, milestone: Option<&
     let stdout = run_gh(&args)?;
     let value: Value = serde_json::from_str(&stdout).context("解析 gh issue view 的 JSON 输出失败")?;
     Ok(parse_issue_value(&value))
+}
+
+/// 仓库标签清单（创建 Issue 侧栏候选）。
+fn list_labels(slug: &str) -> Result<Vec<crate::models::LabelInfo>> {
+    let args = ["api", &format!("repos/{slug}/labels?per_page=100")];
+    let out = run_gh(&args)?;
+    let values: Vec<Value> = serde_json::from_str(&out).context("解析标签清单失败")?;
+    Ok(values
+        .iter()
+        .map(|v| crate::models::LabelInfo {
+            id: v.get("id").and_then(Value::as_i64).unwrap_or(0),
+            name: v.get("name").and_then(Value::as_str).unwrap_or_default().to_string(),
+            color: v.get("color").and_then(Value::as_str).map(str::to_string),
+        })
+        .collect())
+}
+
+/// 可指派用户清单（创建 Issue 侧栏候选）。
+fn list_assignees(slug: &str) -> Result<Vec<String>> {
+    let args = ["api", &format!("repos/{slug}/assignees?per_page=100"), "--jq", ".[].login"];
+    let out = run_gh(&args)?;
+    Ok(out.lines().map(str::trim).filter(|l| !l.is_empty()).map(String::from).collect())
+}
+
+/// 新建仓库标签（GitHub 色值不带 # 前缀）。
+fn create_label(slug: &str, name: &str, color: &str) -> Result<crate::models::LabelInfo> {
+    let args = [
+        "api",
+        "--method",
+        "POST",
+        &format!("repos/{slug}/labels"),
+        "-f",
+        &format!("name={}", name.trim()),
+        "-f",
+        &format!("color={}", color.trim_start_matches('#')),
+    ];
+    let out = run_gh(&args)?;
+    let value: Value = serde_json::from_str(&out).context("解析标签创建响应失败")?;
+    Ok(crate::models::LabelInfo {
+        id: value.get("id").and_then(Value::as_i64).unwrap_or(0),
+        name: value.get("name").and_then(Value::as_str).unwrap_or_default().to_string(),
+        color: value.get("color").and_then(Value::as_str).map(str::to_string),
+    })
+}
+
+/// issue view 回读全量（三个 update_* 写穿透共用）。
+fn view_issue(slug: &str, number: &str) -> Result<Issue> {
+    let args = ["issue", "view", number, "--repo", slug, "--json", ISSUE_LIST_FIELDS];
+    let stdout = run_gh(&args)?;
+    let value: Value = serde_json::from_str(&stdout).context("解析 gh issue view 的 JSON 输出失败")?;
+    Ok(parse_issue_value(&value))
+}
+
+/// 编辑 Issue 标题/正文：gh issue edit → issue view 回读全量（写穿透）。
+fn update_issue(slug: &str, number: &str, title: &str, body: Option<&str>) -> Result<Issue> {
+    let mut args = vec![
+        "issue".to_string(),
+        "edit".to_string(),
+        number.to_string(),
+        "-R".to_string(),
+        slug.to_string(),
+        "--title".to_string(),
+        title.trim().to_string(),
+    ];
+    if let Some(b) = body {
+        args.push("--body".to_string());
+        args.push(b.trim().to_string());
+    }
+    let arg_refs: Vec<&str> = args.iter().map(String::as_str).collect();
+    run_gh(&arg_refs)?;
+    view_issue(slug, number)
+}
+
+/// 挂/清里程碑：gh issue edit --milestone（空串 = 清除）→ 回读。
+fn update_issue_milestone(slug: &str, number: &str, milestone: Option<&str>) -> Result<Issue> {
+    let name = milestone.map(str::trim).unwrap_or_default();
+    run_gh(&["issue", "edit", number, "--repo", slug, "--milestone", name])?;
+    view_issue(slug, number)
+}
+
+/// 整体替换标签：PUT issues/{n}/labels（gh api 数组字段）→ 回读。
+fn update_issue_labels(slug: &str, number: &str, labels: &[String]) -> Result<Issue> {
+    if labels.is_empty() {
+        run_gh(&[
+            "api",
+            "--method",
+            "PUT",
+            &format!("repos/{slug}/issues/{number}/labels"),
+            "-F",
+            "labels=[]",
+        ])?;
+    } else {
+        let mut args = vec![
+            "api".to_string(),
+            "--method".to_string(),
+            "PUT".to_string(),
+            format!("repos/{slug}/issues/{number}/labels"),
+        ];
+        for l in labels {
+            if !l.trim().is_empty() {
+                args.push("-f".to_string());
+                args.push(format!("labels[]={}", l.trim()));
+            }
+        }
+        let arg_refs: Vec<&str> = args.iter().map(String::as_str).collect();
+        run_gh(&arg_refs)?;
+    }
+    view_issue(slug, number)
+}
+
+/// 整体替换负责人：PUT issues/{n}/assignees → 回读。
+fn update_issue_assignees(slug: &str, number: &str, assignees: &[String]) -> Result<Issue> {
+    if assignees.is_empty() {
+        run_gh(&[
+            "api",
+            "--method",
+            "DELETE",
+            &format!("repos/{slug}/issues/{number}/assignees"),
+            "-F",
+            "assignees=[]",
+        ])?;
+    } else {
+        let mut args = vec![
+            "api".to_string(),
+            "--method".to_string(),
+            "PUT".to_string(),
+            format!("repos/{slug}/issues/{number}/assignees"),
+        ];
+        for a in assignees {
+            if !a.trim().is_empty() {
+                args.push("-f".to_string());
+                args.push(format!("assignees[]={}", a.trim()));
+            }
+        }
+        let arg_refs: Vec<&str> = args.iter().map(String::as_str).collect();
+        run_gh(&arg_refs)?;
+    }
+    view_issue(slug, number)
 }
 
 /// 创建 PR：gh pr create → 解析编号 → pr view 取全量。
@@ -500,16 +1008,66 @@ fn list_milestones(slug: &str) -> Result<Vec<crate::models::MilestoneInfo>> {
     let args = ["api", &format!("repos/{slug}/milestones?state=all&per_page=100")];
     let out = run_gh(&args)?;
     let values: Vec<Value> = serde_json::from_str(&out).context("解析里程碑清单失败")?;
-    Ok(values
-        .iter()
-        .map(|v| crate::models::MilestoneInfo {
-            title: v.get("title").and_then(Value::as_str).unwrap_or_default().to_string(),
-            due_on: v.get("due_on").and_then(Value::as_str).map(str::to_string),
-            state: v.get("state").and_then(Value::as_str).unwrap_or("open").to_string(),
-            open_issues: v.get("open_issues").and_then(Value::as_i64).unwrap_or(0),
-            closed_issues: v.get("closed_issues").and_then(Value::as_i64).unwrap_or(0),
-        })
-        .collect())
+    Ok(values.iter().map(parse_milestone_value).collect())
+}
+
+/// 里程碑 REST JSON → MilestoneInfo（清单与写穿透回读共用）。
+fn parse_milestone_value(v: &Value) -> crate::models::MilestoneInfo {
+    crate::models::MilestoneInfo {
+        number: v.get("number").and_then(Value::as_i64).unwrap_or(0),
+        title: v.get("title").and_then(Value::as_str).unwrap_or_default().to_string(),
+        description: v.get("description").and_then(Value::as_str).map(str::to_string),
+        due_on: v.get("due_on").and_then(Value::as_str).map(str::to_string),
+        state: v.get("state").and_then(Value::as_str).unwrap_or("open").to_string(),
+        open_issues: v.get("open_issues").and_then(Value::as_i64).unwrap_or(0),
+        closed_issues: v.get("closed_issues").and_then(Value::as_i64).unwrap_or(0),
+        html_url: v.get("html_url").and_then(Value::as_str).map(str::to_string),
+    }
+}
+
+/// 切换里程碑开启/关闭：PATCH state → 返回平台确认的全量元数据。
+fn set_milestone_state(slug: &str, number: i64, closed: bool) -> Result<crate::models::MilestoneInfo> {
+    let args = [
+        "api",
+        "--method",
+        "PATCH",
+        &format!("repos/{slug}/milestones/{number}"),
+        "-f",
+        &format!("state={}", if closed { "closed" } else { "open" }),
+    ];
+    let out = run_gh(&args)?;
+    let value: Value = serde_json::from_str(&out).context("解析里程碑状态更新响应失败")?;
+    Ok(parse_milestone_value(&value))
+}
+
+/// 编辑里程碑名称/描述/截止日：PATCH → 返回平台确认的全量元数据。
+fn update_milestone(
+    slug: &str,
+    number: i64,
+    title: &str,
+    description: Option<&str>,
+    due_on: Option<&str>,
+) -> Result<crate::models::MilestoneInfo> {
+    let mut args = vec![
+        "api".to_string(),
+        "--method".to_string(),
+        "PATCH".to_string(),
+        format!("repos/{slug}/milestones/{number}"),
+        "-f".to_string(),
+        format!("title={}", title.trim()),
+    ];
+    if let Some(d) = description {
+        args.push("-f".to_string());
+        args.push(format!("description={}", d.trim()));
+    }
+    if let Some(d) = due_on {
+        args.push("-f".to_string());
+        args.push(format!("due_on={}", normalize_due_date(d)));
+    }
+    let arg_refs: Vec<&str> = args.iter().map(String::as_str).collect();
+    let out = run_gh(&arg_refs)?;
+    let value: Value = serde_json::from_str(&out).context("解析里程碑编辑响应失败")?;
+    Ok(parse_milestone_value(&value))
 }
 
 /// 创建里程碑本体（gh api POST 表单字段）。
@@ -546,15 +1104,42 @@ fn remote_branches(slug: &str) -> Result<Vec<String>> {
 }
 
 /// Close or reopen an issue; returns the fresh entity for store patching.
-fn set_issue_state(slug: &str, number: &str, closed: bool) -> Result<Issue> {
-    let verb = if closed { "close" } else { "reopen" };
-    let args = ["issue", verb, number, "--repo", slug];
-    run_gh(&args)?;
-    let args = ["issue", "view", number, "--repo", slug, "--json", ISSUE_LIST_FIELDS];
-    let stdout = run_gh(&args)?;
-    let value: Value =
-        serde_json::from_str(&stdout).context("解析 gh issue view 的 JSON 输出失败")?;
-    Ok(parse_issue_value(&value))
+/// reason ∈ completed | "not planned" | duplicate（gh issue close -r）。
+fn set_issue_state(slug: &str, number: &str, closed: bool, reason: Option<&str>) -> Result<Issue> {
+    if closed {
+        let mut args = vec![
+            "issue".to_string(),
+            "close".to_string(),
+            number.to_string(),
+            "--repo".to_string(),
+            slug.to_string(),
+        ];
+        if let Some(r) = reason.map(str::trim).filter(|s| !s.is_empty()) {
+            args.push("-r".to_string());
+            args.push(r.to_string());
+        }
+        let arg_refs: Vec<&str> = args.iter().map(String::as_str).collect();
+        run_gh(&arg_refs)?;
+    } else {
+        run_gh(&["issue", "reopen", number, "--repo", slug])?;
+    }
+    view_issue(slug, number)
+}
+
+/// 锁定/解锁讨论：REST issues/{n}/lock（PUT 上锁、DELETE 解锁）。
+fn set_issue_locked(slug: &str, number: &str, locked: bool) -> Result<()> {
+    if locked {
+        run_gh(&["api", "--method", "PUT", &format!("repos/{slug}/issues/{number}/lock")])?;
+    } else {
+        run_gh(&["api", "--method", "DELETE", &format!("repos/{slug}/issues/{number}/lock")])?;
+    }
+    Ok(())
+}
+
+/// 删除 Issue：REST DELETE（需仓库管理员，204 即成功）。
+fn delete_issue(slug: &str, number: &str) -> Result<()> {
+    run_gh(&["api", "--method", "DELETE", &format!("repos/{slug}/issues/{number}")])?;
+    Ok(())
 }
 
 /// Close or reopen a pull request; returns the fresh full record so a close

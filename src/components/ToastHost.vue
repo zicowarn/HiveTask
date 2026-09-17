@@ -7,6 +7,12 @@
  */
 import { toasts, dismissToast } from "../toast";
 
+/** 动作按钮：先执行再关掉这条（撤销这类操作要立刻可见结果）。 */
+function runAction(toast: { id: number; action?: { run: () => void } }): void {
+  toast.action?.run();
+  dismissToast(toast.id);
+}
+
 const kindIcon: Record<string, string> = {
   error: "✕",
   info: "ℹ",
@@ -32,6 +38,9 @@ const kindIcon: Record<string, string> = {
               {{ toast.detail }}
             </p>
           </div>
+          <button v-if="toast.action" class="toast-action" @click="runAction(toast)">
+            {{ toast.action.label }}
+          </button>
           <button class="toast-close" :aria-label="'关闭'" @click="dismissToast(toast.id)">✕</button>
         </div>
       </TransitionGroup>
@@ -86,6 +95,21 @@ const kindIcon: Record<string, string> = {
 }
 .toast.success .toast-icon {
   color: var(--success);
+}
+.toast-action {
+  flex: none;
+  align-self: center;
+  height: 20px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+  font-size: var(--font-sm);
+  cursor: pointer;
+}
+.toast-action:hover {
+  background: var(--bg-hover);
 }
 .toast-body {
   flex: 1;

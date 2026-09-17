@@ -89,7 +89,9 @@ onBeforeUnmount(() => {
 <style scoped>
 .editor-switcher {
   position: relative;
-  min-width: 0;
+  /* 固定尺寸：不得被页签条挤压。一旦这个盒子收缩，里面的按钮会溢出自身边界，
+     把与右侧的间隙"吃掉"——实机截图里切换器与方向按钮贴住就是这个原因。 */
+  flex: none;
 }
 .switcher-btn {
   display: inline-flex;

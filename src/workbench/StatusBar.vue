@@ -12,15 +12,17 @@
  * Reachability is tracked passively (gh roundtrip outcomes); clicking the
  * cell runs one user-initiated probe.
  */
-import { computed } from "vue";
+import { computed, nextTick, ref } from "vue";
 import { storeToRefs } from "pinia";
 import { useRepoStore } from "../stores/repo";
 import { useIssuesStore } from "../stores/issues";
 import { usePullsStore } from "../stores/pulls";
 import { useProjectsStore } from "../stores/projects";
+import { useKnowledgeStore } from "../stores/knowledge";
 import { useSyncMetaStore } from "../stores/sync-meta";
 import { netOnline, probeNow } from "../net";
 import { useI18n } from "../i18n";
+import { platformName } from "../panels/platform-label";
 import { APP_VERSION } from "../app-info";
 import { shortOrigin } from "../origin";
 import EditorIcon from "../components/EditorIcon.vue";
@@ -31,6 +33,11 @@ const repo = useRepoStore();
 const issues = useIssuesStore();
 const pulls = usePullsStore();
 const projectsStore = useProjectsStore();
+const knowledge = useKnowledgeStore();
+/** 状态栏点 ⟳ = 刷新项目数据（与面板头部刷新按钮同一入口）。 */
+async function refreshProject() {
+  await projectsStore.syncSelected();
+}
 const syncMeta = useSyncMetaStore();
 const { t, locale, localeChoice, locales, cycleLocale } = useI18n();
 const { current, origin, ghAvailable } = storeToRefs(repo);
@@ -49,17 +56,9 @@ const repoName = computed(() => {
 });
 
 /** 来源标签与运行时路由同源（repo.platform 来自 repo_info 的
- * resolve_target 链）；无 platform = 本地/未知。 */
-const PLATFORM_LABELS: Record<string, string> = {
-  github: "GitHub",
-  gitee: "Gitee",
-  gitea: "Gitea",
-  gitlab: "GitLab",
-};
-const platformLabel = computed(() => {
-  const p = repo.platform;
-  return p ? (PLATFORM_LABELS[p] ?? p) : t("statusbar.local");
-});
+ * resolve_target 链）；无 platform = 本地/未知。表与「在 {平台} 打开」
+ * 共享（panels/platform-label.ts）。 */
+const platformLabel = computed(() => platformName(repo.platform) ?? t("statusbar.local"));
 
 /** 项目分布格：选中项目的按列计数（堆叠条 + 总数），点击跳项目工作区。
  * 应用级数据（projects store 启动时已加载）；无选中项目则隐藏。 */
@@ -83,6 +82,10 @@ function gotoProjects() {
 // (and when the active bucket was never synced) the cell falls back to the
 // latest sync across all buckets — a cell that flickers out on tab
 // switches reads as "lost" rather than "not applicable".
+/** 选中项目的同步时间（拉线上 Projects 条目时盖章）；与 Issue/PR 的仓库同步是两本账。 */
+const projectSyncedAt = computed(() => projectsStore.selected?.syncedAt ?? null);
+const projectSyncedLabel = computed(() => (projectSyncedAt.value ? relative(projectSyncedAt.value) : ""));
+
 const syncedAt = computed(() => {
   const bucketKey =
     props.workspace === "issues"
@@ -99,10 +102,9 @@ const syncedAt = computed(() => {
 });
 
 /** "2026-09-11T02:00:00Z" → "5 分钟前" / "2 hours ago", locale-following. */
-const syncedLabel = computed(() => {
-  if (!syncedAt.value) return "";
-  const then = new Date(syncedAt.value).getTime();
-  if (Number.isNaN(then)) return syncedAt.value;
+function relative(iso: string): string {
+  const then = new Date(iso).getTime();
+  if (Number.isNaN(then)) return iso;
   const diffSeconds = Math.round((then - Date.now()) / 1000);
   const units: [Intl.RelativeTimeFormatUnit, number][] = [
     ["second", 60],
@@ -122,7 +124,94 @@ const syncedLabel = computed(() => {
     }
     value = Math.round(value / span);
   }
-  return syncedAt.value;
+  return iso;
+}
+const syncedLabel = computed(() => (syncedAt.value ? relative(syncedAt.value) : ""));
+
+// ---- 知识库：当前文件的语言 / 编码 / 换行 / 大小 ----
+// 光标行列与制表位要等 CM6 编辑器落地（T6）才有真值，届时补在同一个格里。
+const KB_LANGUAGES: Record<string, string> = {
+  md: "Markdown",
+  markdown: "Markdown",
+  mdx: "Markdown",
+  json: "JSON",
+  jsonc: "JSON",
+  yml: "YAML",
+  yaml: "YAML",
+  toml: "TOML",
+  csv: "CSV",
+  tsv: "TSV",
+  ts: "TypeScript",
+  tsx: "TypeScript",
+  js: "JavaScript",
+  jsx: "JavaScript",
+  vue: "Vue",
+  rs: "Rust",
+  py: "Python",
+  go: "Go",
+  java: "Java",
+  rb: "Ruby",
+  php: "PHP",
+  sh: "Shell",
+  zsh: "Shell",
+  bash: "Shell",
+  html: "HTML",
+  htm: "HTML",
+  css: "CSS",
+  scss: "SCSS",
+  less: "Less",
+  sql: "SQL",
+  xml: "XML",
+  txt: "Plain Text",
+  log: "Log",
+  lock: "Lockfile",
+};
+
+const kbFile = computed(() => (props.workspace === "knowledge" ? knowledge.selected : null));
+const kbLanguage = computed(() => {
+  const rel = kbFile.value;
+  if (!rel) return "";
+  // 非文本格式由预览插件给出准确名字（PDF/Word/表格…）；文本/代码走扩展名映射。
+  // 以前这里只有语言映射表，PDF/docx/xlsx 一律显示「纯文本」（用户实测发现）。
+  if (knowledge.activeFormat) return knowledge.activeFormat.label;
+  const name = rel.split("/").pop() ?? rel;
+  const ext = name.includes(".") ? name.split(".").pop()!.toLowerCase() : "";
+  return KB_LANGUAGES[ext] ?? t("kb.fileTypePlain");
+});
+
+/** 分页文档的页码（如「第 3 / 62 页」）——点击可输入页码回车跳转。 */
+const kbPageEditing = ref(false);
+const kbPageDraft = ref("");
+const kbPageInput = ref<HTMLInputElement | null>(null);
+
+function startPageJump(): void {
+  if (!knowledge.paging) return;
+  kbPageDraft.value = String(knowledge.paging.page);
+  kbPageEditing.value = true;
+  void nextTick(() => kbPageInput.value?.select());
+}
+
+function commitPageJump(): void {
+  const page = Number.parseInt(kbPageDraft.value, 10);
+  kbPageEditing.value = false;
+  if (Number.isFinite(page) && page > 0) knowledge.requestPageJump(page);
+}
+const kbEol = computed(() => (knowledge.activeText?.eol === "\r\n" ? "CRLF" : "LF"));
+/** 字数：非空白字符数；有拉丁词时附上词数（纯中文不显示"0 词"）。 */
+const kbWordCount = computed(() => {
+  const stats = knowledge.stats;
+  if (!stats) return "";
+  const chars = stats.chars.toLocaleString(locale.value);
+  if (stats.words === 0) return t("kb.wordCountChars", { chars });
+  return t("kb.wordCount", { chars, words: stats.words.toLocaleString(locale.value) });
+});
+const kbSize = computed(() => {
+  // 非文本格式没有 activeText，但尺寸同样要显示（插件解析时已知道）
+  const size = knowledge.activeText?.size ?? knowledge.activeFormat?.size;
+  if (size === undefined) return "";
+  if (size < 1024) return `${size} B`;
+  if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
+  return `${(size / 1024 / 1024).toFixed(1)} MB`;
 });
 
 async function probe() {
@@ -183,6 +272,45 @@ async function probe() {
     </div>
 
     <div class="status-right">
+      <!-- 知识库：当前文件信息（右对齐段，与 VS Code 同侧） -->
+      <template v-if="kbFile">
+        <span v-if="knowledge.cursor" class="status-cell kb-cursor-cell">
+          {{ t("kb.cursorPos", { line: knowledge.cursor.line, col: knowledge.cursor.col }) }}
+        </span>
+        <span class="status-cell" :title="t('kb.indentTip')">
+          {{ t("kb.indentSize", { n: knowledge.indentWidth }) }}
+        </span>
+        <span v-if="knowledge.stats" class="status-cell" :title="t('kb.wordCountTip')">
+          {{ kbWordCount }}
+        </span>
+        <span class="status-cell kb-lang-cell" :title="knowledge.selected ?? ''">{{ kbLanguage }}</span>
+        <span v-if="knowledge.section" class="status-cell kb-section-cell" :title="knowledge.section">
+          {{ knowledge.section }}
+        </span>
+        <span v-if="knowledge.paging" class="status-cell kb-page-cell">
+          <template v-if="!kbPageEditing">
+            <button class="kb-page" :title="t('kb.pageJumpTip')" @click="startPageJump">
+              {{ t("kb.pageOf", { page: knowledge.paging.page, total: knowledge.paging.total }) }}
+            </button>
+          </template>
+          <input
+            v-else
+            ref="kbPageInput"
+            v-model="kbPageDraft"
+            class="kb-page-input"
+            type="text"
+            inputmode="numeric"
+            @keydown.enter="commitPageJump"
+            @keydown.esc="kbPageEditing = false"
+            @blur="commitPageJump"
+          />
+        </span>
+        <span v-if="knowledge.activeText" class="status-cell" :title="t('kb.encodingTip')">
+          {{ knowledge.activeText.encoding }}
+        </span>
+        <span v-if="knowledge.activeText" class="status-cell" :title="t('kb.eolTip')">{{ kbEol }}</span>
+        <span v-if="kbSize" class="status-cell">{{ kbSize }}</span>
+      </template>
       <button
         v-if="netOnline !== null"
         class="status-cell net-cell"
@@ -192,6 +320,7 @@ async function probe() {
       >
         ● {{ netOnline ? t("statusbar.online") : t("statusbar.offline") }}
       </button>
+      <!-- Issue / PR 的同步格（仓库数据；与项目数据是两本账） -->
       <span
         v-if="syncedAt"
         class="status-cell"
@@ -199,6 +328,21 @@ async function probe() {
       >
         <span class="sync-mark">⟳</span> {{ syncedLabel }}
       </span>
+      <!-- 项目数据同步格（独立一格：选中项目即显示，点击 = 刷新项目数据） -->
+      <button
+        v-if="projectsStore.selected"
+        class="status-cell project-sync-cell"
+        :title="
+          projectSyncedAt
+            ? t('statusbar.projectSyncedAt', { time: new Date(projectSyncedAt).toLocaleString() })
+            : t('statusbar.projectNeverSynced')
+        "
+        @click="refreshProject()"
+      >
+        <span class="proj-mark">◫</span>
+        <span class="sync-mark">⟳</span>
+        {{ projectSyncedAt ? projectSyncedLabel : t("project.neverSynced") }}
+      </button>
       <span
         v-if="ghAvailable !== null"
         class="status-cell gh-cell"
@@ -240,6 +384,38 @@ async function probe() {
   min-width: 0;
 }
 /* Cells are full-height so hover highlight reads like VS Code segments. */
+.kb-section-cell {
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.kb-page-cell {
+  display: inline-flex;
+  align-items: center;
+}
+.kb-page {
+  padding: 0 4px;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  font-size: var(--font-sm);
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+}
+.kb-page:hover {
+  color: var(--accent);
+}
+.kb-page-input {
+  width: 44px;
+  height: 16px;
+  padding: 0 4px;
+  border: 1px solid var(--accent);
+  border-radius: 3px;
+  background: var(--bg-panel);
+  color: var(--text);
+  font-size: var(--font-sm);
+}
 .status-cell {
   display: inline-flex;
   align-items: center;
@@ -306,6 +482,10 @@ button.status-cell {
 }
 /* The ⟳ glyph reads smaller than the filled ● dots at the same font
    size — bump it so the status marks align visually. */
+.project-sync-cell .proj-mark {
+  margin-right: 4px;
+  color: var(--text-dim);
+}
 .sync-mark {
   font-size: var(--icon-size, 14px);
   line-height: 1;

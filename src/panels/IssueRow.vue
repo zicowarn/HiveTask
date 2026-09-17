@@ -5,6 +5,7 @@
  */
 import { storeToRefs } from "pinia";
 import { useIssuesStore } from "../stores/issues";
+import { chipStyle } from "./label-chip";
 import type { Issue } from "../types";
 
 defineProps<{ issue: Issue }>();
@@ -37,6 +38,7 @@ function timeLabel(iso?: string | null): string {
         v-for="label in issue.labels.slice(0, 3)"
         :key="label"
         class="chip"
+        :style="chipStyle(store.labelColor(label))"
       >{{ label }}</span>
     </div>
   </li>

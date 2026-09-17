@@ -88,6 +88,84 @@ pub fn history(repo_path: &str, limit: Option<u32>) -> Result<GitHistoryPage> {
     Ok(GitHistoryPage { commits, refs, head: head_short, has_more: false })
 }
 
+/// **单文件**的历史：只保留"碰过这个文件"的提交。
+///
+/// 为什么需要单独一条命令（而不是给 `history` 加参数）：libgit2 没有 `git log -- <path>` 的直通 API，
+/// 得自己走 **revwalk + 逐提交 diff + pathspec**：
+///   1. 遍历提交（拓扑 + 时间序，与 `history` 同口径）；
+///   2. 每个提交与它的**第一个父提交**做 diff，diff 时带 `pathspec(文件相对仓库根的路径)`；
+///   3. diff 里有该文件的 delta → 这个提交碰过它，保留。
+///
+/// 代价是"每个提交一次 diff"，所以用 `limit` 兜住**扫描量**（扫到 limit 个提交就停），
+/// 命中数单独可以再限（返回值里 `has_more` 表示是否因扫描上限而截断）。
+pub fn file_history(repo_path: &str, file_rel: &str, limit: Option<u32>) -> Result<GitHistoryPage> {
+    let repo = open_repo(repo_path)?;
+    if repo.is_empty()? {
+        return Ok(GitHistoryPage { commits: vec![], refs: vec![], head: None, has_more: false });
+    }
+    let scan_limit = limit.map(|n| n.clamp(10, 2000) as usize).unwrap_or(200);
+    let head_short = head_branch_name(&repo)?;
+
+    let mut revwalk = repo.revwalk()?;
+    revwalk.set_sorting(git2::Sort::TOPOLOGICAL | git2::Sort::TIME)?;
+    revwalk.push_head()?;
+    // 远端分支也纳入（与 history 的"所有 tip"口径一致）
+    if let Ok(references) = repo.references() {
+        for reference in references.flatten() {
+            if reference.is_remote() {
+                if let Ok(target) = reference.peel_to_commit() {
+                    let _ = revwalk.push(target.id());
+                }
+            }
+        }
+    }
+
+    let mut path_opts = git2::DiffOptions::new();
+    path_opts.pathspec(file_rel);
+    path_opts.include_typechange(true);
+
+    let mut commits = Vec::new();
+    let mut scanned = 0usize;
+    let mut truncated = false;
+    for oid in revwalk {
+        if scanned >= scan_limit {
+            truncated = true;
+            break;
+        }
+        scanned += 1;
+        let oid = oid?;
+        let commit = repo.find_commit(oid)?;
+        let tree = commit.tree()?;
+        let parent_tree = match commit.parent(0) {
+            Ok(parent) => Some(parent.tree()?),
+            Err(_) => None, // 根提交：与空树比
+        };
+        let diff = repo.diff_tree_to_tree(parent_tree.as_ref(), Some(&tree), Some(&mut path_opts))?;
+        if diff.deltas().len() == 0 {
+            continue; // 这个提交没碰该文件
+        }
+        let parents = (0..commit.parent_count())
+            .filter_map(|i| commit.parent_id(i).ok())
+            .map(|p| p.to_string())
+            .collect();
+        commits.push(CommitRow {
+            oid: oid.to_string(),
+            parents,
+            message: commit.summary().ok().unwrap_or_default().unwrap_or_default().to_string(),
+            author: commit.author().name().ok().map(str::to_string),
+            committed_at_unix: commit.time().seconds(),
+        });
+    }
+
+    Ok(GitHistoryPage {
+        commits,
+        refs: Vec::new(),
+        head: head_short,
+        has_more: truncated,
+    })
+}
+
+
 fn head_branch_name(repo: &git2::Repository) -> Result<Option<String>> {
     if repo.head_detached()? {
         return Ok(None);
@@ -176,6 +254,34 @@ fn resolve_branch_oid(repo: &git2::Repository, name: &str) -> Result<Oid> {
     reference
         .target()
         .ok_or_else(|| anyhow!("分支未指向提交: {name}"))
+}
+
+/// PR 创建流程的 ref 解析：本地分支优先，origin/{name} 远程跟踪分支兜底
+/// （head/base 来自远端分支清单，克隆里是 refs/remotes/origin/*）。
+fn resolve_pr_oid(repo: &git2::Repository, name: &str) -> Result<Oid> {
+    repo.find_reference(&format!("refs/heads/{name}"))
+        .or_else(|_| repo.find_reference(&format!("refs/remotes/origin/{name}")))
+        .with_context(|| format!("分支不存在（本地与 origin 均未找到，可先抓取远端）: {name}"))?
+        .target()
+        .ok_or_else(|| anyhow!("分支未指向提交: {name}"))
+}
+
+/// PR 创建预览：base..head 间提交清单（拓扑+时间序，新→旧，上限 200）。
+pub fn commits_between(repo_path: &str, base: &str, head: &str) -> Result<Vec<CommitRow>> {
+    let repo = open_repo(repo_path)?;
+    let base_oid = resolve_pr_oid(&repo, base)?;
+    let head_oid = resolve_pr_oid(&repo, head)?;
+    let mut commits = Vec::new();
+    let mut revwalk = repo.revwalk()?;
+    revwalk.set_sorting(git2::Sort::TOPOLOGICAL | git2::Sort::TIME)?;
+    revwalk.push(head_oid)?;
+    if let Ok(ancestor) = repo.merge_base(base_oid, head_oid) {
+        revwalk.hide(ancestor)?;
+    }
+    for oid in revwalk.take(200) {
+        commits.push(commit_row(&repo, oid?)?);
+    }
+    Ok(commits)
 }
 
 fn commit_row(repo: &git2::Repository, oid: Oid) -> Result<CommitRow> {
@@ -408,6 +514,76 @@ pub fn review_merge(repo_path: &str, base: &str, head: &str, method: &str) -> Re
 pub fn branch_delete(repo_path: &str, name: &str, force: bool) -> Result<()> {
     let flag = if force { "-D" } else { "-d" };
     run_git(repo_path, &["branch", flag, name]).map(|_| ())
+}
+
+#[cfg(test)]
+mod file_history_tests {
+    use super::*;
+
+    /// 造一个小仓库：a.txt 改两次、b.txt 改一次，并有一个只碰 b 的提交。
+    fn seed_repo(dir: &std::path::Path) -> git2::Repository {
+        let repo = git2::Repository::init(dir).unwrap();
+        let mut config = repo.config().unwrap();
+        config.set_str("user.name", "tester").unwrap();
+        config.set_str("user.email", "t@example.com").unwrap();
+        drop(config);
+
+        let commit = |repo: &git2::Repository, file: &str, content: &str, msg: &str| {
+            std::fs::write(dir.join(file), content).unwrap();
+            let mut index = repo.index().unwrap();
+            index.add_path(std::path::Path::new(file)).unwrap();
+            index.write().unwrap();
+            let tree_id = index.write_tree().unwrap();
+            let tree = repo.find_tree(tree_id).unwrap();
+            let sig = repo.signature().unwrap();
+            let parent = repo.head().ok().and_then(|h| h.peel_to_commit().ok());
+            let parents: Vec<&git2::Commit> = parent.iter().collect();
+            repo.commit(Some("HEAD"), &sig, &sig, msg, &tree, &parents).unwrap();
+        };
+
+        commit(&repo, "a.txt", "1", "a: first");
+        commit(&repo, "b.txt", "1", "b: first");
+        commit(&repo, "a.txt", "2", "a: second");
+        commit(&repo, "b.txt", "2", "b: second");
+        repo
+    }
+
+    #[test]
+    fn file_history_keeps_only_commits_touching_that_file() {
+        let dir = std::env::temp_dir().join(format!("hivetask-filehist-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        seed_repo(&dir);
+        let path = dir.to_string_lossy().to_string();
+
+        let page = file_history(&path, "a.txt", Some(50)).unwrap();
+        let messages: Vec<&str> = page.commits.iter().map(|c| c.message.as_str()).collect();
+        assert_eq!(messages, vec!["a: second", "a: first"], "只应包含碰过 a.txt 的提交");
+
+        let b_page = file_history(&path, "b.txt", Some(50)).unwrap();
+        let b_messages: Vec<&str> = b_page.commits.iter().map(|c| c.message.as_str()).collect();
+        assert_eq!(b_messages, vec!["b: second", "b: first"]);
+
+        // 不存在的路径 → 空历史（不是报错）
+        let none = file_history(&path, "nope.md", Some(50)).unwrap();
+        assert!(none.commits.is_empty());
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn file_history_reports_truncation_on_scan_limit() {
+        let dir = std::env::temp_dir().join(format!("hivetask-filehist-limit-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        seed_repo(&dir);
+        let path = dir.to_string_lossy().to_string();
+
+        // 扫描上限 10（下界）→ 4 个提交都在范围内，不应截断
+        let page = file_history(&path, "a.txt", Some(10)).unwrap();
+        assert!(!page.has_more);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }
 
 #[cfg(test)]

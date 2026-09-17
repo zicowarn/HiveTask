@@ -73,11 +73,21 @@ impl Source for LocalSource {
         journal::add_comment(workdir, &mut conn, number, body, &journal::current_author(workdir))
     }
 
-    fn set_issue_state(&self, repo: &RepoRef, number: &str, closed: bool) -> Result<Issue> {
+    fn set_issue_state(&self, repo: &RepoRef, number: &str, closed: bool, _reason: Option<&str>) -> Result<Issue> {
+        // 本地无关闭理由语义（journal v2 待办）
         let workdir = self.workdir(repo)?;
         let mut conn = storage::open(workdir)?;
         journal::sync(workdir, &mut conn)?;
         journal::set_issue_state(workdir, &mut conn, number, closed, &journal::current_author(workdir))
+    }
+
+    fn set_issue_locked(&self, _repo: &RepoRef, _number: &str, _locked: bool) -> Result<()> {
+        Err(anyhow!("本地 Issue 暂不支持锁定讨论"))
+    }
+
+    fn delete_issue(&self, _repo: &RepoRef, _number: &str) -> Result<()> {
+        // 事件日志不可变（真源），本地 Issue 不做删除
+        Err(anyhow!("本地 Issue 按事件日志不可变，不支持删除"))
     }
 
     fn set_pull_state(&self, _repo: &RepoRef, _number: &str, _closed: bool) -> Result<Pull> {
@@ -87,13 +97,54 @@ impl Source for LocalSource {
     fn merge_pull(&self, _repo: &RepoRef, _number: &str, _method: MergeMethod) -> Result<Pull> {
         Err(anyhow!("本地仓库没有 Pull Request"))
     }
-    fn create_issue(&self, repo: &RepoRef, title: &str, body: Option<&str>, milestone: Option<&str>) -> Result<Issue> {
+    fn create_issue(&self, repo: &RepoRef, title: &str, body: Option<&str>, milestone: Option<&str>, _labels: &[String], _assignees: &[String]) -> Result<Issue> {
+        // journal 事件 v1 无 labels/assignees 字段，本地创建忽略之
         let workdir = self.workdir(repo)?;
         let mut conn = crate::storage::open(workdir)?;
         journal::sync(workdir, &mut conn)?;
         journal::create_issue(workdir, &mut conn, title, body, &journal::current_author(workdir), milestone)
     }
+    fn list_labels(&self, _repo: &RepoRef) -> Result<Vec<crate::models::LabelInfo>> {
+        Ok(Vec::new()) // 本地无平台标签
+    }
+    fn list_assignees(&self, _repo: &RepoRef) -> Result<Vec<String>> {
+        Ok(Vec::new()) // 本地无可指派用户
+    }
+    fn create_label(&self, _repo: &RepoRef, _name: &str, _color: &str) -> Result<crate::models::LabelInfo> {
+        Err(anyhow!("本地仓库没有平台标签"))
+    }
+    fn update_issue(&self, repo: &RepoRef, number: &str, title: &str, body: Option<&str>) -> Result<Issue> {
+        let workdir = self.workdir(repo)?;
+        let mut conn = crate::storage::open(workdir)?;
+        journal::sync(workdir, &mut conn)?;
+        journal::edit_issue(workdir, &mut conn, number, title, body, &journal::current_author(workdir))
+    }
+    fn update_issue_milestone(&self, repo: &RepoRef, number: &str, milestone: Option<&str>) -> Result<Issue> {
+        // 本地里程碑 = Issue 上的纯文本标签，无平台语义；写入走 journal 事件（真源）
+        let workdir = self.workdir(repo)?;
+        let mut conn = crate::storage::open(workdir)?;
+        journal::sync(workdir, &mut conn)?;
+        journal::set_issue_milestone(workdir, &mut conn, number, milestone, &journal::current_author(workdir))
+    }
+    fn update_issue_labels(&self, repo: &RepoRef, number: &str, labels: &[String]) -> Result<Issue> {
+        let workdir = self.workdir(repo)?;
+        let mut conn = crate::storage::open(workdir)?;
+        journal::sync(workdir, &mut conn)?;
+        journal::set_issue_labels(workdir, &mut conn, number, labels, &journal::current_author(workdir))
+    }
+    fn update_issue_assignees(&self, repo: &RepoRef, number: &str, assignees: &[String]) -> Result<Issue> {
+        let workdir = self.workdir(repo)?;
+        let mut conn = crate::storage::open(workdir)?;
+        journal::sync(workdir, &mut conn)?;
+        journal::set_issue_assignees(workdir, &mut conn, number, assignees, &journal::current_author(workdir))
+    }
     fn create_milestone(&self, _repo: &RepoRef, _title: &str, _due_on: Option<&str>, _description: Option<&str>) -> Result<String> {
+        Err(anyhow!("本地仓库没有平台里程碑"))
+    }
+    fn set_milestone_state(&self, _repo: &RepoRef, _number: i64, _closed: bool) -> Result<crate::models::MilestoneInfo> {
+        Err(anyhow!("本地仓库没有平台里程碑"))
+    }
+    fn update_milestone(&self, _repo: &RepoRef, _number: i64, _title: &str, _description: Option<&str>, _due_on: Option<&str>) -> Result<crate::models::MilestoneInfo> {
         Err(anyhow!("本地仓库没有平台里程碑"))
     }
     fn create_pull(&self, _repo: &RepoRef, _head: &str, _base: &str, _title: &str, _body: Option<&str>) -> Result<Pull> {
@@ -120,11 +171,15 @@ impl Source for LocalSource {
         Ok(seen
             .into_iter()
             .map(|(title, open_n, closed_n)| crate::models::MilestoneInfo {
+                // 本地"里程碑"是 Issue 文本标签：无编号/描述/在线地址。
+                number: 0,
                 title,
+                description: None,
                 due_on: None,
                 state: if open_n > 0 { "open".to_string() } else { "closed".to_string() },
                 open_issues: open_n,
                 closed_issues: closed_n,
+                html_url: None,
             })
             .collect())
     }

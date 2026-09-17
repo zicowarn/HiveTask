@@ -4,6 +4,7 @@
  * 后台轮询令牌 → 喂入 gh 凭据库。凭据全程由 gh 托管，本应用不经手。
  */
 import { ref, watch } from "vue";
+import { translateError } from "../gh-errors";
 import { api, isTauri } from "../api";
 import { openExternalUrl } from "../open-url";
 import { pushToast } from "../toast";
@@ -36,7 +37,7 @@ async function start() {
     void poll(started.deviceCode, started.intervalSecs, run);
   } catch (e) {
     if (run !== runId) return;
-    failure.value = String(e);
+    failure.value = translateError(String(e));
     phase.value = "failed";
   }
 }
@@ -53,7 +54,7 @@ async function poll(deviceCode: string, intervalSecs: number, run: number) {
     emit("success", who);
   } catch (e) {
     if (run !== runId) return;
-    failure.value = String(e);
+    failure.value = translateError(String(e));
     phase.value = "failed";
   }
 }

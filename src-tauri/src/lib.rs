@@ -8,6 +8,7 @@ mod gh;
 mod gitea;
 mod git;
 mod journal;
+mod kb;
 mod local;
 mod models;
 mod projects;
@@ -107,6 +108,40 @@ fn health_check() -> HealthInfo {
 }
 
 /// Native directory picker; returns the selected git repository path.
+/// 另存文本（视图数据 CSV 导出用）：原生保存对话框 → 写文件；取消返回 None。
+#[tauri::command]
+async fn save_text_file(
+    window: tauri::WebviewWindow,
+    default_name: String,
+    contents: String,
+) -> Result<Option<String>, String> {
+    use tauri_plugin_dialog::FilePath;
+
+    let (tx, mut rx) = tauri::async_runtime::channel::<Option<String>>(1);
+    window
+        .dialog()
+        .file()
+        .set_title("导出为 CSV")
+        .set_file_name(&default_name)
+        .save_file(move |path| {
+            let value: Option<String> = path
+                .map(|p| match p {
+                    FilePath::Path(path_buf) => path_buf.to_string_lossy().to_string(),
+                    FilePath::Url(url) => url
+                        .to_file_path()
+                        .map(|p| p.to_string_lossy().to_string())
+                        .unwrap_or_default(),
+                })
+                .filter(|s| !s.is_empty());
+            let _ = tx.blocking_send(value);
+        });
+    let Some(path) = rx.recv().await.ok_or_else(|| "对话框已关闭".to_string())? else {
+        return Ok(None); // 用户取消
+    };
+    std::fs::write(&path, contents).map_err(|e| e.to_string())?;
+    Ok(Some(path))
+}
+
 #[tauri::command]
 async fn pick_repo(window: tauri::WebviewWindow) -> Result<Option<String>, String> {
     use tauri_plugin_dialog::FilePath;
@@ -228,6 +263,24 @@ fn git_history(repo_path: String, limit: Option<u32>) -> Result<models::GitHisto
     git::history(&dir.to_string_lossy(), limit).map_err(|e| e.to_string())
 }
 
+/// 知识库侧入口：**知识库根**可能只是仓库的一个子目录（甚至就是仓库根），
+/// 所以这里把"根 + 相对根的路径"换算成"仓库 + 仓库内相对路径"，再查单文件历史。
+#[tauri::command]
+fn git_file_history(root: String, rel: String, limit: Option<u32>) -> Result<models::GitHistoryPage, String> {
+    let repo = git2::Repository::discover(&root).map_err(|e| e.to_string())?;
+    let workdir = repo
+        .workdir()
+        .ok_or_else(|| "裸仓库没有工作区".to_string())?
+        .to_path_buf();
+    let rel_in_repo = std::path::Path::new(&root)
+        .join(&rel)
+        .strip_prefix(&workdir)
+        .map_err(|_| "文件不在该 Git 仓库内".to_string())?
+        .to_string_lossy()
+        .to_string();
+    git::file_history(&workdir.to_string_lossy(), &rel_in_repo, limit).map_err(|e| e.to_string())
+}
+
 /// Branch list with local/remote kind and ahead/behind vs upstream.
 #[tauri::command]
 fn git_branches(repo_path: String) -> Result<Vec<models::BranchRow>, String> {
@@ -254,6 +307,13 @@ fn branch_review_list(repo_path: String, base: String) -> Result<Vec<models::Rev
 fn branch_review_diff(repo_path: String, base: String, head: String) -> Result<models::BranchReviewDiff, String> {
     let dir = local_dir_of(&repo_path)?;
     git::review_diff(&dir.to_string_lossy(), &base, &head).map_err(|e| e.to_string())
+}
+
+/// PR 创建预览：base..head 提交清单（本地分支优先，origin/{name} 兜底）。
+#[tauri::command]
+fn pr_commits_between(repo_path: String, base: String, head: String) -> Result<Vec<models::CommitRow>, String> {
+    let dir = local_dir_of(&repo_path)?;
+    git::commits_between(&dir.to_string_lossy(), &base, &head).map_err(|e| e.to_string())
 }
 
 /// 合并执行（merge / squash / rebase）。返回合并后 base 的顶点 oid。
@@ -338,7 +398,11 @@ fn create_issue(
     title: String,
     body: Option<String>,
     milestone: Option<String>,
+    labels: Option<Vec<String>>,
+    assignees: Option<Vec<String>>,
 ) -> Result<Issue, String> {
+    let labels = labels.unwrap_or_default();
+    let assignees = assignees.unwrap_or_default();
     let repo = resolve(&repo_path)?;
     let issue = match repo.platform.as_deref() {
         Some("local") => {
@@ -354,7 +418,7 @@ fn create_issue(
         }
         _ => {
             let issue = source::source_for_ref(repo.platform.as_deref(), &repo.host)
-                .create_issue(&repo, &title, body.as_deref(), milestone.as_deref())
+                .create_issue(&repo, &title, body.as_deref(), milestone.as_deref(), &labels, &assignees)
                 .map_err(|e| e.to_string())?;
             let conn = storage::open(&storage_dir_of(&repo)).map_err(|e| e.to_string())?;
             storage::upsert_issue(&conn, &issue, &issue_state_source(&repo)).map_err(|e| e.to_string())?;
@@ -426,9 +490,16 @@ fn remote_branch_list(repo_path: String) -> Result<Vec<String>, String> {
 /// entity so the frontend can patch both stores from one source of truth.
 /// 尾部挂「关闭→Done」看板自动化（本地/远端关闭都流经此处）。
 #[tauri::command]
-fn set_issue_state(repo_path: String, number: String, closed: bool) -> Result<Issue, String> {
+fn set_issue_state(
+    repo_path: String,
+    number: String,
+    closed: bool,
+    reason: Option<String>,
+) -> Result<Issue, String> {
     let repo = resolve(&repo_path)?;
-    let issue = source::source_for_ref(repo.platform.as_deref(), &repo.host).set_issue_state(&repo, &number, closed).map_err(|e| e.to_string())?;
+    let issue = source::source_for_ref(repo.platform.as_deref(), &repo.host)
+        .set_issue_state(&repo, &number, closed, reason.as_deref())
+        .map_err(|e| e.to_string())?;
     let conn = storage::open(&storage_dir_of(&repo)).map_err(|e| e.to_string())?;
     storage::update_issue_state(&conn, &issue.number, &issue.state).map_err(|e| e.to_string())?;
     if closed {
@@ -444,6 +515,162 @@ fn set_issue_state(repo_path: String, number: String, closed: bool) -> Result<Is
     Ok(issue)
 }
 
+/// 锁定/解锁讨论（gh/Gitea；本地 Err）。
+#[tauri::command]
+fn issue_set_locked(repo_path: String, number: String, locked: bool) -> Result<(), String> {
+    let repo = resolve(&repo_path)?;
+    source::source_for_ref(repo.platform.as_deref(), &repo.host)
+        .set_issue_locked(&repo, &number, locked)
+        .map_err(|e| e.to_string())
+}
+
+/// 删除 Issue（平台侧永久删除，需管理员；Gitea/本地 Err）。
+#[tauri::command]
+fn issue_delete(repo_path: String, number: String) -> Result<(), String> {
+    let repo = resolve(&repo_path)?;
+    source::source_for_ref(repo.platform.as_deref(), &repo.host)
+        .delete_issue(&repo, &number)
+        .map_err(|e| e.to_string())
+}
+
+/// 仓库标签清单（创建 Issue 对话框侧栏候选）。
+#[tauri::command]
+fn label_list(repo_path: String) -> Result<Vec<models::LabelInfo>, String> {
+    let repo = resolve(&repo_path)?;
+    source::source_for_ref(repo.platform.as_deref(), &repo.host)
+        .list_labels(&repo)
+        .map_err(|e| e.to_string())
+}
+
+/// 可指派用户清单（创建 Issue 对话框侧栏候选）。
+#[tauri::command]
+fn assignee_list(repo_path: String) -> Result<Vec<String>, String> {
+    let repo = resolve(&repo_path)?;
+    source::source_for_ref(repo.platform.as_deref(), &repo.host)
+        .list_assignees(&repo)
+        .map_err(|e| e.to_string())
+}
+
+/// 新建仓库标签（写穿透，返回平台确认的标签）。
+#[tauri::command]
+fn create_label(repo_path: String, name: String, color: String) -> Result<models::LabelInfo, String> {
+    let repo = resolve(&repo_path)?;
+    source::source_for_ref(repo.platform.as_deref(), &repo.host)
+        .create_label(&repo, &name, &color)
+        .map_err(|e| e.to_string())
+}
+
+/// 切换里程碑开启/关闭（Source 写穿透 → 定点替换返回元数据）。
+#[tauri::command]
+fn set_milestone_state(
+    repo_path: String,
+    number: i64,
+    closed: bool,
+) -> Result<models::MilestoneInfo, String> {
+    let repo = resolve(&repo_path)?;
+    source::source_for_ref(repo.platform.as_deref(), &repo.host)
+        .set_milestone_state(&repo, number, closed)
+        .map_err(|e| e.to_string())
+}
+
+/// 编辑里程碑名称/描述/截止日（Source 写穿透）。
+#[tauri::command]
+fn update_milestone(
+    repo_path: String,
+    number: i64,
+    title: String,
+    description: Option<String>,
+    due_on: Option<String>,
+) -> Result<models::MilestoneInfo, String> {
+    let repo = resolve(&repo_path)?;
+    source::source_for_ref(repo.platform.as_deref(), &repo.host)
+        .update_milestone(&repo, number, &title, description.as_deref(), due_on.as_deref())
+        .map_err(|e| e.to_string())
+}
+
+/// 编辑 Issue 标题/正文（Source 写穿透 → 定点回写物化视图）。
+#[tauri::command]
+fn update_issue(
+    repo_path: String,
+    number: String,
+    title: String,
+    body: Option<String>,
+) -> Result<Issue, String> {
+    let repo = resolve(&repo_path)?;
+    let issue = source::source_for_ref(repo.platform.as_deref(), &repo.host)
+        .update_issue(&repo, &number, &title, body.as_deref())
+        .map_err(|e| e.to_string())?;
+    let conn = storage::open(&storage_dir_of(&repo)).map_err(|e| e.to_string())?;
+    conn.execute(
+        "UPDATE issues SET title = ?1, body = ?2, synced_at = datetime('now') WHERE number = ?3",
+        (issue.title.clone(), issue.body.clone(), issue.number.clone()),
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(issue)
+}
+
+/// 挂/清里程碑（写穿透 → 缓存行同步）。
+#[tauri::command]
+fn issue_update_milestone(
+    repo_path: String,
+    number: String,
+    milestone: Option<String>,
+) -> Result<Issue, String> {
+    let repo = resolve(&repo_path)?;
+    let issue = source::source_for_ref(repo.platform.as_deref(), &repo.host)
+        .update_issue_milestone(&repo, &number, milestone.as_deref())
+        .map_err(|e| e.to_string())?;
+    let conn = storage::open(&storage_dir_of(&repo)).map_err(|e| e.to_string())?;
+    conn.execute(
+        "UPDATE issues SET milestone = ?1, synced_at = datetime('now') WHERE number = ?2",
+        (issue.milestone.clone(), issue.number.clone()),
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(issue)
+}
+
+/// 整体替换标签（写穿透 → 缓存行同步）。
+#[tauri::command]
+fn issue_update_labels(repo_path: String, number: String, labels: Vec<String>) -> Result<Issue, String> {
+    let repo = resolve(&repo_path)?;
+    let issue = source::source_for_ref(repo.platform.as_deref(), &repo.host)
+        .update_issue_labels(&repo, &number, &labels)
+        .map_err(|e| e.to_string())?;
+    let conn = storage::open(&storage_dir_of(&repo)).map_err(|e| e.to_string())?;
+    conn.execute(
+        "UPDATE issues SET labels = ?1, synced_at = datetime('now') WHERE number = ?2",
+        (
+            serde_json::json!(issue.labels).to_string(),
+            issue.number.clone(),
+        ),
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(issue)
+}
+
+/// 整体替换负责人（写穿透 → 缓存行同步）。
+#[tauri::command]
+fn issue_update_assignees(
+    repo_path: String,
+    number: String,
+    assignees: Vec<String>,
+) -> Result<Issue, String> {
+    let repo = resolve(&repo_path)?;
+    let issue = source::source_for_ref(repo.platform.as_deref(), &repo.host)
+        .update_issue_assignees(&repo, &number, &assignees)
+        .map_err(|e| e.to_string())?;
+    let conn = storage::open(&storage_dir_of(&repo)).map_err(|e| e.to_string())?;
+    conn.execute(
+        "UPDATE issues SET assignees = ?1, synced_at = datetime('now') WHERE number = ?2",
+        (
+            serde_json::json!(issue.assignees).to_string(),
+            issue.number.clone(),
+        ),
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(issue)
+}
+
 /// 登记表 repo id（看板条目关联键）；未登记 → None。
 fn app_repo_id(target: &str) -> Option<String> {
     let conn = appdb::open().ok()?;
@@ -451,8 +678,344 @@ fn app_repo_id(target: &str) -> Option<String> {
         .ok()
 }
 
+/// 线上 ProjectsV2 清单（GitHub；viewer 名下，按最近更新排序）。
+/// 需 gh token 具备 read:project scope——缺失时透传可读指引。
+#[tauri::command]
+fn remote_project_list(limit: Option<u32>) -> Result<Vec<gh::RemoteProject>, String> {
+    gh::list_user_projects(limit.unwrap_or(50)).map_err(|e| e.to_string())
+}
+
 /// 线上仓库清单（「刷新从线上查找」）：按接入的 platform 分派——
 /// GitHub 透传 gh 托管账户，Gitea/Gitee 用钥匙串 token 调 /user/repos。
+
+/// 拉取线上 ProjectsV2 条目落本地看板（需 read:project；仅 GitHub 项目）。
+/// 返回 { imported, skipped }：未登记仓库的条目跳过（不静默登记）。
+/// 平台色名 → 十六进制（与 Edit option 对话框的八色调色板一致）。
+fn gh_color_hex(name: &str) -> &'static str {
+    match name.to_ascii_uppercase().as_str() {
+        "BLUE" => "#0969da",
+        "GREEN" => "#1a7f37",
+        "YELLOW" => "#9a6700",
+        "ORANGE" => "#bc4c00",
+        "RED" => "#d1242f",
+        "PINK" => "#bf3989",
+        "PURPLE" => "#8250df",
+        _ => "#59636e", // GRAY
+    }
+}
+
+/// 本地十六进制色 → 平台色名（`gh_color_hex` 的反向；发布列时用）。
+/// 八色调色板以外的本地色（自建列取色器）就近归一到最接近的色名。
+fn gh_color_name(hex: &str) -> &'static str {
+    let h = hex.trim().trim_start_matches('#').to_ascii_lowercase();
+    let mapped = match h.as_str() {
+        "0969da" => "BLUE",
+        "1a7f37" => "GREEN",
+        "9a6700" => "YELLOW",
+        "bc4c00" => "ORANGE",
+        "d1242f" => "RED",
+        "bf3989" => "PINK",
+        "8250df" => "PURPLE",
+        "59636e" => "GRAY",
+        _ => "",
+    };
+    if !mapped.is_empty() {
+        return mapped;
+    }
+    // 非调色板颜色：按 RGB 距离归一到八色里最接近的一档
+    let parse = |i: usize| u8::from_str_radix(h.get(i..i + 2).unwrap_or("00"), 16).unwrap_or(0) as i32;
+    let (r, g, b) = (parse(0), parse(2), parse(4));
+    [
+        ("BLUE", "#0969da"),
+        ("GREEN", "#1a7f37"),
+        ("YELLOW", "#9a6700"),
+        ("ORANGE", "#bc4c00"),
+        ("RED", "#d1242f"),
+        ("PINK", "#bf3989"),
+        ("PURPLE", "#8250df"),
+        ("GRAY", "#59636e"),
+    ]
+    .iter()
+    .map(|(name, ref_hex)| {
+        let p = |i: usize| i32::from_str_radix(&ref_hex[1 + i..1 + i + 2], 16).unwrap_or(0);
+        let d = (r - p(0)).pow(2) + (g - p(2)).pow(2) + (b - p(4)).pow(2);
+        (*name, d)
+    })
+    .min_by_key(|(_, d)| *d)
+    .map(|(n, _)| n)
+    .unwrap_or("GRAY")
+}
+
+#[cfg(test)]
+mod sync_tests {
+    use super::{gh_color_hex, gh_color_name};
+
+    /// 平台色名 → 十六进制：与 Edit option 八色调色板一致；未知回落 GRAY。
+    #[test]
+    fn color_map_matches_palette() {
+        assert_eq!(gh_color_hex("PURPLE"), "#8250df");
+        assert_eq!(gh_color_hex("blue"), "#0969da");
+        assert_eq!(gh_color_hex("ORANGE"), "#bc4c00");
+        assert_eq!(gh_color_hex("WHATEVER"), "#59636e");
+    }
+
+    /// 线上独有字段的建列排除表（GitHub 内置字段不该变成本地列）。
+    #[test]
+    fn builtin_fields_are_excluded() {
+        use super::GH_BUILTIN_FIELDS;
+        for name in ["Title", "Assignees", "Labels", "Milestone", "Repository", "Sub-issues progress"] {
+            assert!(
+                GH_BUILTIN_FIELDS.iter().any(|n| n.eq_ignore_ascii_case(name)),
+                "{name} 应被排除"
+            );
+        }
+        assert!(!GH_BUILTIN_FIELDS.iter().any(|n| n.eq_ignore_ascii_case("Size")));
+    }
+
+    /// 十六进制 → 色名：调色板原样往返；近似色（自建列取色器）归一不错档。
+    #[test]
+    fn color_name_round_trips_palette() {
+        for name in ["BLUE", "GREEN", "YELLOW", "ORANGE", "RED", "PINK", "PURPLE", "GRAY"] {
+            assert_eq!(gh_color_name(gh_color_hex(name)), name, "{name} 往返应稳定");
+        }
+        assert_eq!(gh_color_name("#0a6adc"), "BLUE", "近蓝应归一到 BLUE");
+        assert_eq!(gh_color_name("d12430"), "RED", "无 # 前缀也应识别（近红→RED）");
+    }
+}
+
+/// 线上项目引用的三要素：归属类型（user/org）、归属名、项目编号。
+/// ref 形如 https://github.com/users/<owner>/projects/<n> 或 /orgs/<owner>/projects/<n>。
+fn parse_project_ref(r#ref: &str) -> Result<(String, String, u32), String> {
+    let parts: Vec<&str> = r#ref.trim_end_matches('/').split('/').collect();
+    let idx = parts
+        .iter()
+        .position(|p| *p == "users" || *p == "orgs")
+        .ok_or_else(|| "无法解析线上项目地址".to_string())?;
+    let owner_kind = if parts[idx] == "orgs" { "org" } else { "user" };
+    let owner = *parts.get(idx + 1).ok_or_else(|| "无法解析项目归属".to_string())?;
+    let number: u32 = *parts
+        .last()
+        .and_then(|n| n.parse::<u32>().ok())
+        .as_ref()
+        .ok_or_else(|| "无法解析项目编号".to_string())?;
+    Ok((owner_kind.to_string(), owner.to_string(), number))
+}
+
+/// GitHub 内置字段（非用户列）：本地不建模，刷新时不据此建列。
+const GH_BUILTIN_FIELDS: [&str; 12] = [
+    "Title",
+    "Assignees",
+    "Labels",
+    "Milestone",
+    "Repository",
+    "Parent issue",
+    "Sub-issues progress",
+    "Linked pull requests",
+    "Reviewers",
+    "Tracks",
+    "Tracked by",
+    "Pull requests",
+];
+
+/// 本地字段名 → 线上字段名（两个同名不改的字段除外：状态 → Status、优先级 → Priority）。
+fn online_field_name(field: &projects::ProjectField) -> &str {
+    if field.kind == "builtin_status" {
+        "Status"
+    } else if field.name == "优先级" {
+        "Priority"
+    } else {
+        &field.name
+    }
+}
+
+/// 线上一组选项 → 本地 FieldOption（同名保留本地 id，新名派生稳定 id）。
+fn map_remote_options(field_id: &str, local: Option<&Vec<projects::FieldOption>>, remote: &[gh::RemoteFieldOption]) -> Vec<projects::FieldOption> {
+    remote
+        .iter()
+        .map(|o| {
+            let existing = local.and_then(|ls| ls.iter().find(|x| x.name.eq_ignore_ascii_case(&o.name)));
+            projects::FieldOption {
+                id: existing
+                    .map(|x| x.id.clone())
+                    .unwrap_or_else(|| format!("{field_id}-{}", o.name.to_lowercase().replace(' ', "-"))),
+                name: o.name.clone(),
+                color: gh_color_hex(&o.color).to_string(),
+                description: o.description.clone(),
+            }
+        })
+        .collect()
+}
+
+#[tauri::command]
+fn project_sync_items(project_id: String) -> Result<(u32, u32), String> {
+    let app = appdb::open().map_err(|e| e.to_string())?;
+    let project = projects::project_get_in(&app, &project_id)?;
+    let r#ref = project.platform_ref.clone().ok_or_else(|| "该项目未绑定线上项目".to_string())?;
+    let kind = project.platform_kind.clone().unwrap_or_else(|| "github".to_string());
+    if kind != "github" {
+        return Err("目前仅支持 GitHub Projects 的数据刷新".to_string());
+    }
+    let (owner_kind, owner, number) = parse_project_ref(&r#ref)?;
+
+    let snap = gh::fetch_project_items(&owner_kind, &owner, number, 100).map_err(|e| e.to_string())?;
+
+    // ---- ① 列设置对齐：线上 Status / Priority 的选项（名称/顺序/颜色/说明）写进本地字段 ----
+    for remote_field in &snap.fields {
+        // 非单选字段（数字/文本/日期）没有选项表，只需第 ① 步的建列
+        if remote_field.options.is_empty() && remote_field.data_type.as_deref() != Some("NUMBER") && remote_field.data_type.as_deref() != Some("TEXT") && remote_field.data_type.as_deref() != Some("DATE") {
+            continue;
+        }
+        let local = projects::fields_in(&app, &project_id)?
+            .into_iter()
+            .find(|f| {
+                (remote_field.name.eq_ignore_ascii_case("status") && f.kind == "builtin_status")
+                    || f.name.eq_ignore_ascii_case(&remote_field.name)
+                    || (remote_field.name.eq_ignore_ascii_case("priority") && f.name == "优先级")
+            });
+        let local = match local {
+            Some(f) => f,
+            None => {
+                // 线上独有的字段：本地自动补同名字段，否则这些列的值在卡片上没有落点。
+                // 类型随线上（单选给选项表；数字/文本/日期只建壳）。GitHub 内置字段不建。
+                if GH_BUILTIN_FIELDS.iter().any(|n| n.eq_ignore_ascii_case(&remote_field.name)) {
+                    continue;
+                }
+                let kind = match remote_field.data_type.as_deref().unwrap_or("SINGLE_SELECT") {
+                    "NUMBER" => "number",
+                    "TEXT" => "text",
+                    "DATE" => "date",
+                    "SINGLE_SELECT" => "single_select",
+                    _ => continue, // ITERATION / 关联等类型本地不建模
+                };
+                if kind != "single_select" && remote_field.options.is_empty() {
+                    projects::field_create_in(&app, &project_id, &remote_field.name, kind, &[])?;
+                    continue;
+                }
+                let names: Vec<String> = remote_field.options.iter().map(|o| o.name.clone()).collect();
+                let created =
+                    projects::field_create_in(&app, &project_id, &remote_field.name, "single_select", &names)?;
+                projects::field_set_options_in(
+                    &app,
+                    &created.id,
+                    &map_remote_options(&created.id, Some(&created.options), &remote_field.options),
+                )?;
+                continue;
+            }
+        };
+        // 同名选项保留本地 id（item 既有值不丢）；新名称用线上名派生稳定 id。
+        // 线上是列设置的真源：本地独有选项在此被覆盖掉（用户要的「更新即覆盖」）。
+        let options = map_remote_options(&local.id, Some(&local.options), &remote_field.options);
+        if !options.is_empty() {
+            projects::field_set_options_in(&app, &local.id, &options)?;
+        }
+    }
+
+    let items = snap.items;
+    let fields = projects::fields_in(&app, &project_id)?;
+    let mut imported = 0u32;
+    let mut skipped = 0u32;
+    for it in items {
+        let (Some(full), Some(num)) = (it.repo_full_name.clone(), it.number) else {
+            skipped += 1; // 草稿条目：平台侧草稿，本地无对应实体
+            continue;
+        };
+        let repo_id: Option<String> = app
+            .query_row(
+                "SELECT id FROM repos WHERE remote_url LIKE '%' || ?1 || '%' ORDER BY last_opened_at DESC LIMIT 1",
+                (&full,),
+                |row| row.get(0),
+            )
+            .ok();
+        let Some(repo_id) = repo_id else {
+            skipped += 1; // 仓库未登记：不静默登记，交由用户在「切换仓库」里处理
+            continue;
+        };
+        let number = num.to_string();
+        let existing: Option<String> = app
+            .query_row(
+                "SELECT id FROM project_items WHERE project_id = ?1 AND kind = 'issue' AND repo_id = ?2 AND number = ?3",
+                (&project_id, &repo_id, &number),
+                |row| row.get(0),
+            )
+            .ok();
+        let item_id = match existing {
+            Some(id) => id,
+            None => {
+                let created = projects::item_add_in(
+                    &app,
+                    &project_id,
+                    "issue",
+                    Some(&repo_id),
+                    Some(&number),
+                    it.title.as_deref(),
+                    None,
+                )?;
+                imported += 1;
+                created.id
+            }
+        };
+        // 字段值按**线上字段名**（含别名）对齐写回：
+        // 单选查选项 id（对不上就保持原值），数字/文本/日期存文本。
+        for field in fields.iter().filter(|f| {
+            matches!(f.kind.as_str(), "builtin_status" | "single_select" | "number" | "text" | "date")
+        }) {
+            let Some(raw) = it.values.get(online_field_name(field)) else { continue };
+            if field.kind == "builtin_status" || field.kind == "single_select" {
+                if let Some(opt) = field.options.iter().find(|o| o.name.eq_ignore_ascii_case(raw)) {
+                    projects::set_field_value_in(&app, &item_id, &field.id, Some(&opt.id))?;
+                }
+                continue;
+            }
+            projects::set_field_value_in(&app, &item_id, &field.id, Some(raw))?;
+        }
+    }
+    app.execute(
+        "UPDATE projects SET synced_at = ?2 WHERE id = ?1",
+        rusqlite::params![project_id, appdb::chrono_like_now()],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok((imported, skipped))
+}
+
+/// 本地列 → 线上：把本地单选字段的选项表（名称/顺序/颜色/说明）整体推到线上项目。
+/// 覆盖式写入（updateProjectV2Field 的 singleSelectOptions 是整表替换）。
+/// 需要 project 写权限；权限不足时返回可读指引，本地列不受影响。
+#[tauri::command]
+fn project_publish_columns(project_id: String) -> Result<u32, String> {
+    let app = appdb::open().map_err(|e| e.to_string())?;
+    let project = projects::project_get_in(&app, &project_id)?;
+    let r#ref = project.platform_ref.clone().ok_or_else(|| "该项目未绑定线上项目".to_string())?;
+    let kind = project.platform_kind.clone().unwrap_or_else(|| "github".to_string());
+    if kind != "github" {
+        return Err("目前仅支持发布到 GitHub Projects".to_string());
+    }
+    let (owner_kind, owner, number) = parse_project_ref(&r#ref)?;
+    let fields = projects::fields_in(&app, &project_id)?;
+    let mut published = 0u32;
+    for field in fields
+        .iter()
+        .filter(|f| f.kind == "builtin_status" || f.kind == "single_select")
+    {
+        if field.options.is_empty() {
+            continue;
+        }
+        // 线上字段名：与刷新侧同一套别名（状态→Status、优先级→Priority）
+        let online_name = online_field_name(field).to_string();
+        let opts: Vec<(String, String, Option<String>)> = field
+            .options
+            .iter()
+            .map(|o| (o.name.clone(), gh_color_name(&o.color).to_string(), o.description.clone()))
+            .collect();
+        match gh::publish_field_options(&owner_kind, &owner, number, &online_name, &opts) {
+            Ok(()) => published += 1,
+            // 线上没有该字段（本地自建列）：跳过，不算失败
+            Err(e) if e.to_string().contains("没有名为") => continue,
+            Err(e) => return Err(e.to_string()),
+        }
+    }
+    Ok(published)
+}
+
 #[tauri::command]
 fn remote_repo_list(platform: String, host: String) -> Result<Vec<source::RemoteRepoInfo>, String> {
     match platform.as_str() {
@@ -539,6 +1102,28 @@ pub fn run() {
             gh_auth_with_token,
             gh_auth_user,
             pick_repo,
+            kb::kb_pick_root,
+            kb::kb_list_dir,
+            kb::kb_walk,
+            kb::kb_search,
+            kb::kb_stat,
+            kb::kb_read_text,
+            kb::kb_read_bytes,
+            kb::kb_write_text,
+            kb::kb_create,
+            kb::kb_write_bytes,
+            kb::kb_rename,
+            kb::kb_copy,
+            kb::kb_move,
+            kb::kb_delete,
+            kb::kb_pick_app,
+            kb::kb_open_prefs_get,
+            kb::kb_open_prefs_set,
+            kb::kb_open_external,
+            save_text_file,
+            remote_project_list,
+            project_sync_items,
+            project_publish_columns,
             repo_info,
             refresh_issues,
             list_cached_issues,
@@ -555,14 +1140,28 @@ pub fn run() {
             create_milestone,
             remote_branch_list,
             milestone_list,
+            label_list,
+            assignee_list,
+            create_label,
+            set_milestone_state,
+            update_milestone,
             set_issue_state,
+            issue_set_locked,
+            issue_delete,
+            update_issue,
+            issue_update_milestone,
+            issue_update_labels,
+            issue_update_assignees,
             projects::project_create,
+            projects::project_import_remote,
             projects::project_list,
             projects::project_update,
             projects::project_archive,
             projects::project_delete,
             projects::project_fields,
             projects::project_field_set_options,
+            projects::project_field_create,
+            projects::project_field_option_add,
             projects::project_item_add,
             projects::project_item_list,
             projects::project_item_move,
@@ -580,10 +1179,12 @@ pub fn run() {
             merge_pull,
             log_line,
             git_history,
+            git_file_history,
             git_branches,
             git_fetch,
             branch_review_list,
             branch_review_diff,
+            pr_commits_between,
             branch_merge,
             branch_delete,
             pty::pty_spawn,
@@ -605,4 +1206,78 @@ pub fn run() {
         .manage(pty::PtyMap(std::sync::Mutex::new(std::collections::HashMap::new())))
         .run(tauri::generate_context!())
         .expect("error while running HiveTask");
+}
+
+#[cfg(test)]
+mod live_sync_tests {
+    /// 实机把本地列发布到线上（`cargo test -- --ignored` 手动触发；需要 project 写权限）。
+    /// 发布后回读线上选项表，验证「本地改列 → 线上列一致」。
+    #[test]
+    #[ignore]
+    fn publish_real_project_columns_round_trip() {
+        let app = crate::appdb::open().expect("打开 app.db");
+        let pid: String = app
+            .query_row(
+                "SELECT id FROM projects WHERE platform_ref LIKE '%users/zicowarn/projects/13%'",
+                (),
+                |r| r.get(0),
+            )
+            .expect("本地应有绑定的 PDFRefTrans 项目");
+        let published = super::project_publish_columns(pid.clone()).expect("发布应成功");
+        eprintln!("发布字段数：{published}");
+        let snap = crate::gh::fetch_project_items("user", "zicowarn", 13, 5).expect("回读线上字段");
+        let local = crate::projects::fields_in(&app, &pid).expect("读本地字段");
+        for lf in local
+            .iter()
+            .filter(|f| f.kind == "builtin_status" || f.kind == "single_select")
+        {
+            let online_name = super::online_field_name(lf);
+            let Some(rf) = snap.fields.iter().find(|f| f.name == online_name) else { continue };
+            let local_names: Vec<&str> = lf.options.iter().map(|o| o.name.as_str()).collect();
+            let online_names: Vec<&str> = rf.options.iter().map(|o| o.name.as_str()).collect();
+            eprintln!("{online_name}: 本地 {local_names:?} / 线上 {online_names:?}");
+            assert_eq!(local_names, online_names, "{online_name} 的列应与本地一致");
+        }
+    }
+
+    /// 实机对线上项目跑一次同步（网络 + 真实 app.db）：`cargo test -- --ignored` 手动触发。
+    /// 验证「线上独有的单选字段自动补成本地列」与「选项按线上覆盖」两条路径。
+    #[test]
+    #[ignore]
+    fn sync_real_project_pulls_online_columns() {
+        let app = crate::appdb::open().expect("打开 app.db");
+        let pid: String = app
+            .query_row(
+                "SELECT id FROM projects WHERE platform_ref LIKE '%users/zicowarn/projects/13%'",
+                (),
+                |r| r.get(0),
+            )
+            .expect("本地应有绑定的 PDFRefTrans 项目");
+        let (imported, skipped) = super::project_sync_items(pid.clone()).expect("同步应成功");
+        eprintln!("导入 {imported} 条，跳过 {skipped} 条");
+        let fields = crate::projects::fields_in(&app, &pid).expect("读字段");
+        let names: Vec<&str> = fields.iter().map(|f| f.name.as_str()).collect();
+        eprintln!("本地字段：{names:?}");
+        assert!(names.contains(&"Size"), "线上 Size 应补成本地列：{names:?}");
+        let size = fields.iter().find(|f| f.name == "Size").unwrap();
+        let opt_names: Vec<&str> = size.options.iter().map(|o| o.name.as_str()).collect();
+        eprintln!("Size 选项：{opt_names:?} 颜色：{:?}", size.options.iter().map(|o| o.color.as_str()).collect::<Vec<_>>());
+        assert_eq!(opt_names, ["XS", "S", "M", "L", "XL"], "Size 选项应与线上一致");
+        // 数字字段（Estimate）也要补成本地列，并把线上值写回条目
+        let est = fields.iter().find(|f| f.name == "Estimate").expect("线上 Estimate 应补成本地列");
+        assert_eq!(est.kind, "number");
+        let vals: i64 = app
+            .query_row(
+                "SELECT count(*) FROM project_field_values WHERE field_id = ?1 AND value IS NOT NULL AND value <> ''",
+                (&est.id,),
+                |r| r.get(0),
+            )
+            .unwrap();
+        eprintln!("Estimate 有值的条目：{vals}");
+        assert!(vals > 0, "Estimate 的值应落库（卡片 chip 的数据面）");
+        let status = fields.iter().find(|f| f.kind == "builtin_status").unwrap();
+        let st: Vec<&str> = status.options.iter().map(|o| o.name.as_str()).collect();
+        eprintln!("Status：{st:?}");
+        assert_eq!(st, ["Backlog", "Ready", "In progress", "In review", "Done"]);
+    }
 }

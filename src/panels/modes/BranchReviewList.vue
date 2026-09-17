@@ -7,6 +7,7 @@ import { onMounted } from "vue";
 import { storeToRefs } from "pinia";
 import { useBranchReviewStore } from "../../stores/branchReview";
 import { useI18n } from "../../i18n";
+import DropdownMenu from "../../components/DropdownMenu.vue";
 
 const store = useBranchReviewStore();
 const { branches, base, selected, loading, error } = storeToRefs(store);
@@ -22,9 +23,12 @@ onMounted(() => {
     <div class="br-bar">
       <label class="br-base">
         <span class="br-base-label">{{ t("branchReview.base") }}</span>
-        <select class="br-base-select" :value="base" @change="store.setBase(($event.target as HTMLSelectElement).value)">
-          <option v-for="n in store.baseChoices" :key="n" :value="n">{{ n }}</option>
-        </select>
+        <DropdownMenu
+          class="br-base-dd"
+          :options="store.baseChoices.map((n) => ({ value: n, label: n }))"
+          :model-value="base ?? ''"
+          @update:model-value="store.setBase($event as string)"
+        />
       </label>
       <span v-if="loading" class="br-loading">{{ t("list.loading") }}</span>
     </div>
@@ -74,13 +78,8 @@ onMounted(() => {
   font-size: var(--font-sm);
   color: var(--text-dim);
 }
-.br-base-select {
-  font-size: var(--font-md);
-  color: var(--text);
-  background: var(--bg-app);
-  border: 1px solid var(--border);
-  border-radius: 5px;
-  padding: 2px 6px;
+.br-base-dd {
+  width: 140px;
 }
 .br-loading {
   font-size: var(--font-sm);

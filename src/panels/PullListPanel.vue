@@ -60,7 +60,7 @@ function timeLabel(iso?: string | null): string {
         </button>
       </div>
       <span class="toolbar-spacer"></span>
-      <button class="refresh-btn" :disabled="loading" @click="store.refresh()">
+      <button class="refresh-btn" :disabled="loading" :title="t('pull.refreshHint')" @click="store.refresh()">
         {{ loading ? t("common.syncing") : t("common.refresh") }}
       </button>
       <button class="refresh-btn create-btn" @click="createOpen = true">

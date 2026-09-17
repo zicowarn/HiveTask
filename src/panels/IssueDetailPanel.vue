@@ -1,22 +1,67 @@
 <script setup lang="ts">
-import { watch } from "vue";
+import { computed, ref, watch } from "vue";
 import { storeToRefs } from "pinia";
 import PanelShell from "../workbench/PanelShell.vue";
 import MarkdownView from "../components/MarkdownView.vue";
 import CommentsSection from "../components/CommentsSection.vue";
+import MilestoneDetailView from "./MilestoneDetailView.vue";
 import { stripHtmlComments } from "../components/markdown";
 import { useIssuesStore } from "../stores/issues";
 import { useRepoStore } from "../stores/repo";
 import { useI18n } from "../i18n";
+import { translateError } from "../gh-errors";
 import { useCloseReopen } from "./close-reopen";
 import { stateLabel } from "./state-label";
+import { openOnLabel } from "./platform-label";
+import { chipStyle } from "./label-chip";
 
 defineProps<{ leafId?: string; panelType?: string }>();
 
 const issues = useIssuesStore();
 const repo = useRepoStore();
-const { selected } = storeToRefs(issues);
+// 选中主体二选一：里程碑选中时右栏整体让位给里程碑详情（派生式，
+// 无独立 mode 注册）。
+const { selected, selectedMilestone } = storeToRefs(issues);
 const { t } = useI18n();
+
+// ---- 编辑态（查看 ⇄ 编辑显式切换）----
+// 契约：保存 = 写穿透（失败留在编辑态，输入不丢，重试 = 再点保存）；
+// Esc 等于取消（回到查看态，显示远端原值）。
+const editing = ref(false);
+const editTitle = ref("");
+const editBody = ref("");
+const saving = ref(false);
+const editError = ref<string | null>(null);
+
+function startEdit() {
+  if (!selected.value) return;
+  editTitle.value = selected.value.title;
+  editBody.value = selected.value.body ?? "";
+  editError.value = null;
+  editing.value = true;
+}
+
+function cancelEdit() {
+  editing.value = false;
+  editError.value = null;
+}
+
+async function saveEdit() {
+  const issue = selected.value;
+  const title = editTitle.value.trim();
+  if (!issue || !title || saving.value) return;
+  saving.value = true;
+  editError.value = null;
+  try {
+    await issues.updateIssue(issue.number, title, editBody.value.trim() || undefined);
+    editing.value = false;
+  } catch (e) {
+    // 留在现场：编辑内容与错误横幅都保留，重试 = 再点保存
+    editError.value = translateError(String(e));
+  } finally {
+    saving.value = false;
+  }
+}
 
 const {
   armed: closeArmed,
@@ -47,6 +92,16 @@ function hasVisibleBody(body?: string | null): boolean {
   return !!body && stripHtmlComments(body).trim().length > 0;
 }
 
+/** 编辑态对选中主体失效即退出（切选中/切仓库/里程碑派生接管）。 */
+watch(
+  () => selected.value?.number,
+  () => {
+    if (editing.value) cancelEdit();
+  },
+);
+
+const openBtnLabel = computed(() => openOnLabel(repo.platform));
+
 function openUrl(url?: string | null) {
   if (!url) return;
   // opener plugin opens the system browser; in plain-browser preview fall
@@ -61,7 +116,9 @@ function openUrl(url?: string | null) {
 
 <template>
   <PanelShell :leaf-id="leafId" :panel-type="panelType">
-    <template v-if="selected">
+    <MilestoneDetailView v-if="selectedMilestone" :title="selectedMilestone" />
+
+    <template v-else-if="selected">
       <header class="detail-header">
         <div class="detail-title-row">
           <span class="detail-number">#{{ selected.number }}</span>
@@ -70,6 +127,7 @@ function openUrl(url?: string | null) {
             class="state-action"
             :class="{ armed: closeArmed }"
             :disabled="closeWorking"
+            :title="selected.state === 'OPEN' ? t('detail.closeHint') : t('detail.reopenHint')"
             @click="selected.state === 'OPEN' ? closeClick() : reopenClick()"
           >
             {{
@@ -82,16 +140,60 @@ function openUrl(url?: string | null) {
                   : t("detail.reopen")
             }}
           </button>
+          <button
+            v-if="!editing"
+            class="state-action"
+            :title="t('detail.editHint')"
+            @click="startEdit"
+          >{{ t("detail.edit") }}</button>
         </div>
-        <h2 class="detail-title">{{ selected.title }}</h2>
-        <div class="detail-tags">
-          <span v-for="label in selected.labels" :key="label" class="detail-label">{{ label }}</span>
-        </div>
+
+        <template v-if="!editing">
+          <h2 class="detail-title">{{ selected.title }}</h2>
+          <div class="detail-tags">
+            <span
+              v-for="label in selected.labels"
+              :key="label"
+              class="detail-label"
+              :style="chipStyle(issues.labelColor(label))"
+            >{{ label }}</span>
+          </div>
+        </template>
+        <input
+          v-else
+          v-model="editTitle"
+          class="edit-title"
+          :placeholder="t('issue.titlePlaceholder')"
+          spellcheck="false"
+          @keydown.enter.prevent="saveEdit"
+          @keydown.esc.prevent="cancelEdit"
+        />
       </header>
 
       <div class="detail-body">
-        <MarkdownView v-if="hasVisibleBody(selected.body)" :source="selected.body" />
-        <p v-else class="detail-nobody">{{ t("common.noBody") }}</p>
+        <p v-if="editError" class="edit-error">{{ editError }}</p>
+
+        <template v-if="!editing">
+          <MarkdownView v-if="hasVisibleBody(selected.body)" :source="selected.body" />
+          <p v-else class="detail-nobody">{{ t("common.noBody") }}</p>
+        </template>
+        <template v-else>
+          <textarea
+            v-model="editBody"
+            class="edit-body"
+            :placeholder="t('issue.bodyPlaceholder')"
+            rows="10"
+            spellcheck="false"
+          ></textarea>
+          <div class="edit-actions">
+            <button class="edit-btn" :disabled="saving" @click="cancelEdit">
+              {{ t("conn.cancel") }}
+            </button>
+            <button class="edit-btn primary" :disabled="saving || !editTitle.trim()" @click="saveEdit">
+              {{ saving ? t("common.syncing") : t("detail.save") }}
+            </button>
+          </div>
+        </template>
 
         <CommentsSection
           :comments="issues.comments"
@@ -103,13 +205,20 @@ function openUrl(url?: string | null) {
 
       <footer class="detail-footer">
         <div class="detail-people">
-          <template v-if="selected.author">{{ t("common.author", { name: selected.author }) }}</template>
-          <template v-if="selected.assignees.length">
-            　·　{{ t("common.assignees", { name: selected.assignees.join(", ") }) }}
+          <template v-if="!editing">
+            <template v-if="selected.author">{{ t("common.author", { name: selected.author }) }}</template>
+            <template v-if="selected.assignees.length">
+              　·　{{ t("common.assignees", { name: selected.assignees.join(", ") }) }}
+            </template>
           </template>
+          <button v-else class="edit-entry" @click="cancelEdit">{{ t("detail.cancelEdit") }}</button>
         </div>
-        <button v-if="selected.url" class="open-github" @click="openUrl(selected.url)">
-          {{ t("common.openInGithub") }}
+        <button
+          v-if="!editing && selected.url && openBtnLabel"
+          class="open-github"
+          @click="openUrl(selected.url)"
+        >
+          {{ openBtnLabel }}
         </button>
       </footer>
     </template>
@@ -156,6 +265,10 @@ function openUrl(url?: string | null) {
   border-color: var(--danger);
   background: var(--danger-soft);
   color: var(--danger);
+}
+/* 组内第二个管理按钮（编辑）贴着前一个，不再参与右推 */
+.state-action + .state-action {
+  margin-left: 0;
 }
 .state-action:disabled {
   opacity: 0.5;
@@ -227,6 +340,84 @@ function openUrl(url?: string | null) {
 .open-github:hover {
   border-color: var(--accent);
   background: var(--bg-hover);
+}
+/* ---- 编辑态（查看 ⇄ 编辑显式切换）---- */
+.edit-title {
+  box-sizing: border-box;
+  width: 100%;
+  margin-top: 8px;
+  font-size: var(--font-xl);
+  font-weight: 600;
+  font-family: inherit;
+  color: var(--text);
+  background: var(--bg-app);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 10px;
+  outline: none;
+}
+.edit-title:focus {
+  border-color: var(--accent);
+}
+.edit-error {
+  margin: 0 0 10px;
+  padding: 7px 10px;
+  font-size: var(--font-md);
+  color: var(--danger);
+  background: var(--danger-banner);
+  border: 1px solid var(--danger-banner-border);
+  border-radius: 6px;
+  word-break: break-all;
+}
+.edit-body {
+  box-sizing: border-box;
+  width: 100%;
+  font-size: var(--font-base);
+  font-family: inherit;
+  line-height: 1.5;
+  color: var(--text);
+  background: var(--bg-app);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px 10px;
+  outline: none;
+  resize: vertical;
+}
+.edit-body:focus {
+  border-color: var(--accent);
+}
+.edit-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 8px;
+}
+.edit-btn {
+  border: 1px solid var(--border);
+  background: var(--bg-panel);
+  color: var(--text);
+  font-size: var(--font-md);
+  height: 26px;
+  padding: 0 14px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.edit-btn.primary {
+  border-color: var(--accent);
+  color: var(--accent);
+  font-weight: 600;
+}
+.edit-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.edit-entry {
+  border: none;
+  background: transparent;
+  color: var(--accent);
+  font-size: var(--font-md);
+  cursor: pointer;
+  padding: 0;
 }
 .detail-empty {
   margin: auto;

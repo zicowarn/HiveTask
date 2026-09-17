@@ -17,10 +17,12 @@ import ProjectPanel from "../panels/ProjectPanel.vue";
 import SettingsPanel from "../panels/SettingsPanel.vue";
 import GitHistoryPanel from "../panels/GitHistoryPanel.vue";
 import TerminalPanel from "../panels/TerminalPanel.vue";
+import KnowledgeWorkbench from "../knowledge/KnowledgeWorkbench.vue";
 import IssueListMode from "../panels/modes/IssueListMode.vue";
 import IssueMilestoneMode from "../panels/modes/IssueMilestoneMode.vue";
 import ProjectBoardMode from "../panels/modes/ProjectBoardMode.vue";
 import ProjectTableMode from "../panels/modes/ProjectTableMode.vue";
+import ProjectRoadmapMode from "../panels/modes/ProjectRoadmapMode.vue";
 import SettingsBasicMode from "../panels/modes/SettingsBasicMode.vue";
 import { workspaces } from "./workspaces";
 import type { MessageKey } from "../i18n";
@@ -63,7 +65,9 @@ registerPanel("pull.detail", PullDetailPanel);
 registerPanel("project.board", ProjectPanel, [
   { key: "board", labelKey: "mode.board", component: ProjectBoardMode },
   { key: "table", labelKey: "mode.table", component: ProjectTableMode },
+  { key: "roadmap", labelKey: "mode.roadmap", component: ProjectRoadmapMode },
 ]);
+registerPanel("knowledge.workbench", KnowledgeWorkbench);
 registerPanel("git.history", GitHistoryPanel);
 registerPanel("terminal", TerminalPanel);
 registerPanel("settings", SettingsPanel, [

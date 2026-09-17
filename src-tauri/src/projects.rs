@@ -21,6 +21,10 @@ pub struct Project {
     pub group_tag: Option<String>,
     /// 归属接入（切换项目对话框按它分 Tab）；NULL = 本地/未接入。
     pub connection_id: Option<String>,
+    /// 平台绑定（导入线上 Projects 时记录；NULL = 纯本地项目）。
+    pub platform_kind: Option<String>,
+    pub platform_host: Option<String>,
+    pub platform_ref: Option<String>,
     pub archived: bool,
     pub created_at: String,
     pub updated_at: String,
@@ -31,6 +35,9 @@ pub struct FieldOption {
     pub id: String,
     pub name: String,
     pub color: String,
+    /// 选项说明（GitHub 的 Description：显示在组头与取值面板）；旧数据缺省为空。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -63,6 +70,25 @@ pub struct ProjectItem {
     pub ghost: bool,
     /// 字段值 map（field_id → value）。
     pub field_values: std::collections::BTreeMap<String, String>,
+    /// 引用实体的只读元数据（跨库读仓库缓存，草稿/悬挂/未同步为 None）。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub entity: Option<EntityMeta>,
+}
+
+/// 引用实体（Issue / PR）的镜像元数据——项目容器只存引用，正文元数据留在
+/// 各仓库缓存库里；这里按需补齐，让看板字段面板能列出 GitHub 同名的那些维度
+/// （标题 / 开闭 / 作者 / 负责人 / 标签 / 里程碑 / 创建 / 更新时间）。
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EntityMeta {
+    pub title: String,
+    pub state: String,
+    pub author: Option<String>,
+    pub assignees: Vec<String>,
+    pub labels: Vec<String>,
+    pub milestone: Option<String>,
+    pub created_at: Option<String>,
+    pub updated_at: Option<String>,
 }
 
 /// rank 间距基数：新条目追加为 max+GAP；中值插入不足时全列重排。
@@ -81,6 +107,9 @@ fn project_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Project> {
         description: row.get("description")?,
         group_tag: row.get("group_tag")?,
         connection_id: row.get("connection_id")?,
+        platform_kind: row.get("platform_kind")?,
+        platform_host: row.get("platform_host")?,
+        platform_ref: row.get("platform_ref")?,
         archived: row.get::<_, i64>("archived")? != 0,
         created_at: row.get("created_at")?,
         updated_at: row.get("updated_at")?,
@@ -114,6 +143,19 @@ pub fn project_create_in(
     description: Option<&str>,
     connection_id: Option<&str>,
 ) -> Result<Project, String> {
+    project_create_with_binding_in(conn, name, description, connection_id, None, None, None)
+}
+
+/// 创建项目并可同时记录平台绑定（导入线上 Projects 用）。
+pub fn project_create_with_binding_in(
+    conn: &Connection,
+    name: &str,
+    description: Option<&str>,
+    connection_id: Option<&str>,
+    platform_kind: Option<&str>,
+    platform_host: Option<&str>,
+    platform_ref: Option<&str>,
+) -> Result<Project, String> {
     if name.trim().is_empty() {
         return Err("项目名不能为空".to_string());
     }
@@ -127,9 +169,17 @@ pub fn project_create_in(
     }
     let id = uuid();
     conn.execute(
-        "INSERT INTO projects (id, display_name, description, connection_id, created_at, updated_at, last_opened_at)
-         VALUES (?1, ?2, ?3, ?4, ?1, ?1, ?1)",
-        rusqlite::params![id, name.trim(), description, connection_id],
+        "INSERT INTO projects (id, display_name, description, connection_id, platform_kind, platform_host, platform_ref, created_at, updated_at, last_opened_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?1, ?1, ?1)",
+        rusqlite::params![
+            id,
+            name.trim(),
+            description,
+            connection_id,
+            platform_kind,
+            platform_host,
+            platform_ref
+        ],
     )
     .map_err(|e| e.to_string())?;
     seed_fields(conn, &id)?;
@@ -140,15 +190,15 @@ pub fn project_create_in(
 /// 列名可改（field options 重写即可），自动化按名匹配 "Done"。
 fn seed_fields(conn: &Connection, project_id: &str) -> Result<(), String> {
     let status = serde_json::to_string(&[
-        FieldOption { id: format!("{project_id}-s1"), name: "Todo".into(), color: "#8b949e".into() },
-        FieldOption { id: format!("{project_id}-s2"), name: "In Progress".into(), color: "#d29922".into() },
-        FieldOption { id: format!("{project_id}-s3"), name: "Done".into(), color: "#3fb950".into() },
+        FieldOption { id: format!("{project_id}-s1"), name: "Todo".into(), color: GRAY.into(), description: None },
+        FieldOption { id: format!("{project_id}-s2"), name: "In Progress".into(), color: YELLOW.into(), description: None },
+        FieldOption { id: format!("{project_id}-s3"), name: "Done".into(), color: GREEN.into(), description: None },
     ])
     .map_err(|e| e.to_string())?;
     let priority = serde_json::to_string(&[
-        FieldOption { id: format!("{project_id}-p1"), name: "P0".into(), color: "#f85149".into() },
-        FieldOption { id: format!("{project_id}-p2"), name: "P1".into(), color: "#d29922".into() },
-        FieldOption { id: format!("{project_id}-p3"), name: "P2".into(), color: "#8b949e".into() },
+        FieldOption { id: format!("{project_id}-p1"), name: "P0".into(), color: RED.into(), description: None },
+        FieldOption { id: format!("{project_id}-p2"), name: "P1".into(), color: YELLOW.into(), description: None },
+        FieldOption { id: format!("{project_id}-p3"), name: "P2".into(), color: GRAY.into(), description: None },
     ])
     .map_err(|e| e.to_string())?;
     conn.execute(
@@ -240,6 +290,118 @@ pub fn status_field_in(conn: &Connection, project_id: &str) -> Result<Option<Pro
         .find(|f| f.kind == "builtin_status"))
 }
 
+pub fn field_get_in(conn: &Connection, field_id: &str) -> Result<Option<ProjectField>, String> {
+    let mut stmt = conn.prepare("SELECT * FROM project_fields WHERE id = ?1").map_err(|e| e.to_string())?;
+    let mut rows = stmt.query_map((field_id,), field_from_row).map_err(|e| e.to_string())?;
+    match rows.next() {
+        Some(row) => row.map(Some).map_err(|e| e.to_string()),
+        None => Ok(None),
+    }
+}
+
+/// 分列字段解析：显式 field_id 优先（视图「分列方式」可选任一单选字段），
+/// 缺省回落内置状态字段（既有行为）。
+fn column_field_in(conn: &Connection, project_id: &str, field_id: Option<&str>) -> Result<ProjectField, String> {
+    match field_id {
+        Some(fid) => field_get_in(conn, fid)?.ok_or_else(|| "未知字段".to_string()),
+        None => status_field_in(conn, project_id)?.ok_or_else(|| "项目缺少状态字段".to_string()),
+    }
+}
+
+/// 自建字段类型（对齐 GitHub 的最小集；值一律以文本落库，类型只影响渲染与校验）。
+pub const CUSTOM_FIELD_KINDS: [&str; 4] = ["single_select", "text", "number", "date"];
+
+/// 单选选项默认配色（按声明顺序轮转）。
+const GRAY: &str = "#59636e";
+const YELLOW: &str = "#9a6700";
+const GREEN: &str = "#1a7f37";
+const RED: &str = "#d1242f";
+
+/// 选项可选色（GitHub 的八色选项调色板，取自平台页面）。
+const OPTION_PALETTE: [&str; 8] = [GRAY, "#0969da", GREEN, YELLOW, "#bc4c00", RED, "#bf3989", "#8250df"];
+
+/// 新建字段：position 追加到末尾；单选至少给一个选项名（id 与颜色由后端配）。
+pub fn field_create_in(
+    conn: &Connection,
+    project_id: &str,
+    name: &str,
+    kind: &str,
+    option_names: &[String],
+) -> Result<ProjectField, String> {
+    let name = name.trim();
+    if name.is_empty() {
+        return Err("字段名不能为空".to_string());
+    }
+    if !CUSTOM_FIELD_KINDS.contains(&kind) {
+        return Err("不支持的字段类型".to_string());
+    }
+    let existing = fields_in(conn, project_id)?;
+    if existing.iter().any(|f| f.name == name) {
+        return Err("字段名已存在".to_string());
+    }
+    let names: Vec<String> = option_names
+        .iter()
+        .map(|n| n.trim().to_string())
+        .filter(|n| !n.is_empty())
+        .collect();
+    if kind == "single_select" && names.is_empty() {
+        return Err("单选字段至少需要一个选项".to_string());
+    }
+    let position = existing.iter().map(|f| f.position).max().map(|m| m + 1).unwrap_or(0);
+    let id = format!("{}-{}", project_id, crate::appdb::uuid());
+    let options: Vec<FieldOption> = if kind == "single_select" {
+        names
+            .iter()
+            .enumerate()
+            .map(|(i, n)| FieldOption {
+                id: format!("{id}-o{i}"),
+                name: n.clone(),
+                color: OPTION_PALETTE[i % OPTION_PALETTE.len()].to_string(),
+                description: None,
+            })
+            .collect()
+    } else {
+        Vec::new()
+    };
+    let json = serde_json::to_string(&options).map_err(|e| e.to_string())?;
+    conn.execute(
+        "INSERT INTO project_fields (id, project_id, kind, name, options, position)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        rusqlite::params![id, project_id, kind, name, json, position],
+    )
+    .map_err(|e| e.to_string())?;
+    field_get_in(conn, &id)?.ok_or_else(|| "字段创建失败".to_string())
+}
+
+/// 追加一个选项（新建列 / 新建泳道段）：id 与位置由后端定，颜色取调色板。
+pub fn field_option_add_in(
+    conn: &Connection,
+    field_id: &str,
+    name: &str,
+    color: Option<&str>,
+) -> Result<ProjectField, String> {
+    let name = name.trim();
+    if name.is_empty() {
+        return Err("名称不能为空".to_string());
+    }
+    let field = field_get_in(conn, field_id)?.ok_or_else(|| "未知字段".to_string())?;
+    if field.options.iter().any(|o| o.name == name) {
+        return Err("同名选项已存在".to_string());
+    }
+    let next = field.options.len();
+    let mut options = field.options.clone();
+    options.push(FieldOption {
+        id: format!("{}-o{}", field.id, crate::appdb::uuid()),
+        name: name.to_string(),
+        color: color
+            .map(|c| c.to_string())
+            .unwrap_or_else(|| OPTION_PALETTE[next % OPTION_PALETTE.len()].to_string()),
+        description: None,
+    });
+    field_set_options_in(conn, &field.id, &options)?;
+    field_get_in(conn, field_id)?.ok_or_else(|| "字段读取失败".to_string())
+}
+
 /// 重写单选字段的 options（改名/调色/排序；item 既有值按 option id 存，
 /// 改名无损）。
 pub fn field_set_options_in(conn: &Connection, field_id: &str, options: &[FieldOption]) -> Result<(), String> {
@@ -256,24 +418,133 @@ pub fn field_set_options_in(conn: &Connection, field_id: &str, options: &[FieldO
 // ---- 条目 ----
 
 fn item_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ProjectItem> {
+    let repo_id: Option<String> = row.get("repo_id")?;
+    // 悬挂 = 条目引用了某个仓库、但登记行已被删（JOIN 落空）。
+    // 草稿的 repo_id 本来就为空，不属于悬挂——早先只看 JOIN 会把所有草稿误标 ghost。
+    let ghost = repo_id.is_some() && row.get::<_, Option<String>>("joined_repo_id")?.is_none();
     Ok(ProjectItem {
         id: row.get("id")?,
         project_id: row.get("project_id")?,
         kind: row.get("kind")?,
-        repo_id: row.get("repo_id")?,
+        repo_id,
         number: row.get("number")?,
         draft_title: row.get("draft_title")?,
         draft_body: row.get("draft_body")?,
         rank: row.get("rank")?,
         added_at: row.get("added_at")?,
         repo_label: row.get("repo_label")?,
-        ghost: row.get::<_, Option<String>>("joined_repo_id")?.is_none(),
+        ghost,
         field_values: std::collections::BTreeMap::new(),
+        entity: None,
     })
 }
 
 const ITEM_SELECT: &str = "SELECT i.*, r.display_name AS repo_label, r.id AS joined_repo_id
  FROM project_items i LEFT JOIN repos r ON r.id = i.repo_id";
+
+/// 注册仓库的缓存目录：本地克隆 → <repo>/.hivetask；仅远端登记 →
+/// app data 的 repos-cache/<owner>/<repo>（与 storage_dir_of 同口径）。
+fn cache_dir_for_repo(conn: &Connection, repo_id: &str) -> Option<std::path::PathBuf> {
+    let (path, remote_url): (Option<String>, Option<String>) = conn
+        .query_row("SELECT path, remote_url FROM repos WHERE id = ?1", (repo_id,), |row| {
+            Ok((row.get(0)?, row.get(1)?))
+        })
+        .ok()?;
+    if let Some(dir) = path.filter(|p| !p.is_empty()) {
+        return Some(std::path::PathBuf::from(dir).join(".hivetask"));
+    }
+    let url = remote_url.filter(|u| !u.is_empty())?;
+    let repo = crate::source::resolve_target(&url).ok()?;
+    crate::appdb::remote_cache_dir(&repo.owner, &repo.repo)
+}
+
+/// 只读打开仓库缓存库；不存在（从未同步）即返回 None，不因缺缓存报错。
+fn open_cache_readonly(dir: &std::path::Path) -> Option<Connection> {
+    let db = crate::storage::db_path(dir);
+    if !db.exists() {
+        return None;
+    }
+    Connection::open_with_flags(&db, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY).ok()
+}
+
+fn json_strings(raw: Option<String>) -> Vec<String> {
+    raw.and_then(|s| serde_json::from_str::<Vec<String>>(&s).ok()).unwrap_or_default()
+}
+
+/// 按 kind 从缓存库批量取实体元数据（number → meta）；缺表/缺列按空处理。
+fn entity_meta_map(
+    cache: &Connection,
+    kind: &str,
+    numbers: &[String],
+) -> std::collections::HashMap<String, EntityMeta> {
+    let mut out = std::collections::HashMap::new();
+    if numbers.is_empty() {
+        return out;
+    }
+    // pulls 表没有 milestone 列（对齐 GitHub：PR 不挂仓库里程碑）
+    let (table, milestone_col) = if kind == "pull" { ("pulls", "NULL") } else { ("issues", "milestone") };
+    let placeholders = vec!["?"; numbers.len()].join(",");
+    let sql = format!(
+        "SELECT number, title, state, author, assignees, labels, {milestone_col}, created_at, updated_at
+         FROM {table} WHERE number IN ({placeholders})"
+    );
+    let Ok(mut stmt) = cache.prepare(&sql) else {
+        return out;
+    };
+    let params: Vec<&dyn rusqlite::ToSql> = numbers.iter().map(|n| n as &dyn rusqlite::ToSql).collect();
+    let Ok(rows) = stmt.query_map(params.as_slice(), |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            EntityMeta {
+                title: row.get(1)?,
+                state: row.get(2)?,
+                author: row.get(3)?,
+                assignees: json_strings(row.get(4)?),
+                labels: json_strings(row.get(5)?),
+                milestone: row.get(6)?,
+                created_at: row.get(7)?,
+                updated_at: row.get(8)?,
+            },
+        ))
+    }) else {
+        return out;
+    };
+    for row in rows.flatten() {
+        out.insert(row.0, row.1);
+    }
+    out
+}
+
+/// 给条目补齐引用实体元数据（读不到就留 None）。项目容器在 app.db、实体元数据
+/// 在各仓库缓存库，故按 repo 分组、每个仓库只开一次库。
+fn enrich_items(conn: &Connection, items: &mut [ProjectItem]) {
+    let mut by_repo: std::collections::BTreeMap<String, Vec<(String, usize)>> =
+        std::collections::BTreeMap::new();
+    for (idx, item) in items.iter().enumerate() {
+        if item.kind == "draft" {
+            continue;
+        }
+        if let (Some(repo_id), Some(number)) = (item.repo_id.clone(), item.number.clone()) {
+            by_repo.entry(repo_id).or_default().push((number, idx));
+        }
+    }
+    for (repo_id, refs) in by_repo {
+        let Some(dir) = cache_dir_for_repo(conn, &repo_id) else { continue };
+        let Some(cache) = open_cache_readonly(&dir) else { continue };
+        for kind in ["issue", "pull"] {
+            let refs_of_kind: Vec<(String, usize)> = refs
+                .iter()
+                .filter(|(_, idx)| items[*idx].kind == kind)
+                .cloned()
+                .collect();
+            let numbers: Vec<String> = refs_of_kind.iter().map(|(n, _)| n.clone()).collect();
+            let meta = entity_meta_map(&cache, kind, &numbers);
+            for (number, idx) in refs_of_kind {
+                items[idx].entity = meta.get(&number).cloned();
+            }
+        }
+    }
+}
 
 fn load_field_values(conn: &Connection, items: &mut [ProjectItem]) -> Result<(), String> {
     let mut stmt = conn
@@ -305,6 +576,7 @@ pub fn item_list_in(conn: &Connection, project_id: &str) -> Result<Vec<ProjectIt
     let rows = stmt.query_map((project_id,), item_from_row).map_err(|e| e.to_string())?;
     let mut items = rows.collect::<std::result::Result<Vec<_>, _>>().map_err(|e| e.to_string())?;
     load_field_values(conn, &mut items)?;
+    enrich_items(conn, &mut items);
     Ok(items)
 }
 
@@ -314,6 +586,7 @@ pub fn item_get_in(conn: &Connection, item_id: &str) -> Result<ProjectItem, Stri
         .query_row(&sql, (item_id,), item_from_row)
         .map_err(|_| "条目不存在".to_string())?;
     load_field_values(conn, std::slice::from_mut(&mut item))?;
+    enrich_items(conn, std::slice::from_mut(&mut item));
     Ok(item)
 }
 
@@ -390,7 +663,8 @@ pub fn item_update_draft_in(conn: &Connection, item_id: &str, title: &str, body:
 pub fn item_move_in(
     conn: &Connection,
     item_id: &str,
-    status_option_id: Option<&str>,
+    field_id: Option<&str>,
+    option_id: Option<&str>,
     prev_id: Option<&str>,
     next_id: Option<&str>,
 ) -> Result<ProjectItem, String> {
@@ -411,7 +685,7 @@ pub fn item_move_in(
         (None, None) => parse_rank(&item.rank),
         // 间距不足：全列重排后再取中值（罕见路径，保序正确性优先）
         _ => {
-            respace_column_in(conn, &project_id, status_option_id.as_deref())?;
+            respace_column_in(conn, &project_id, field_id, option_id)?;
             let prev_rank = prev_id.map(|id| neighbor_rank(id)).transpose()?;
             let next_rank = next_id.map(|id| neighbor_rank(id)).transpose()?;
             match (prev_rank, next_rank) {
@@ -425,21 +699,25 @@ pub fn item_move_in(
     conn.execute("UPDATE project_items SET rank = ?2 WHERE id = ?1", rusqlite::params![item_id, new_rank.to_string()])
         .map_err(|e| e.to_string())?;
 
-    if let Some(option_id) = status_option_id {
-        let field = status_field_in(conn, &project_id)?
-            .ok_or_else(|| "项目缺少状态字段".to_string())?;
-        if !field.options.iter().any(|o| o.id == option_id) {
-            return Err("未知的状态选项".to_string());
+    if let Some(opt_id) = option_id {
+        let field = column_field_in(conn, &project_id, field_id)?;
+        if !field.options.iter().any(|o| o.id == opt_id) {
+            return Err("未知的列选项".to_string());
         }
-        set_field_value_in(conn, item_id, &field.id, Some(option_id))?;
+        set_field_value_in(conn, item_id, &field.id, Some(opt_id))?;
     }
     item_get_in(conn, item_id)
 }
 
 /// 列内全量重排：按现有序 1024 等距（消除碎片化）。
-fn respace_column_in(conn: &Connection, project_id: &str, status_option_id: Option<&str>) -> Result<(), String> {
-    let field = status_field_in(conn, project_id)?.ok_or_else(|| "项目缺少状态字段".to_string())?;
-    let Some(option_id) = status_option_id else {
+fn respace_column_in(
+    conn: &Connection,
+    project_id: &str,
+    field_id: Option<&str>,
+    option_id: Option<&str>,
+) -> Result<(), String> {
+    let field = column_field_in(conn, project_id, field_id)?;
+    let Some(option_id) = option_id else {
         return Ok(()); // 不换列时无从界定列范围，保持原 rank（罕见且无害）
     };
     let sql = format!(
@@ -610,6 +888,26 @@ pub fn bound_repos_in(conn: &Connection, project_id: &str) -> Result<Vec<BoundRe
 // ---- 命令层（appdb 先例：命令在各自模块、_in 核心供测试） ----
 
 #[tauri::command]
+pub fn project_import_remote(
+    name: String,
+    connection_id: Option<String>,
+    platform_kind: String,
+    platform_host: String,
+    platform_ref: String,
+) -> Result<Project, String> {
+    let conn = crate::appdb::open().map_err(|e| e.to_string())?;
+    project_create_with_binding_in(
+        &conn,
+        &name,
+        None,
+        connection_id.as_deref(),
+        Some(&platform_kind),
+        Some(&platform_host),
+        Some(&platform_ref),
+    )
+}
+
+#[tauri::command]
 pub fn project_create(
     name: String,
     description: Option<String>,
@@ -678,12 +976,20 @@ pub fn project_item_list(project_id: String) -> Result<Vec<ProjectItem>, String>
 #[tauri::command]
 pub fn project_item_move(
     item_id: String,
-    status_option_id: Option<String>,
+    field_id: Option<String>,
+    option_id: Option<String>,
     prev_id: Option<String>,
     next_id: Option<String>,
 ) -> Result<ProjectItem, String> {
     let conn = crate::appdb::open().map_err(|e| e.to_string())?;
-    item_move_in(&conn, &item_id, status_option_id.as_deref(), prev_id.as_deref(), next_id.as_deref())
+    item_move_in(
+        &conn,
+        &item_id,
+        field_id.as_deref(),
+        option_id.as_deref(),
+        prev_id.as_deref(),
+        next_id.as_deref(),
+    )
 }
 
 #[tauri::command]
@@ -696,6 +1002,27 @@ pub fn project_item_remove(item_id: String) -> Result<(), String> {
 pub fn project_item_update_draft(item_id: String, title: String, body: Option<String>) -> Result<ProjectItem, String> {
     let conn = crate::appdb::open().map_err(|e| e.to_string())?;
     item_update_draft_in(&conn, &item_id, &title, body.as_deref())
+}
+
+#[tauri::command]
+pub fn project_field_create(
+    project_id: String,
+    name: String,
+    kind: String,
+    option_names: Vec<String>,
+) -> Result<ProjectField, String> {
+    let conn = crate::appdb::open().map_err(|e| e.to_string())?;
+    field_create_in(&conn, &project_id, &name, &kind, &option_names)
+}
+
+#[tauri::command]
+pub fn project_field_option_add(
+    field_id: String,
+    name: String,
+    color: Option<String>,
+) -> Result<ProjectField, String> {
+    let conn = crate::appdb::open().map_err(|e| e.to_string())?;
+    field_option_add_in(&conn, &field_id, &name, color.as_deref())
 }
 
 #[tauri::command]
@@ -770,14 +1097,66 @@ mod tests {
             Some(status.options[0].id.as_str())
         );
         // 把 c 移到 a、b 之间
-        item_move_in(&conn, &c.id, None, Some(&a.id), Some(&b.id)).unwrap();
+        item_move_in(&conn, &c.id, None, None, Some(&a.id), Some(&b.id)).unwrap();
         let items = item_list_in(&conn, &p.id).unwrap();
         assert_eq!(items.iter().map(|i| i.id.clone()).collect::<Vec<_>>(), [a_id.clone(), c_id.clone(), b_id.clone()]);
         // 换列：a 移到 Done
         let done = &status.options[2];
-        item_move_in(&conn, &a.id, Some(&done.id), None, None).unwrap();
+        item_move_in(&conn, &a.id, None, Some(&done.id), None, None).unwrap();
         let items = item_list_in(&conn, &p.id).unwrap();
         assert_eq!(items.iter().find(|i| i.id == a.id).unwrap().field_values.get(&status.id).map(|v| v.as_str()), Some(done.id.as_str()));
+    }
+
+    #[test]
+    fn item_move_sets_arbitrary_column_field() {
+        let conn = mem_db();
+        let p = project_create_in(&conn, "board", None, None).unwrap();
+        let priority = fields_in(&conn, &p.id).unwrap().into_iter().find(|f| f.name == "优先级").unwrap();
+        let status = status_field_in(&conn, &p.id).unwrap().unwrap();
+        let a = item_add_in(&conn, &p.id, "draft", None, None, Some("a"), None).unwrap();
+        // 分列方式 = 优先级：拖到 P1 列只改该字段，状态不动
+        let p1 = &priority.options[1];
+        let moved = item_move_in(&conn, &a.id, Some(&priority.id), Some(&p1.id), None, None).unwrap();
+        assert_eq!(moved.field_values.get(&priority.id).map(|v| v.as_str()), Some(p1.id.as_str()));
+        assert_eq!(
+            moved.field_values.get(&status.id).map(|v| v.as_str()),
+            Some(status.options[0].id.as_str())
+        );
+    }
+
+    #[test]
+    fn field_create_appends_options_and_validates() {
+        let conn = mem_db();
+        let p = project_create_in(&conn, "board", None, None).unwrap();
+        let seeded = fields_in(&conn, &p.id).unwrap().len();
+        // 单选：选项自动配 id 与颜色，position 追加在种子字段之后
+        let names = vec!["S1".to_string(), "S2".to_string()];
+        let f = field_create_in(&conn, &p.id, "迭代", "single_select", &names).unwrap();
+        assert_eq!(f.kind, "single_select");
+        assert_eq!(f.options.len(), 2);
+        assert!(f.options.iter().all(|o| !o.color.is_empty() && o.id.starts_with(&p.id)));
+        assert!(f.position >= seeded as i64);
+        // 文本/日期类字段无选项
+        let text = field_create_in(&conn, &p.id, "备注", "text", &[]).unwrap();
+        assert!(text.options.is_empty());
+        // 校验：重名 / 空名 / 未知类型 / 单选无选项
+        assert!(field_create_in(&conn, &p.id, "迭代", "text", &[]).is_err());
+        assert!(field_create_in(&conn, &p.id, "  ", "text", &[]).is_err());
+        assert!(field_create_in(&conn, &p.id, "链接", "url", &[]).is_err());
+        assert!(field_create_in(&conn, &p.id, "通道", "single_select", &[]).is_err());
+        assert_eq!(fields_in(&conn, &p.id).unwrap().len(), seeded + 2);
+    }
+
+    #[test]
+    fn draft_is_not_ghost() {
+        // 回归：草稿 repo_id 为空，但「悬挂」只应指引用了已删仓库的条目——
+        // 早先仅看 JOIN 是否落空，把所有草稿都误标成「来源已移除」。
+        let conn = mem_db();
+        let p = project_create_in(&conn, "board", None, None).unwrap();
+        item_add_in(&conn, &p.id, "draft", None, None, Some("草稿标题"), None).unwrap();
+        let items = item_list_in(&conn, &p.id).unwrap();
+        assert!(!items[0].ghost);
+        assert_eq!(items[0].draft_title.as_deref(), Some("草稿标题"));
     }
 
     #[test]

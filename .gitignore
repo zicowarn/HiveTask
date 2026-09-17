@@ -22,3 +22,6 @@ src-tauri/gen/
 # Local agent harness
 .dsh/
 src-tauri/binaries/
+
+# Playwright MCP 的临时产物（浏览器自检用，不入库）
+.playwright-mcp/

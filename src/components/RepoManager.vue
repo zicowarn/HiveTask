@@ -5,10 +5,12 @@
  * 数据来自 app.db 登记表（appdb.rs），选择仓库仍走 repo.setCurrent。
  */
 import { computed, onMounted, ref, watch } from "vue";
+import { translateError } from "../gh-errors";
 import { api, isTauri } from "../api";
 import { useI18n } from "../i18n";
 import { useRepoStore } from "../stores/repo";
 import EditorIcon from "./EditorIcon.vue";
+import DropdownMenu from "./DropdownMenu.vue";
 
 const emit = defineEmits<{ close: []; select: [path: string] }>();
 
@@ -68,7 +70,7 @@ async function fetchOnline() {
   try {
     onlineRepos.value = await api.remoteRepoList(conn.platform, conn.host);
   } catch (e) {
-    onlineError.value = String(e);
+    onlineError.value = translateError(String(e));
     onlineRepos.value = [];
   } finally {
     onlineLoading.value = false;
@@ -251,11 +253,12 @@ async function remove(entry: RepoEntry) {
     <div v-if="remoteFormOpen" class="remote-form">
       <label class="remote-platform">
         <span class="remote-platform-label">{{ t("repo.remoteConnection") }}</span>
-        <select v-model="remoteConnectionId" class="remote-select">
-          <option v-for="c in connections" :key="c.id" :value="c.id">
-            {{ c.label || c.host }}
-          </option>
-        </select>
+        <DropdownMenu
+          class="remote-select"
+          :options="connections.map((c) => ({ value: c.id, label: c.label || c.host }))"
+          v-model="remoteConnectionId"
+          :placeholder="t('repo.remoteConnection')"
+        />
       </label>
       <input
         v-model.trim="remoteUrl"
@@ -494,24 +497,9 @@ async function remove(entry: RepoEntry) {
   font-size: var(--font-sm);
   color: var(--text-dim);
 }
-/* 下拉与输入框同款扁平样式；select 必须 appearance:none，
-   否则 macOS 画原生渐变/立体外观（此前踩过）。 */
+/* 下拉：统一 DropdownMenu 组件（AGENTS.md 下拉菜单规范） */
 .remote-select {
-  appearance: none;
-  -webkit-appearance: none;
-  box-sizing: border-box;
-  font-size: var(--font-md);
-  color: var(--text);
-  background-color: var(--bg-app);
-  border: 1px solid var(--border);
-  border-radius: 5px;
-  height: 24px;
-  padding: 0 22px 0 8px;
-  outline: none;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 10 10'%3E%3Cpath d='M2 3.5L5 6.5L8 3.5' fill='none' stroke='%239aa0a8' stroke-width='1.4' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
-  background-repeat: no-repeat;
-  background-position: right 7px center;
-  background-size: 8px;
+  width: 100%;
 }
 .remote-select:focus {
   border-color: var(--accent);

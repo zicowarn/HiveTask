@@ -9,21 +9,24 @@ import AboutDialog from "./components/AboutDialog.vue";
 import RepoManager from "./components/RepoManager.vue";
 import EditorIcon from "./components/EditorIcon.vue";
 import ToastHost from "./components/ToastHost.vue";
+import SwitchKnowledgeDialog from "./knowledge/SwitchKnowledgeDialog.vue";
 import { workspaces } from "./workbench/registry";
 import { buildMenuDefs } from "./menu-defs";
 import { syncApplicationMenu } from "./native-menu";
 import { openExternalUrl } from "./open-url";
 import { api, isTauri } from "./api";
+import { keepsNativeContextMenu } from "./context-menu";
 import { useRepoStore } from "./stores/repo";
 import { useIssuesStore } from "./stores/issues";
 import { usePullsStore } from "./stores/pulls";
 import { useProjectsStore } from "./stores/projects";
+import { useKnowledgeStore } from "./stores/knowledge";
 import { useSettingsStore } from "./stores/settings";
 import { useWorkbenchStore } from "./stores/workbench";
 import { useI18n } from "./i18n";
 import { useTheme } from "./theme";
 import { probeNow } from "./net";
-import { shortOrigin } from "./origin";
+import { shortOrigin, shortPath } from "./origin";
 
 const WORKSPACE_KEY = "hivetask.workspace";
 
@@ -31,6 +34,7 @@ const repo = useRepoStore();
 const issues = useIssuesStore();
 const pulls = usePullsStore();
 const projectsStore = useProjectsStore();
+const knowledge = useKnowledgeStore();
 const settings = useSettingsStore();
 const workbench = useWorkbenchStore();
 const { current, origin, visibility } = storeToRefs(repo);
@@ -162,6 +166,7 @@ const menus = computed(() =>
     gotoIssues: () => switchWorkspace("issues"),
     gotoPulls: () => switchWorkspace("pulls"),
     gotoProjects: () => switchWorkspace("projects"),
+    gotoKnowledge: () => switchWorkspace("knowledge"),
     gotoTools: () => switchWorkspace("tools"),
     statusbarVisible: () => settings.statusbarVisible,
     toggleStatusbar: () => settings.toggleStatusbar(),
@@ -187,6 +192,7 @@ function onKeydown(event: KeyboardEvent) {
     "1": () => switchWorkspace("issues"),
     "2": () => switchWorkspace("pulls"),
     "4": () => switchWorkspace("projects"),
+    "5": () => switchWorkspace("knowledge"),
     "3": () => switchWorkspace("tools"),
     ",": openPreferences,
   };
@@ -197,6 +203,11 @@ function onKeydown(event: KeyboardEvent) {
     event.preventDefault();
     handler();
   }
+}
+
+/** 外壳右键：不让 WebView 弹默认菜单（可编辑处/链接/有选中文本时放行）。 */
+function onContextMenu(event: MouseEvent): void {
+  if (!keepsNativeContextMenu(event)) event.preventDefault();
 }
 
 // Repo context changes (startup restore, folder picker, VITE_AUTO_REPO) pull
@@ -211,6 +222,9 @@ watch(
 );
 
 onMounted(async () => {
+  // 外壳上的右键一律不给 WebView 默认菜单（说明见 context-menu.ts）；
+  // 浏览器预览里同样生效，行为与打包后一致。
+  window.addEventListener("contextmenu", onContextMenu);
   if (!inTauri) window.addEventListener("keydown", onKeydown);
   if (!isTauri()) return;
   await repo.checkHealth();
@@ -234,6 +248,7 @@ onMounted(async () => {
   }
 });
 onBeforeUnmount(() => {
+  window.removeEventListener("contextmenu", onContextMenu);
   if (!inTauri) window.removeEventListener("keydown", onKeydown);
 });
 </script>
@@ -278,6 +293,13 @@ onBeforeUnmount(() => {
         </template>
         <span v-else class="repo-hint">{{ t("app.projectNone") }}</span>
       </div>
+      <div v-else-if="activeKey === 'knowledge'" class="repo-box">
+        <template v-if="knowledge.root">
+          <span class="repo-path" :title="knowledge.root">{{ knowledge.rootName }}</span>
+          <span class="repo-origin" :title="knowledge.root">{{ shortPath(knowledge.root) }}</span>
+        </template>
+        <span v-else class="repo-hint">{{ t("app.knowledgeNone") }}</span>
+      </div>
       <div v-else class="repo-box">
         <template v-if="current">
           <span class="repo-path" :title="current">{{ current }}</span>
@@ -301,6 +323,13 @@ onBeforeUnmount(() => {
           @click="projectPickerOpen = true"
         >
           {{ t("app.projectSwitch") }}
+        </button>
+        <button
+          v-else-if="activeKey === 'knowledge'"
+          class="header-btn"
+          @click="knowledge.openSwitch()"
+        >
+          {{ knowledge.root ? t("kb.switchRoot") : t("kb.pickRoot") }}
         </button>
         <button v-else class="header-btn" @click="repoManagerOpen = true">
           {{ current ? t("app.repoSwitch") : t("app.repoPick") }}
@@ -351,6 +380,17 @@ onBeforeUnmount(() => {
           <button class="repo-panel-close" @click="projectPickerOpen = false">✕</button>
         </div>
         <ProjectManager />
+      </div>
+    </div>
+
+    <!-- 切换知识库：与「切换仓库 / 切换项目」共用同一 overlay + panel 外壳 -->
+    <div v-if="knowledge.switchOpen" class="repo-overlay" @click.self="knowledge.closeSwitch()">
+      <div class="repo-panel">
+        <div class="repo-panel-head">
+          <span class="repo-panel-title">{{ t("kb.switchRoot") }}</span>
+          <button class="repo-panel-close" @click="knowledge.closeSwitch()">✕</button>
+        </div>
+        <SwitchKnowledgeDialog @close="knowledge.closeSwitch()" />
       </div>
     </div>
 

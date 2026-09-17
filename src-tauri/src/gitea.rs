@@ -270,6 +270,13 @@ impl GiteaSource {
     fn comments_url(&self, slug: &RepoSlug, number: &str) -> String {
         self.api(&format!("/repos/{}/{}/issues/{number}/comments", slug.owner, slug.repo))
     }
+    /// 写后 GET issues/{n} 回读全量（labels/assignees 端点返回的是子资源清单）。
+    fn fetch_issue(&self, repo: &RepoRef, number: &str) -> Result<Issue> {
+        let slug = self.slug_ref(repo);
+        let url = self.api(&format!("/repos/{}/{}/issues/{number}", slug.owner, slug.repo));
+        let value = self.get(&url)?;
+        Ok(map_gitea_issue(&value))
+    }
 }
 
 impl Source for GiteaSource {
@@ -332,13 +339,84 @@ impl Source for GiteaSource {
         self.fetch_comments(repo, kind, number)
     }
 
-    fn set_issue_state(&self, repo: &RepoRef, number: &str, closed: bool) -> Result<Issue> {
+    fn set_issue_state(&self, repo: &RepoRef, number: &str, closed: bool, _reason: Option<&str>) -> Result<Issue> {
         let slug = self.slug_ref(repo);
         let url = self.api(&format!("/repos/{}/{}/issues/{number}", slug.owner, slug.repo));
         let state = if closed { "closed" } else { "open" };
         let value =
             self.send_json(reqwest::Method::PATCH, &url, serde_json::json!({ "state": state }))?;
         Ok(map_gitea_issue(&value))
+    }
+
+    fn set_issue_locked(&self, repo: &RepoRef, number: &str, locked: bool) -> Result<()> {
+        let slug = self.slug_ref(repo);
+        let url = self.api(&format!("/repos/{}/{}/issues/{number}/lock", slug.owner, slug.repo));
+        self.send_json(reqwest::Method::PUT, &url, serde_json::json!({ "locked": locked }))?;
+        Ok(())
+    }
+
+    fn delete_issue(&self, _repo: &RepoRef, _number: &str) -> Result<()> {
+        Err(anyhow!("Gitea/Gitee 没有删除 Issue 的 REST 通道"))
+    }
+
+    fn update_issue(&self, repo: &RepoRef, number: &str, title: &str, body: Option<&str>) -> Result<Issue> {
+        let slug = self.slug_ref(repo);
+        let url = self.api(&format!("/repos/{}/{}/issues/{number}", slug.owner, slug.repo));
+        // Gitea/Gitee 同构：PATCH issues/{n}，body 传空串即清空正文。
+        let mut payload = serde_json::json!({ "title": title.trim() });
+        if let Some(b) = body {
+            payload["body"] = Value::from(b.trim());
+        }
+        let value = self.send_json(reqwest::Method::PATCH, &url, payload)?;
+        Ok(map_gitea_issue(&value))
+    }
+
+    fn update_issue_milestone(&self, repo: &RepoRef, number: &str, milestone: Option<&str>) -> Result<Issue> {
+        let slug = self.slug_ref(repo);
+        let url = self.api(&format!("/repos/{}/{}/issues/{number}", slug.owner, slug.repo));
+        let payload = match milestone.map(str::trim).filter(|s| !s.is_empty()) {
+            Some(name) => {
+                let list_url = self.api(&format!("/repos/{}/{}/milestones?state=all&limit=100", slug.owner, slug.repo));
+                let list = self.get(&list_url)?;
+                let id = list
+                    .as_array()
+                    .and_then(|arr| {
+                        arr.iter()
+                            .find(|m| m.get("title").and_then(Value::as_str).map(|t| t.eq_ignore_ascii_case(name)).unwrap_or(false))
+                            .and_then(|m| m.get("id"))
+                    })
+                    .and_then(Value::as_i64);
+                match id {
+                    Some(mid) => serde_json::json!({ "milestone": mid }),
+                    None => return Err(anyhow!("里程碑不存在: {name}")),
+                }
+            }
+            None => serde_json::json!({ "milestone": 0 }),
+        };
+        self.send_json(reqwest::Method::PATCH, &url, payload)?;
+        self.fetch_issue(repo, number)
+    }
+
+    fn update_issue_labels(&self, repo: &RepoRef, number: &str, labels: &[String]) -> Result<Issue> {
+        let slug = self.slug_ref(repo);
+        let url = self.api(&format!("/repos/{}/{}/issues/{number}/labels", slug.owner, slug.repo));
+        // 名字 → id（Gitea/Gitee 同为 id 数组整体替换）
+        let all = self.list_labels(repo)?;
+        let ids: Vec<Value> = all
+            .iter()
+            .filter(|l| labels.iter().any(|n| n.eq_ignore_ascii_case(&l.name)))
+            .map(|l| Value::from(l.id))
+            .collect();
+        self.send_json(reqwest::Method::PUT, &url, serde_json::json!({ "labels": ids }))?;
+        self.fetch_issue(repo, number)
+    }
+
+    fn update_issue_assignees(&self, repo: &RepoRef, number: &str, assignees: &[String]) -> Result<Issue> {
+        let slug = self.slug_ref(repo);
+        let url = self.api(&format!("/repos/{}/{}/issues/{number}/assignees", slug.owner, slug.repo));
+        let names: Vec<&str> = assignees.iter().map(String::as_str).collect();
+        self.send_json(reqwest::Method::PUT, &url, serde_json::json!({ "assignees": names }))?;
+        self.fetch_issue(repo, number)
     }
 
     fn set_pull_state(&self, repo: &RepoRef, number: &str, closed: bool) -> Result<Pull> {
@@ -362,7 +440,7 @@ impl Source for GiteaSource {
         self.fetch_pull_detail(repo, number)
     }
 
-    fn create_issue(&self, repo: &RepoRef, title: &str, body: Option<&str>, milestone: Option<&str>) -> Result<Issue> {
+    fn create_issue(&self, repo: &RepoRef, title: &str, body: Option<&str>, milestone: Option<&str>, labels: &[String], assignees: &[String]) -> Result<Issue> {
         let slug = self.slug_ref(repo);
         let url = self.api(&format!("/repos/{}/{}/issues", slug.owner, slug.repo));
         // 里程碑按名归属：REST 需要 id，先从里程碑清单按标题解析
@@ -383,8 +461,74 @@ impl Source for GiteaSource {
                 None => return Err(anyhow!("里程碑不存在: {name}")),
             }
         }
+        // Gitea REST：labels 传 id 数组（名字 → id 就地解析），assignees 传登录名
+        if !labels.is_empty() {
+            let all = self.list_labels(repo)?;
+            let ids: Vec<Value> = all
+                .iter()
+                .filter(|l| labels.iter().any(|n| n.eq_ignore_ascii_case(&l.name)))
+                .map(|l| Value::from(l.id))
+                .collect();
+            payload["labels"] = Value::from(ids);
+        }
+        if !assignees.is_empty() {
+            payload["assignees"] = serde_json::to_value(assignees).context("序列化负责人失败")?;
+        }
         let value = self.send_json(reqwest::Method::POST, &url, payload)?;
         Ok(map_gitea_issue(&value))
+    }
+
+    fn list_labels(&self, repo: &RepoRef) -> Result<Vec<crate::models::LabelInfo>> {
+        let slug = self.slug_ref(repo);
+        let url = self.api(&format!("/repos/{}/{}/labels?limit=100", slug.owner, slug.repo));
+        let value = self.get(&url)?;
+        Ok(value
+            .as_array()
+            .map(|arr| {
+                arr.iter()
+                    .map(|v| crate::models::LabelInfo {
+                        id: v.get("id").and_then(Value::as_i64).unwrap_or(0),
+                        name: v.get("name").and_then(Value::as_str).unwrap_or_default().to_string(),
+                        color: v.get("color").and_then(Value::as_str).map(str::to_string),
+                    })
+                    .collect()
+            })
+            .unwrap_or_default())
+    }
+
+    fn list_assignees(&self, repo: &RepoRef) -> Result<Vec<String>> {
+        let slug = self.slug_ref(repo);
+        let url = self.api(&format!("/repos/{}/{}/assignees?limit=100", slug.owner, slug.repo));
+        let value = self.get(&url)?;
+        Ok(value
+            .as_array()
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|u| u.get("login").and_then(Value::as_str).map(str::to_string))
+                    .collect()
+            })
+            .unwrap_or_default())
+    }
+
+    fn create_label(&self, repo: &RepoRef, name: &str, color: &str) -> Result<crate::models::LabelInfo> {
+        let slug = self.slug_ref(repo);
+        let url = self.api(&format!("/repos/{}/{}/labels", slug.owner, slug.repo));
+        // Gitea 色值形态带 # 前缀
+        let color = if color.trim_start_matches('#').len() > 0 {
+            format!("#{}", color.trim_start_matches('#'))
+        } else {
+            color.to_string()
+        };
+        let value = self.send_json(
+            reqwest::Method::POST,
+            &url,
+            serde_json::json!({ "name": name.trim(), "color": color }),
+        )?;
+        Ok(crate::models::LabelInfo {
+            id: value.get("id").and_then(Value::as_i64).unwrap_or(0),
+            name: value.get("name").and_then(Value::as_str).unwrap_or_default().to_string(),
+            color: value.get("color").and_then(Value::as_str).map(str::to_string),
+        })
     }
 
     fn create_milestone(&self, repo: &RepoRef, title: &str, due_on: Option<&str>, description: Option<&str>) -> Result<String> {
@@ -436,18 +580,45 @@ impl Source for GiteaSource {
         let value = self.get(&url)?;
         Ok(value
             .as_array()
-            .map(|arr| {
-                arr.iter()
-                    .map(|v| crate::models::MilestoneInfo {
-                        title: v.get("title").and_then(Value::as_str).unwrap_or_default().to_string(),
-                        due_on: v.get("due_on").and_then(Value::as_str).map(str::to_string),
-                        state: v.get("state").and_then(Value::as_str).unwrap_or("open").to_string(),
-                        open_issues: v.get("open_issues").and_then(Value::as_i64).unwrap_or(0),
-                        closed_issues: v.get("closed_issues").and_then(Value::as_i64).unwrap_or(0),
-                    })
-                    .collect()
-            })
+            .map(|arr| arr.iter().map(parse_milestone_value).collect())
             .unwrap_or_default())
+    }
+
+    fn set_milestone_state(&self, repo: &RepoRef, number: i64, closed: bool) -> Result<crate::models::MilestoneInfo> {
+        let slug = self.slug_ref(repo);
+        let url = self.api(&format!("/repos/{}/{}/milestones/{number}", slug.owner, slug.repo));
+        let state = if closed { "closed" } else { "open" };
+        let value =
+            self.send_json(reqwest::Method::PATCH, &url, serde_json::json!({ "state": state }))?;
+        Ok(parse_milestone_value(&value))
+    }
+
+    fn update_milestone(&self, repo: &RepoRef, number: i64, title: &str, description: Option<&str>, due_on: Option<&str>) -> Result<crate::models::MilestoneInfo> {
+        let slug = self.slug_ref(repo);
+        let url = self.api(&format!("/repos/{}/{}/milestones/{number}", slug.owner, slug.repo));
+        let mut payload = serde_json::json!({ "title": title.trim() });
+        if let Some(d) = description {
+            payload["description"] = Value::from(d.trim());
+        }
+        if let Some(d) = due_on {
+            payload["due_on"] = Value::from(crate::gh::normalize_due_date(d));
+        }
+        let value = self.send_json(reqwest::Method::PATCH, &url, payload)?;
+        Ok(parse_milestone_value(&value))
+    }
+}
+
+/// Gitea/Gitee 里程碑 REST JSON → MilestoneInfo（id 即编号；无 html_url）。
+fn parse_milestone_value(v: &Value) -> crate::models::MilestoneInfo {
+    crate::models::MilestoneInfo {
+        number: v.get("id").and_then(Value::as_i64).unwrap_or(0),
+        title: v.get("title").and_then(Value::as_str).unwrap_or_default().to_string(),
+        description: v.get("description").and_then(Value::as_str).map(str::to_string),
+        due_on: v.get("due_on").and_then(Value::as_str).map(str::to_string),
+        state: v.get("state").and_then(Value::as_str).unwrap_or("open").to_string(),
+        open_issues: v.get("open_issues").and_then(Value::as_i64).unwrap_or(0),
+        closed_issues: v.get("closed_issues").and_then(Value::as_i64).unwrap_or(0),
+        html_url: None,
     }
 }
 

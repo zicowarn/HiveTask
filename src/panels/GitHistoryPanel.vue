@@ -174,7 +174,12 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
 <template>
   <PanelShell :leaf-id="leafId" :panel-type="panelType">
     <template #actions>
-      <button class="fetch-btn" :disabled="fetching || loading" @click="fetchAll">
+      <button
+        class="fetch-btn"
+        :disabled="fetching || loading"
+        :title="t('gitHistory.fetchHint')"
+        @click="fetchAll"
+      >
         {{ fetching ? t("common.syncing") : t("gitHistory.fetch") }}
       </button>
     </template>

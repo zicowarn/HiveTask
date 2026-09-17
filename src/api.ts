@@ -8,6 +8,7 @@ import { invoke, type Channel } from "@tauri-apps/api/core";
 import type {
   Comment,
   GitBranchRow,
+  GitCommitRow,
   GitHistoryPage,
   HealthInfo,
   Issue,
@@ -19,7 +20,29 @@ import type {
 
 // ---- Projects 看板（应用级，P4）----
 
+/** 里程碑元数据（镜像 models.rs::MilestoneInfo，camelCase）。 */
+export interface MilestoneInfo {
+  number: number;
+  title: string;
+  description: string | null;
+  dueOn: string | null;
+  state: string;
+  openIssues: number;
+  closedIssues: number;
+  htmlUrl: string | null;
+}
+
+/** 仓库标签（创建 Issue 的侧栏候选，镜像 models.rs::LabelInfo）。 */
+export interface LabelInfo {
+  id: number;
+  name: string;
+  /** hex 主题色（可能缺 # 前缀）。 */
+  color: string | null;
+}
+
 export interface FieldOption {
+  /** 选项说明（显示在组头与取值面板）；旧数据可能缺省。 */
+  description?: string | null;
   id: string;
   name: string;
   color: string;
@@ -32,6 +55,12 @@ export interface Project {
   groupTag: string | null;
   /** 归属接入（切换项目对话框按它分 Tab）；null = 本地。 */
   connectionId: string | null;
+  /** 平台绑定（导入线上 Projects 时记录；null = 纯本地项目）。 */
+  platformKind: string | null;
+  platformHost: string | null;
+  platformRef: string | null;
+  /** 项目数据最近同步时间（拉取线上 Projects 条目后盖章；null = 从未同步）。 */
+  syncedAt: string | null;
   archived: boolean;
   createdAt: string;
   updatedAt: string;
@@ -59,6 +88,20 @@ export interface ProjectItem {
   repoLabel: string | null;
   ghost: boolean;
   fieldValues: Record<string, string>;
+  /** 引用实体的镜像元数据（仓库缓存里的 Issue/PR 行）；草稿/悬挂/未同步为 null。 */
+  entity?: ProjectEntityMeta | null;
+}
+
+/** 引用实体（Issue/PR）的只读元数据。 */
+export interface ProjectEntityMeta {
+  title: string;
+  state: string;
+  author: string | null;
+  assignees: string[];
+  labels: string[];
+  milestone: string | null;
+  createdAt: string | null;
+  updatedAt: string | null;
 }
 
 /** 项目绑定的仓库（接入配置标签随 repos 行携带）。 */
@@ -117,16 +160,109 @@ export interface BranchReviewDiff {
 
 export const isTauri = (): boolean => "__TAURI_INTERNALS__" in window;
 
+// ---- 知识库（文件系统层，镜像 src-tauri/src/kb.rs）----
+
+export interface KbEntry {
+  name: string;
+  /** 相对根的路径，`/` 分隔——树的前端 key。 */
+  rel: string;
+  kind: "file" | "dir" | "symlink";
+  size: number;
+  mtimeMs: number;
+  /** `.gitignore` 命中：灰显，不隐藏。 */
+  ignored: boolean;
+}
+
+export interface KbText {
+  text: string;
+  /** 规范化编码名（UTF-8 / GB18030 / BIG5 / UTF-16LE …）——保存时按它回写。 */
+  encoding: string;
+  bom: boolean;
+  eol: string;
+  size: number;
+  mtimeMs: number;
+}
+
+export interface KbStat {
+  exists: boolean;
+  kind: string;
+  size: number;
+  mtimeMs: number;
+}
+
+/** 「打开方式」偏好（镜像 src-tauri/src/kb.rs::OpenWithPrefs）。 */
+export interface OpenWithPrefs {
+  /** 空 = 系统默认程序。 */
+  defaultApp: string;
+  /** 扩展名（小写、不含点）→ 应用名 / 可执行文件路径。 */
+  byExt: Record<string, string>;
+}
+
 export const api = {
   healthCheck: () => invoke<HealthInfo>("health_check"),
   pickRepo: () => invoke<string | null>("pick_repo"),
+  kbPickRoot: () => invoke<string | null>("kb_pick_root"),
+  kbListDir: (root: string, rel = "", showIgnored = false) =>
+    invoke<KbEntry[]>("kb_list_dir", { root, rel, showIgnored }),
+  kbStat: (root: string, rel = "") => invoke<KbStat>("kb_stat", { root, rel }),
+  kbReadText: (root: string, rel: string) => invoke<KbText>("kb_read_text", { root, rel }),
+  /** 二进制预览：Rust 侧用 ipc::Response 回原始字节，这里拿到的是 ArrayBuffer。 */
+  kbReadBytes: (root: string, rel: string) => invoke<ArrayBuffer>("kb_read_bytes", { root, rel }),
+  /** 保编码回写；返回写入后的 mtime。mtime 不符（外部改动）→ 报错。 */
+  kbWriteText: (args: {
+    root: string;
+    rel: string;
+    text: string;
+    encoding: string;
+    bom: boolean;
+    eol: string;
+    expectedMtimeMs: number | null;
+  }) => invoke<number>("kb_write_text", args),
+  /** 写入二进制（粘贴/拖放插图）：base64 传参，父目录自动创建。 */
+  kbWriteBytes: (root: string, rel: string, base64: string) =>
+    invoke<KbEntry>("kb_write_bytes", { root, rel, base64 }),
+  /** 重命名（同根内；目标已存在则报错，不覆盖）。 */
+  kbRename: (root: string, from: string, to: string) =>
+    invoke<KbEntry>("kb_rename", { root, from, to }),
+  /** 复制（保留源；目录递归）。 */
+  kbCopy: (root: string, from: string, to: string) => invoke<KbEntry>("kb_copy", { root, from, to }),
+  /** 移动（跨目录搬；目录亦可）。 */
+  kbMove: (root: string, from: string, to: string) => invoke<KbEntry>("kb_move", { root, from, to }),
+  /** 单文件提交历史（Rust 侧 revwalk + diff pathspec 过滤）。 */
+  gitFileHistory: (root: string, rel: string, limit = 100) =>
+    invoke<GitHistoryPage>("git_file_history", { root, rel, limit }),
+  /** 删除（**进系统回收站**，失败才退永久删除）。 */
+  kbDelete: (root: string, rel: string) => invoke<void>("kb_delete", { root, rel }),
+  /** 新建空文件 / 目录；已存在则报错（不覆盖）。 */
+  kbCreate: (root: string, rel: string, kind: "file" | "dir") =>
+    invoke<KbEntry>("kb_create", { root, rel, kind }),
+  /** 「打开方式」偏好（存 app.db：打开动作由 Rust 执行，配置也由 Rust 持有）。 */
+  kbPickApp: () => invoke<string | null>("kb_pick_app"),
+  kbOpenPrefsGet: () => invoke<OpenWithPrefs>("kb_open_prefs_get"),
+  kbOpenPrefsSet: (prefs: OpenWithPrefs) => invoke<void>("kb_open_prefs_set", { prefs }),
+  /**
+   * 用（配置的）外部程序打开知识库内的文件。
+   * 注意**不能**走 `@tauri-apps/plugin-opener` 的 `openPath`：该命令内部强制 ACL scope
+   * 校验，而其 fs scope 是编译期静态配置、空 allow 即全拒 → 必然 ForbiddenPath。
+   * 这里由 Rust 侧解析要启动的程序（前端不指定，避免把打开文件变成任意程序启动入口）。
+   */
+  kbOpenExternal: (root: string, rel: string) => invoke<void>("kb_open_external", { root, rel }),
   repoInfo: (repoPath: string) =>
     invoke<RepoInfo>("repo_info", { repoPath }),
   refreshIssues: (repoPath: string, state: IssueState, limit = 50) =>
     invoke<Issue[]>("refresh_issues", { repoPath, state, limit }),
   // v1 仅本地仓库（journal + SQLite）；远端创建后续接同一命令。
-  createIssue: (repoPath: string, title: string, body?: string, milestone?: string) =>
-    invoke<Issue>("create_issue", { repoPath, title, body: body ?? null, milestone: milestone ?? null }),
+  createIssue: (repoPath: string, title: string, body?: string, milestone?: string, labels?: string[], assignees?: string[]) =>
+    invoke<Issue>("create_issue", {
+      repoPath,
+      title,
+      body: body ?? null,
+      milestone: milestone ?? null,
+      labels: labels ?? null,
+      assignees: assignees ?? null,
+    }),
+  updateIssue: (repoPath: string, number: string, title: string, body?: string) =>
+    invoke<Issue>("update_issue", { repoPath, number, title, body: body ?? null }),
   createMilestone: (repoPath: string, title: string, dueOn?: string, description?: string) =>
     invoke<string>("create_milestone", { repoPath, title, dueOn: dueOn ?? null, description: description ?? null }),
   listCachedIssues: (repoPath: string, state: IssueState) =>
@@ -149,14 +285,32 @@ export const api = {
   // Returns the fresh conversation — the write-through contract.
   addComment: (repoPath: string, kind: "issue" | "pull", number: string, body: string) =>
     invoke<Comment[]>("add_comment", { repoPath, kind, number, body }),
-  setIssueState: (repoPath: string, number: string, closed: boolean) =>
-    invoke<Issue>("set_issue_state", { repoPath, number, closed }),
+  /** 关闭/重开（reason ∈ completed | not planned | duplicate；重开传 null）。 */
+  setIssueState: (repoPath: string, number: string, closed: boolean, reason?: string | null) =>
+    invoke<Issue>("set_issue_state", { repoPath, number, closed, reason: reason ?? null }),
+  /** 锁定/解锁讨论（gh/Gitea；本地 Err）。 */
+  issueSetLocked: (repoPath: string, number: string, locked: boolean) =>
+    invoke<void>("issue_set_locked", { repoPath, number, locked }),
+  /** 删除 Issue（平台侧永久删除，需管理员；Gitea/本地 Err）。 */
+  issueDelete: (repoPath: string, number: string) =>
+    invoke<void>("issue_delete", { repoPath, number }),
+  /** 挂/清里程碑（写穿透；null = 清除）。 */
+  issueUpdateMilestone: (repoPath: string, number: string, milestone: string | null) =>
+    invoke<Issue>("issue_update_milestone", { repoPath, number, milestone }),
+  /** 整体替换标签（按名，写穿透）。 */
+  issueUpdateLabels: (repoPath: string, number: string, labels: string[]) =>
+    invoke<Issue>("issue_update_labels", { repoPath, number, labels }),
+  /** 整体替换负责人（登录名，写穿透）。 */
+  issueUpdateAssignees: (repoPath: string, number: string, assignees: string[]) =>
+    invoke<Issue>("issue_update_assignees", { repoPath, number, assignees }),
   setPullState: (repoPath: string, number: number, closed: boolean) =>
     invoke<Pull>("set_pull_state", { repoPath, number, closed }),
   mergePull: (repoPath: string, number: number, method: "merge" | "squash" | "rebase") =>
     invoke<Pull>("merge_pull", { repoPath, number, method }),
   gitHistory: (repoPath: string, limit?: number) =>
     invoke<GitHistoryPage>("git_history", { repoPath, limit: limit ?? 500 }),
+  prCommitsBetween: (repoPath: string, base: string, head: string) =>
+    invoke<GitCommitRow[]>("pr_commits_between", { repoPath, base, head }),
   gitBranches: (repoPath: string) => invoke<GitBranchRow[]>("git_branches", { repoPath }),
   gitFetch: (repoPath: string) => invoke<void>("git_fetch", { repoPath }),
   ptySpawn: (args: {
@@ -207,6 +361,15 @@ export const api = {
     invoke<ProjectField[]>("project_fields", { projectId }),
   projectFieldSetOptions: (fieldId: string, options: FieldOption[]) =>
     invoke<void>("project_field_set_options", { fieldId, options }),
+  /** 追加一个选项（新建列 / 新建泳道段）：id 与颜色由后端定。 */
+  projectFieldOptionAdd: (fieldId: string, name: string, color?: string) =>
+    invoke<ProjectField>("project_field_option_add", { fieldId, name, color: color ?? null }),
+  /** 新建项目字段（single_select | text | number | date）；选项名由后端配 id 与颜色。 */
+  /** 另存文本（视图数据 CSV 导出）：取消返回 null。 */
+  saveTextFile: (defaultName: string, contents: string) =>
+    invoke<string | null>("save_text_file", { defaultName, contents }),
+  projectFieldCreate: (projectId: string, name: string, kind: string, optionNames: string[]) =>
+    invoke<ProjectField>("project_field_create", { projectId, name, kind, optionNames }),
   projectItemAdd: (args: {
     projectId: string;
     kind: "issue" | "pull" | "draft";
@@ -225,10 +388,17 @@ export const api = {
     }),
   projectItemList: (projectId: string) =>
     invoke<ProjectItem[]>("project_item_list", { projectId }),
-  projectItemMove: (itemId: string, statusOptionId?: string, prevId?: string, nextId?: string) =>
+  projectItemMove: (
+    itemId: string,
+    fieldId?: string,
+    optionId?: string,
+    prevId?: string,
+    nextId?: string,
+  ) =>
     invoke<ProjectItem>("project_item_move", {
       itemId,
-      statusOptionId: statusOptionId ?? null,
+      fieldId: fieldId ?? null,
+      optionId: optionId ?? null,
       prevId: prevId ?? null,
       nextId: nextId ?? null,
     }),
@@ -246,6 +416,32 @@ export const api = {
   projectRepoList: (projectId: string) =>
     invoke<BoundRepo[]>("project_repo_list", { projectId }),
   /** 线上仓库清单（按接入凭据拉取，用于「刷新从线上查找」）。 */
+  /** 拉取线上 Projects 条目落本地看板；返回 [imported, skipped]。 */
+  projectSyncItems: (projectId: string) =>
+    invoke<[number, number]>("project_sync_items", { projectId }),
+  /** 把本地列（单选字段选项表）发布到线上项目；返回发布的字段数。 */
+  projectPublishColumns: (projectId: string) =>
+    invoke<number>("project_publish_columns", { projectId }),
+  /** 导入线上 Projects 为本地项目（记录平台绑定；name 由调用方给）。 */
+  projectImportRemote: (args: {
+    name: string;
+    connectionId?: string | null;
+    platformKind: string;
+    platformHost: string;
+    platformRef: string;
+  }) =>
+    invoke<Project>("project_import_remote", {
+      name: args.name,
+      connectionId: args.connectionId ?? null,
+      platformKind: args.platformKind,
+      platformHost: args.platformHost,
+      platformRef: args.platformRef,
+    }),
+  /** 线上 ProjectsV2 清单（GitHub；需 token 具备 read:project scope）。 */
+  remoteProjectList: (limit?: number) =>
+    invoke<
+      { number: number; title: string; url: string; closed: boolean }[]
+    >("remote_project_list", { limit: limit ?? null }),
   remoteRepoList: (platform: string, host: string) =>
     invoke<RemoteRepoInfo[]>("remote_repo_list", { platform, host }),
 
@@ -265,12 +461,17 @@ export const api = {
   remoteBranchList: (repoPath: string) =>
     invoke<string[]>("remote_branch_list", { repoPath }),
 
-  // ---- 里程碑元数据（组头 Due by / Overdue 数据源）----
+  // ---- 里程碑元数据（组头 Due by / Overdue、里程碑详情的数据源）----
   milestoneList: (repoPath: string) =>
-    invoke<Array<{ title: string; dueOn: string | null; state: string; openIssues: number; closedIssues: number }>>(
-      "milestone_list",
-      { repoPath },
-    ),
+    invoke<MilestoneInfo[]>("milestone_list", { repoPath }),
+  labelList: (repoPath: string) => invoke<LabelInfo[]>("label_list", { repoPath }),
+  createLabel: (repoPath: string, name: string, color: string) =>
+    invoke<LabelInfo>("create_label", { repoPath, name, color }),
+  assigneeList: (repoPath: string) => invoke<string[]>("assignee_list", { repoPath }),
+  setMilestoneState: (repoPath: string, number: number, closed: boolean) =>
+    invoke<MilestoneInfo>("set_milestone_state", { repoPath, number, closed }),
+  updateMilestone: (repoPath: string, number: number, title: string, description?: string, dueOn?: string) =>
+    invoke<MilestoneInfo>("update_milestone", { repoPath, number, title, description: description ?? null, dueOn: dueOn ?? null }),
 
   // ---- 本地分支 review（PR 工作区本地形态）----
   branchReviewList: (repoPath: string, base: string) =>

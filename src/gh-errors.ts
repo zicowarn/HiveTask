@@ -33,7 +33,7 @@ const RULES: ErrorRule[] = [
     key: "error.repo",
   },
   {
-    pattern: /dial tcp|connection refused|no such host|lookup |i\/o timeout|http 5\d\d|tls|certificate|proxyconnect/i,
+    pattern: /dial tcp|connection refused|no such host|lookup |i\/o timeout|http 5\d\d|tls|certificate|proxyconnect|\bEOF\b/i,
     key: "error.network",
   },
 ];

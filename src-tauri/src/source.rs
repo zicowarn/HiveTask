@@ -121,7 +121,14 @@ pub trait Source: Send + Sync {
     fn fetch_pull_detail(&self, repo: &RepoRef, number: &str) -> Result<Pull>;
     fn fetch_comments(&self, repo: &RepoRef, kind: Kind, number: &str) -> Result<Vec<Comment>>;
     fn add_comment(&self, repo: &RepoRef, kind: Kind, number: &str, body: &str) -> Result<Vec<Comment>>;
-    fn set_issue_state(&self, repo: &RepoRef, number: &str, closed: bool) -> Result<Issue>;
+    /// 关闭/重开 Issue（写穿透）。reason ∈ completed | not planned | duplicate
+    /// （仅关闭时有效；重开传 None。Gitea/Gitee/本地无理由语义 → 忽略）。
+    fn set_issue_state(&self, repo: &RepoRef, number: &str, closed: bool, reason: Option<&str>) -> Result<Issue>;
+    /// 锁定/解锁讨论（后续评论只读）。本地不可锁 → Err。
+    fn set_issue_locked(&self, repo: &RepoRef, number: &str, locked: bool) -> Result<()>;
+    /// 删除 Issue（平台侧永久删除，需仓库管理员）。Gitea 无 REST 通道、
+    /// 本地事件日志不可变 → Err。
+    fn delete_issue(&self, repo: &RepoRef, number: &str) -> Result<()>;
     fn set_pull_state(&self, repo: &RepoRef, number: &str, closed: bool) -> Result<Pull>;
     fn merge_pull(&self, repo: &RepoRef, number: &str, method: MergeMethod) -> Result<Pull>;
     /// 仓库在平台侧的可见性："public" | "private"。GitHub 的 INTERNAL
@@ -129,7 +136,32 @@ pub trait Source: Send + Sync {
     fn repo_visibility(&self, repo: &RepoRef) -> Result<&'static str>;
     /// 创建 Issue（远端写穿透；本地来源走 journal，见 local.rs）。
     /// milestone = 里程碑名称（按名归属；平台差异由实现内部消化）。
-    fn create_issue(&self, repo: &RepoRef, title: &str, body: Option<&str>, milestone: Option<&str>) -> Result<Issue>;
+    /// labels/assignees = 候选清单中的名字/登录名；本地来源忽略（journal
+    /// v1 无对应字段）。
+    fn create_issue(
+        &self,
+        repo: &RepoRef,
+        title: &str,
+        body: Option<&str>,
+        milestone: Option<&str>,
+        labels: &[String],
+        assignees: &[String],
+    ) -> Result<Issue>;
+    /// 仓库标签清单（创建 Issue 的侧栏候选；本地来源为空）。
+    fn list_labels(&self, repo: &RepoRef) -> Result<Vec<crate::models::LabelInfo>>;
+    /// 可指派用户清单（创建 Issue 的侧栏候选；本地来源为空）。
+    fn list_assignees(&self, repo: &RepoRef) -> Result<Vec<String>>;
+    /// 新建仓库标签（GitHub 色值不带 #、Gitea 带带 # 由实现消化；本地不支持）。
+    fn create_label(&self, repo: &RepoRef, name: &str, color: &str) -> Result<crate::models::LabelInfo>;
+    /// 编辑 Issue 标题/正文（写穿透：平台写成功 → 回读全量返回）。
+    /// 本地来源走 journal（issue.edit / issue.labels / issue.assignees / issue.milestone 事件）。
+    fn update_issue(&self, repo: &RepoRef, number: &str, title: &str, body: Option<&str>) -> Result<Issue>;
+    /// 挂/清 Issue 里程碑（按名，None = 清除；写穿透回读全量）。本地 = 纯文本标签（journal 事件）。
+    fn update_issue_milestone(&self, repo: &RepoRef, number: &str, milestone: Option<&str>) -> Result<Issue>;
+    /// 整体替换 Issue 标签（按名；写穿透回读全量）。本地走 journal（issue.labels 事件）。
+    fn update_issue_labels(&self, repo: &RepoRef, number: &str, labels: &[String]) -> Result<Issue>;
+    /// 整体替换 Issue 负责人（登录名；写穿透回读全量）。本地走 journal（issue.assignees 事件）。
+    fn update_issue_assignees(&self, repo: &RepoRef, number: &str, assignees: &[String]) -> Result<Issue>;
     /// 创建里程碑本体（返回平台确认的名称）。本地来源不支持。
     fn create_milestone(&self, repo: &RepoRef, title: &str, due_on: Option<&str>, description: Option<&str>) -> Result<String>;
     /// 创建 PR（head/base 为远端分支名；本地来源 = 分支即 PR，不支持）。
@@ -138,6 +170,10 @@ pub trait Source: Send + Sync {
     fn remote_branches(&self, repo: &RepoRef) -> Result<Vec<String>>;
     /// 里程碑元数据清单（title/due_on/state）。
     fn list_milestones(&self, repo: &RepoRef) -> Result<Vec<crate::models::MilestoneInfo>>;
+    /// 切换里程碑开启/关闭（写穿透，返回平台确认的全量元数据）。本地无平台里程碑。
+    fn set_milestone_state(&self, repo: &RepoRef, number: i64, closed: bool) -> Result<crate::models::MilestoneInfo>;
+    /// 编辑里程碑名称/描述/截止日（写穿透；本地不支持）。
+    fn update_milestone(&self, repo: &RepoRef, number: i64, title: &str, description: Option<&str>, due_on: Option<&str>) -> Result<crate::models::MilestoneInfo>;
 }
 
 /// JSON 编号字段 → 文本口径：字符串直取（Gitee v5 issue "IKCTH7"），
