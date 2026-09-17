@@ -512,7 +512,7 @@ async function revealRel(rel: string): Promise<void> {
   store.select(rel);
   await nextTick();
   const row = rootEl.value?.querySelector<HTMLElement>(`[data-rel="${CSS.escape(rel)}"]`);
-  row?.scrollIntoView({ block: "nearest" });
+  row?.scrollIntoView?.({ block: "nearest" });
   row?.classList.add("flash");
   setTimeout(() => row?.classList.remove("flash"), 900);
 }

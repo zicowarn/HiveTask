@@ -162,6 +162,22 @@ export const isTauri = (): boolean => "__TAURI_INTERNALS__" in window;
 
 // ---- 知识库（文件系统层，镜像 src-tauri/src/kb.rs）----
 
+/** 一条搜索命中（1 基行/列；列按**字符**计，中文场景不能用字节偏移）。 */
+export interface KbSearchHit {
+  rel: string;
+  line: number;
+  column: number;
+  text: string;
+}
+
+export interface KbSearchResult {
+  hits: KbSearchHit[];
+  /** 命中文件数。 */
+  files: number;
+  /** 达到上限被截断（界面提示"还有更多"）。 */
+  truncated: boolean;
+}
+
 export interface KbEntry {
   name: string;
   /** 相对根的路径，`/` 分隔——树的前端 key。 */
@@ -204,6 +220,12 @@ export const api = {
   kbPickRoot: () => invoke<string | null>("kb_pick_root"),
   kbListDir: (root: string, rel = "", showIgnored = false) =>
     invoke<KbEntry[]>("kb_list_dir", { root, rel, showIgnored }),
+  /** 遍历整根拿全部文件（⌘P 快速打开）——一次 IPC，比前端逐层拉快得多。 */
+  kbWalk: (root: string, showIgnored = false, limit?: number) =>
+    invoke<string[]>("kb_walk", { root, showIgnored, limit }),
+  /** 全文搜索（Rust 侧按行搜，编码探测后再匹配，GBK 中文也搜得到）。 */
+  kbSearch: (root: string, query: string, showIgnored = false, maxHits?: number) =>
+    invoke<KbSearchResult>("kb_search", { root, query, showIgnored, maxHits }),
   kbStat: (root: string, rel = "") => invoke<KbStat>("kb_stat", { root, rel }),
   kbReadText: (root: string, rel: string) => invoke<KbText>("kb_read_text", { root, rel }),
   /** 二进制预览：Rust 侧用 ipc::Response 回原始字节，这里拿到的是 ArrayBuffer。 */

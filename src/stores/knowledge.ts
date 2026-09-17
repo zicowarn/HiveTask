@@ -12,6 +12,19 @@ const ROOT_KEY = "hivetask.kb.root";
 const RECENT_KEY = "hivetask.kb.recent";
 const IGNORED_KEY = "hivetask.kb.showIgnored";
 const RECENT_MAX = 12;
+/** 最近打开的**文件**（与「最近的知识库根」分开：一个记目录，一个记文件）。 */
+const RECENT_FILES_KEY = "hivetask.kb.recentFiles";
+const RECENT_FILES_MAX = 20;
+
+function readRecentFiles(): string[] {
+  try {
+    const raw = localStorage.getItem("hivetask.kb.recentFiles");
+    const parsed = raw ? (JSON.parse(raw) as unknown) : [];
+    return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === "string") : [];
+  } catch {
+    return [];
+  }
+}
 
 function readLocal(key: string): string | null {
   try {
@@ -78,6 +91,15 @@ export const useKnowledgeStore = defineStore("knowledge", () => {
   const pageJump = ref<number | null>(null);
   /** 字流文档的当前章节标题（docx 这类没有可信页码的格式用它当"当前位置"）。 */
   const section = ref<string | null>(null);
+  /**
+   * 全部文件清单缓存（⌘P 与搜索用）。一次 `kb_walk` 拿全量；任何写操作后失效。
+   * 懒加载：不打开 ⌘P 就不付这次遍历。
+   */
+  const fileIndex = ref<string[] | null>(null);
+  /** 最近打开的若干文件（⌘P 空查询时置顶；localStorage 持久化）。 */
+  const recentFiles = ref<string[]>(readRecentFiles());
+  /** 预览面板要跳到的行（搜索命中点击后消费，用完清零）。 */
+  const jumpToLine = ref<{ rel: string; line: number } | null>(null);
   /** 编辑器光标位置（行/列）——状态栏用；非 Markdown 或未聚焦时为 null。 */
   const cursor = ref<{ line: number; col: number } | null>(null);
   /** 编辑器缩进宽度（空格数）——状态栏按 VS Code 口径显示。 */
@@ -171,6 +193,9 @@ export const useKnowledgeStore = defineStore("knowledge", () => {
 
   /** 递归刷新已展开的分支（保持展开状态）。 */
   async function refresh(rel = ""): Promise<void> {
+    // 写操作后的统一刷新入口：顺带让 ⌘P/搜索的文件清单失效
+    // （否则会给出已经删掉或改过名的路径）
+    invalidateFileIndex();
     await loadDir(rel);
     for (const key of Object.keys(expanded.value)) {
       if (expanded.value[key] && key !== rel && key.startsWith(rel)) await loadDir(key);
@@ -361,6 +386,40 @@ export const useKnowledgeStore = defineStore("knowledge", () => {
 
   function requestPageJump(page: number): void {
     pageJump.value = page;
+  }
+
+  /** 打开一个文件：切页签 + 记入「最近打开」（⌘P 的置顶依据）。 */
+  function openFile(rel: string): void {
+    select(rel);
+    recentFiles.value = [rel, ...recentFiles.value.filter((item) => item !== rel)].slice(0, RECENT_FILES_MAX);
+    try {
+      localStorage.setItem(RECENT_FILES_KEY, JSON.stringify(recentFiles.value));
+    } catch {
+      // 存储不可用 → 本次会话内仍然生效
+    }
+  }
+
+  /** 全量文件清单（懒加载 + 缓存；写操作后调 `invalidateFileIndex`）。 */
+  async function loadFileIndex(force = false): Promise<string[]> {
+    const base = root.value;
+    if (!base) return [];
+    if (!force && fileIndex.value) return fileIndex.value;
+    const files = await api.kbWalk(base, showIgnored.value);
+    fileIndex.value = files;
+    return files;
+  }
+
+  function invalidateFileIndex(): void {
+    fileIndex.value = null;
+  }
+
+  /** 请求预览跳到某文件的某一行（搜索命中点击用）。 */
+  function requestJump(rel: string, line: number): void {
+    jumpToLine.value = { rel, line };
+  }
+
+  function clearJump(): void {
+    jumpToLine.value = null;
   }
 
   function setActiveText(value: KbText | null): void {
@@ -660,6 +719,14 @@ export const useKnowledgeStore = defineStore("knowledge", () => {
     setCursor,
   setStats,
     clipboard,
+    fileIndex,
+    recentFiles,
+    openFile,
+    loadFileIndex,
+    invalidateFileIndex,
+    jumpToLine,
+    requestJump,
+    clearJump,
     selection,
     selectOnly,
     toggleSelection,

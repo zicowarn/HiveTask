@@ -7,7 +7,7 @@
  * 分栏在**面板内部**用既有的 SplitPane 原语完成（VS Code 侧栏 ≈280px 起步，
  * 拖拽下限由 SplitPane 的 min 比例兜住）。
  */
-import { computed, onMounted, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import PanelShell from "../workbench/PanelShell.vue";
 import SplitPane from "../workbench/SplitPane.vue";
 import { isTauri } from "../api";
@@ -16,6 +16,8 @@ import { useKnowledgeStore } from "../stores/knowledge";
 import KnowledgePreview from "./KnowledgePreview.vue";
 import KnowledgeTabs from "./KnowledgeTabs.vue";
 import KnowledgeTree from "./KnowledgeTree.vue";
+import KnowledgeSearchView from "./KnowledgeSearchView.vue";
+import KnowledgeQuickOpen from "./KnowledgeQuickOpen.vue";
 import KnowledgeCreateDialog from "./KnowledgeCreateDialog.vue";
 import KnowledgeFileHistoryDrawer from "./KnowledgeFileHistoryDrawer.vue";
 
@@ -23,6 +25,34 @@ defineProps<{ leafId?: string; panelType?: string }>();
 
 const store = useKnowledgeStore();
 const { t } = useI18n();
+
+/** 左栏两个视图：文件树 / 全文搜索（MarkText 的 sidebar 同构）。 */
+const sideView = ref<"files" | "search">("files");
+const searchRef = ref<{ focusInput: () => void } | null>(null);
+const quickOpen = ref(false);
+
+function switchToSearch(): void {
+  sideView.value = "search";
+  void nextTick(() => searchRef.value?.focusInput());
+}
+
+/** ⌘P 快速打开、⌘⇧F 搜索（VS Code 同款；⌘F 留给预览内的查找）。 */
+function onShortcut(event: KeyboardEvent): void {
+  if (!(event.metaKey || event.ctrlKey)) return;
+  const key = event.key.toLowerCase();
+  if (key === "p" && !event.shiftKey) {
+    event.preventDefault();
+    quickOpen.value = true;
+    return;
+  }
+  if (key === "f" && event.shiftKey) {
+    event.preventDefault();
+    switchToSearch();
+  }
+}
+
+onMounted(() => window.addEventListener("keydown", onShortcut));
+onBeforeUnmount(() => window.removeEventListener("keydown", onShortcut));
 
 const WIDTH_KEY = "hivetask.kb.treeRatio";
 const ratio = ref(loadRatio());
@@ -95,7 +125,25 @@ const createRequest = ref<{ kind: "file" | "dir"; parent?: string } | null>(null
 
     <SplitPane direction="horizontal" :initial-ratio="ratio" :min="0.12" @update:ratio="ratio = $event">
       <template #first>
-        <KnowledgeTree ref="treeRef" @create="createRequest = $event" @file-history="historyRel = $event" />
+        <div class="kb-side">
+          <div class="kb-side-tabs">
+            <button class="side-tab" :class="{ on: sideView === 'files' }" @click="sideView = 'files'">
+              {{ t("kb.tabFiles") }}
+            </button>
+            <button class="side-tab" :class="{ on: sideView === 'search' }" @click="switchToSearch">
+              {{ t("kb.tabSearch") }}
+            </button>
+          </div>
+          <div class="kb-side-body">
+            <KnowledgeTree
+              v-show="sideView === 'files'"
+              ref="treeRef"
+              @create="createRequest = $event"
+              @file-history="historyRel = $event"
+            />
+            <KnowledgeSearchView v-if="sideView === 'search'" ref="searchRef" />
+          </div>
+        </div>
       </template>
       <template #second>
         <div v-if="emptyRoot" class="kb-welcome">
@@ -121,6 +169,7 @@ const createRequest = ref<{ kind: "file" | "dir"; parent?: string } | null>(null
       :parent="createRequest.parent"
       @close="createRequest = null"
     />
+    <KnowledgeQuickOpen v-if="quickOpen" @close="quickOpen = false" />
   </PanelShell>
 </template>
 
@@ -173,5 +222,39 @@ const createRequest = ref<{ kind: "file" | "dir"; parent?: string } | null>(null
   line-height: 1.7;
   color: var(--text-dim);
   text-align: center;
+}
+.kb-side {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  background: var(--bg-panel);
+}
+.kb-side-tabs {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex: none;
+  padding: 4px 8px 0;
+  border-bottom: 1px solid var(--border);
+}
+.side-tab {
+  height: 22px;
+  padding: 0 10px;
+  border: none;
+  border-radius: 6px 6px 0 0;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: var(--font-md);
+  cursor: pointer;
+}
+.side-tab.on {
+  background: var(--bg-chip, var(--bg-hover));
+  color: var(--text);
+  font-weight: 600;
+}
+.kb-side-body {
+  flex: 1 1 auto;
+  min-height: 0;
 }
 </style>

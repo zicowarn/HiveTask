@@ -501,6 +501,31 @@ async function saveForced(): Promise<void> {
   }
 }
 
+/**
+ * 搜索命中点击 → 跳到那一行。
+ *
+ * 三个条件齐了才跳：目标还在、文件已切过来、编辑器已挂载（CM6 是异步组件）。
+ * 差一个就等着 —— 早期的写法在"文件还没切过来"时直接清掉了请求，结果跳转丢失。
+ * 文本回退视图（`<pre>`）没有编辑器，按行高滚动到大致位置；其余格式（PDF/图片…）
+ * 只打开文件（它们没有"行"的概念）。
+ */
+watch([rel, () => store.jumpToLine, editorRef], async () => {
+  const target = store.jumpToLine;
+  if (!target || rel.value !== target.rel) return;
+  if (kind.value === "markdown" && !editorRef.value) return;
+  store.clearJump();
+  await nextTick();
+  if (kind.value === "markdown") {
+    editorRef.value?.goToLine(target.line);
+    return;
+  }
+  const pre = bodyEl.value?.querySelector<HTMLElement>("pre.code");
+  if (pre) {
+    const lineHeight = Number.parseFloat(getComputedStyle(pre).lineHeight || "0") || 20;
+    pre.scrollTop = Math.max(0, (target.line - 3) * lineHeight);
+  }
+});
+
 /** 状态栏点了页码 → 跳到那一页。 */
 watch(
   () => store.pageJump,

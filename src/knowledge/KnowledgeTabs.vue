@@ -41,7 +41,7 @@ function scrollBy(direction: -1 | 1): void {
 /** 激活页签滚动到可见（切文件时页签可能在被卷走的位置）。 */
 function scrollActiveIntoView(): void {
   const el = strip.value?.querySelector<HTMLElement>(".tab.active");
-  el?.scrollIntoView({ block: "nearest", inline: "nearest" });
+  el?.scrollIntoView?.({ block: "nearest", inline: "nearest" });
   syncArrows();
 }
 

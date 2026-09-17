@@ -34,6 +34,11 @@ function extensionOf(name: string): string {
 }
 
 /** 条目 → Octicon 名（EditorIcon 的 `o.*` 族）。 */
+/** 只给文件名时取图标（⌘P 的结果行用）。 */
+export function iconForFile(name: string): string {
+  return iconForEntry({ name, kind: "file" });
+}
+
 export function iconForEntry(entry: Pick<KbEntry, "name" | "kind">, open = false): string {
   if (entry.kind === "symlink") return "o.file-symlink-file";
   if (entry.kind === "dir") return open ? "o.file-directory-open-fill" : "o.file-directory-fill";
