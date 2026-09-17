@@ -223,6 +223,9 @@ export const api = {
   /** 遍历整根拿全部文件（⌘P 快速打开）——一次 IPC，比前端逐层拉快得多。 */
   kbWalk: (root: string, showIgnored = false, limit?: number) =>
     invoke<string[]>("kb_walk", { root, showIgnored, limit }),
+  /** 让系统生成预览图（Quick Look）；失败返回 null（不抛，调用方按"没有"处理）。 */
+  kbThumbnail: (root: string, rel: string, size = 640) =>
+    invoke<ArrayBuffer>("kb_thumbnail", { root, rel, size }).catch(() => null),
   /** 全文搜索（Rust 侧按行搜，编码探测后再匹配，GBK 中文也搜得到）。 */
   kbSearch: (root: string, query: string, showIgnored = false, maxHits?: number) =>
     invoke<KbSearchResult>("kb_search", { root, query, showIgnored, maxHits }),

@@ -364,6 +364,73 @@ pub fn kb_search(
     Ok(SearchResult { hits, files, truncated })
 }
 
+/// 让**系统**生成一张预览图（Quick Look）——媒体与"没有内置渲染器"的格式靠它兜底。
+///
+/// 为什么走这条路：WebView 解不了的编码（wmv/mkv/avi/rmvb…）和 macOS 自己的格式
+/// （Pages/Numbers/Keynote、sketch 等）我们都没有解码器，但**操作系统有**。
+/// `qlmanage -t` 会调用对应的 Quick Look 生成器出 PNG —— 这是桌面应用相对纯 web 的
+/// 结构性优势（③适配：能力来自平台）。
+///
+/// 只在 macOS 上可用；其它平台返回错误，前端退化成"用默认应用打开"。
+#[tauri::command]
+pub fn kb_thumbnail(root: String, rel: String, size: Option<u32>) -> Result<tauri::ipc::Response, String> {
+    thumbnail_bytes(&root, &rel, size.unwrap_or(640)).map(tauri::ipc::Response::new)
+}
+
+/// 命令的实现体（抽出来给单测直接调 —— `Response` 不便在测试里取字节）。
+pub fn thumbnail_bytes(root: &str, rel: &str, size: u32) -> Result<Vec<u8>, String> {
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = (root, rel, size);
+        Err("当前平台不支持系统预览图".into())
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let root_abs = root_path(root).map_err(|e| e.to_string())?;
+        let abs = resolve_in_root(&root_abs, rel).map_err(|e| e.to_string())?;
+        if !abs.is_file() {
+            return Err("不是文件".into());
+        }
+        let size = size.clamp(64, 2048);
+        // 每次调用用独立临时目录：qlmanage 的输出名带原文件名，共用目录会串
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or_default();
+        let out_dir = std::env::temp_dir().join(format!("hivetask-thumb-{}-{}", std::process::id(), stamp));
+        std::fs::create_dir_all(&out_dir).map_err(|e| e.to_string())?;
+
+        let output = std::process::Command::new("/usr/bin/qlmanage")
+            .arg("-t") // 缩略图模式
+            .arg("-s")
+            .arg(size.to_string())
+            .arg("-o")
+            .arg(&out_dir)
+            .arg(&abs)
+            .output();
+
+        let output = match output {
+            Ok(output) => output,
+            Err(error) => {
+                let _ = std::fs::remove_dir_all(&out_dir);
+                return Err(format!("调用系统预览失败：{error}"));
+            }
+        };
+        if !output.status.success() {
+            let _ = std::fs::remove_dir_all(&out_dir);
+            return Err("系统未能生成预览图".into());
+        }
+        // 输出文件名 = 原文件名 + ".png"
+        let file_name = abs.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+        let bytes = std::fs::read(out_dir.join(format!("{file_name}.png")));
+        let _ = std::fs::remove_dir_all(&out_dir);
+        match bytes {
+            Ok(bytes) if !bytes.is_empty() => Ok(bytes),
+            _ => Err("系统没有为这个文件生成预览图".into()),
+        }
+    }
+}
+
 /// 列出目录一层（懒加载）。
 #[tauri::command]
 pub fn kb_list_dir(root: String, rel: Option<String>, show_ignored: Option<bool>) -> Result<Vec<Entry>, String> {
@@ -748,6 +815,35 @@ mod kb_tests {
         let root = temp_root("search-empty");
         let result = kb_search(root.to_string_lossy().to_string(), "   ".into(), None, None).unwrap();
         assert!(result.hits.is_empty());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn thumbnail_uses_system_quick_look_and_respects_sandbox() {
+        let root = temp_root("thumb");
+        let root_str = root.to_string_lossy().to_string();
+        // 1×1 的 PNG（Quick Look 能直接为图片出图）
+        let png: Vec<u8> = vec![
+            0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44, 0x52,
+            0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00, 0x00, 0x1F, 0x15, 0xC4,
+            0x89, 0x00, 0x00, 0x00, 0x0A, 0x49, 0x44, 0x41, 0x54, 0x78, 0x9C, 0x63, 0x00, 0x01, 0x00, 0x00,
+            0x05, 0x00, 0x01, 0x0D, 0x0A, 0x2D, 0xB4, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4E, 0x44, 0xAE,
+            0x42, 0x60, 0x82,
+        ];
+        std::fs::write(root.join("pic.png"), &png).unwrap();
+
+        // 沙箱：根外的路径必须被拒（不能靠它去读整块磁盘）
+        assert!(kb_thumbnail(root_str.clone(), "../outside.png".into(), None).is_err());
+
+        // 正常路径：拿到的是 PNG 字节（Quick Look 的产物）
+        match thumbnail_bytes(&root_str, "pic.png", 128) {
+            Ok(bytes) => {
+                assert!(bytes.len() > 8, "应拿到非空的预览图");
+                assert_eq!(&bytes[..4], &[0x89, 0x50, 0x4E, 0x47], "应是 PNG 头");
+            }
+            // 无头 CI / 未登录图形会话下 qlmanage 可能不可用：允许失败，但必须是"清晰错误"
+            Err(message) => assert!(message.contains("预览") || message.contains("系统"), "{message}"),
+        }
         let _ = std::fs::remove_dir_all(&root);
     }
 

@@ -1107,6 +1107,7 @@ pub fn run() {
             kb::kb_walk,
             kb::kb_search,
             kb::kb_stat,
+            kb::kb_thumbnail,
             kb::kb_read_text,
             kb::kb_read_bytes,
             kb::kb_write_text,

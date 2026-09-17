@@ -74,6 +74,8 @@ function formatTime(seconds: number): string {
 interface MediaParts {
   wrap: HTMLElement;
   meta: HTMLElement;
+  /** 系统预览图的 object URL（销毁时要释放）。 */
+  posterUrl?: string;
   /** 元信息行前缀（文件名 · 体积），事件回调里复用它拼时长/分辨率。 */
   base: string;
 }
@@ -92,8 +94,39 @@ function createMediaShell(kind: "audio" | "video", ctx: PreviewContext, size: nu
   return { wrap, meta, base };
 }
 
+/**
+ * 解不了编码时请**系统**出一张预览图（Quick Look）贴在海报位。
+ * 我们解不了，但 Quick Look 常常能出第一帧 —— 比只给一句"请用默认应用打开"有用得多。
+ */
+async function attachSystemPoster(
+  ctx: PreviewContext,
+  parts: MediaParts,
+  fallbackNote: string,
+): Promise<void> {
+  const stage = parts.wrap.querySelector(".kb-media-stage");
+  // 拿不到系统预览图 → 给完整可操作的那句话（"请用默认应用打开"）
+  if (!stage || !ctx.systemThumbnail) {
+    parts.meta.textContent = fallbackNote;
+    return;
+  }
+  const bytes = await ctx.systemThumbnail();
+  if (!bytes) {
+    parts.meta.textContent = fallbackNote;
+    return;
+  }
+  const url = URL.createObjectURL(new Blob([bytes], { type: "image/png" }));
+  const img = document.createElement("img");
+  img.className = "kb-media-poster";
+  img.alt = ctx.name;
+  img.src = url;
+  stage.replaceChildren(img);
+  // 有图时文案简短（头部那个「默认应用打开」按钮就在旁边，不必重复）
+  parts.meta.textContent = `${parts.base} —— WebView 解不了这个编码 · 上图为系统生成的预览帧`;
+  parts.posterUrl = url;
+}
+
 /** 播放器事件 → 元信息行（时长、分辨率）；解不了码时如实说明。 */
-function describeMedia(el: HTMLMediaElement, kind: "audio" | "video", parts: MediaParts): void {
+function describeMedia(el: HTMLMediaElement, kind: "audio" | "video", parts: MediaParts, ctx: PreviewContext): void {
   el.addEventListener("loadedmetadata", () => {
     const bits = [formatTime(el.duration)];
     if (kind === "video") {
@@ -103,6 +136,7 @@ function describeMedia(el: HTMLMediaElement, kind: "audio" | "video", parts: Med
     parts.meta.textContent = `${parts.base} · ${bits.join(" · ")}`;
   });
   el.addEventListener("error", () => {
+    void attachSystemPoster(ctx, parts, `${parts.base} —— 这个编码 WebView 解不了，请用默认应用打开`);
     parts.meta.textContent = `${parts.base} —— 这个编码 WebView 解不了，请用默认应用打开`;
   });
 }
@@ -187,9 +221,14 @@ async function renderAudio(ctx: PreviewContext): Promise<PreviewInstance> {
   const url = URL.createObjectURL(new Blob([bytes]));
   el.src = url;
   parts.wrap.querySelector(".kb-media-stage")!.appendChild(el);
-  describeMedia(el, "audio", parts);
+  describeMedia(el, "audio", parts, ctx);
   ctx.container.replaceChildren(parts.wrap);
-  return { destroy: () => URL.revokeObjectURL(url) };
+  return {
+    destroy: () => {
+      URL.revokeObjectURL(url);
+      if (parts.posterUrl) URL.revokeObjectURL(parts.posterUrl);
+    },
+  };
 }
 
 async function renderVideo(ctx: PreviewContext): Promise<PreviewInstance> {
@@ -213,12 +252,13 @@ async function renderVideo(ctx: PreviewContext): Promise<PreviewInstance> {
     el.src = url;
     el.load();
   }
-  describeMedia(el, "video", parts);
+  describeMedia(el, "video", parts, ctx);
   ctx.container.replaceChildren(parts.wrap);
   return {
     destroy() {
       cleanup();
       if (url) URL.revokeObjectURL(url);
+      if (parts.posterUrl) URL.revokeObjectURL(parts.posterUrl);
     },
   };
 }

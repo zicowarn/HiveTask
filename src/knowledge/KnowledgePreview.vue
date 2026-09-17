@@ -67,6 +67,8 @@ const conflict = ref(false);
 const unsupported = ref(false);
 const resolvedPluginId = ref<string | null>(null);
 const imageUrl = ref<string | null>(null);
+/** 没有内置渲染器时，用系统生成的预览图兜底（Quick Look；拿不到就不显示）。 */
+const systemPosterUrl = ref<string | null>(null);
 const imageEl = ref<HTMLImageElement | null>(null);
 /**
  * 缩放：面板只做两件事 —— 记状态、把动作转给"当前持有画面的那一方"。
@@ -117,6 +119,23 @@ function humanSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+}
+
+/** 取系统预览图（拿不到就静默 —— 卡片本身已经说明了情况）。 */
+async function loadSystemPoster(base: string, target: string): Promise<void> {
+  releaseSystemPoster();
+  try {
+    const png = await api.kbThumbnail(base, target);
+    if (!png) return;
+    systemPosterUrl.value = URL.createObjectURL(new Blob([png], { type: "image/png" }));
+  } catch {
+    // 系统没有这个格式的预览器 → 保持不显示
+  }
+}
+
+function releaseSystemPoster(): void {
+  if (systemPosterUrl.value) URL.revokeObjectURL(systemPosterUrl.value);
+  systemPosterUrl.value = null;
 }
 
 function releaseImage(): void {
@@ -370,6 +389,8 @@ async function renderViaRegistry(base: string, target: string, size: number): Pr
   if (!container) return;
   const resolved = await resolvePreview({ root: base, rel: target, name, ext }, readBytes);
   if (!resolved) {
+    // 没有插件认领：先试系统预览图（Pages/Numbers/Keynote、sketch 之类系统能画）
+    void loadSystemPoster(base, target);
     // 没有插件认领：是文本就给纯文本视图（无扩展名的 README/Makefile/.env 这类），
     // 是二进制才给"暂不支持 + 用默认应用打开"的卡片——不拿乱码糊弄人
     if (size <= TEXT_FALLBACK_MAX_BYTES) {
@@ -400,6 +421,11 @@ async function renderViaRegistry(base: string, target: string, size: number): Pr
     readText: async () => (await api.kbReadText(base, target)).text,
     // 同根内其它文件（HLS 分片、3D 的 .bin、shp 的配套 .dbf）：同样受 Rust 侧根沙箱约束
     readSibling: async (sibling: string) => new Uint8Array(await api.kbReadBytes(base, sibling)),
+    // 系统预览图（Quick Look）：媒体解不了、或格式没有内置渲染器时用它兜底
+    systemThumbnail: async () => {
+      const png = await api.kbThumbnail(base, target);
+      return png ? new Uint8Array(png) : null;
+    },
     theme: "dark",
     onZoom: (state) => {
       zoom.value = state;
@@ -544,6 +570,7 @@ function onKeydown(event: KeyboardEvent): void {
 
 async function load(): Promise<void> {
   releaseImage();
+  releaseSystemPoster();
   previewInstance?.destroy?.();
   previewInstance = null;
   unsupported.value = false;
@@ -619,6 +646,7 @@ watch([rel, () => store.root, () => props.reloadTick], () => void load(), { imme
 onMounted(() => window.addEventListener("keydown", onKeydown));
 onBeforeUnmount(() => {
   releaseImage();
+  releaseSystemPoster();
   previewInstance?.destroy?.();
   previewInstance = null;
   window.removeEventListener("keydown", onKeydown);
@@ -894,6 +922,7 @@ function onImageLoaded(): void {
       <!-- 卡片条件必须是 `unsupported` 本身：挂在 kind === 'other' 上会让"插件渲染成功"的
            文件也顶着一张"暂不支持"的卡片（曾经就是这样），语义完全反了 -->
       <div v-if="kind === 'other' && unsupported" class="unsupported">
+        <img v-if="systemPosterUrl" class="unsupported-poster" :src="systemPosterUrl" :alt="name" />
         <EditorIcon name="o.file" />
         <p class="unsupported-title">{{ t("kb.previewUnsupported") }}</p>
         <p class="unsupported-note">{{ t("kb.previewUnsupportedNote") }}</p>
@@ -1496,6 +1525,12 @@ function onImageLoaded(): void {
   background: #000;
   border-radius: 6px;
 }
+.preview-host :deep(.kb-media-poster) {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  border-radius: 6px;
+}
 .preview-host :deep(.kb-media-meta) {
   flex: none;
   margin: 0;
@@ -1660,6 +1695,14 @@ function onImageLoaded(): void {
   gap: 8px;
   padding-top: 48px;
   color: var(--text-dim);
+}
+.unsupported-poster {
+  max-width: min(420px, 70%);
+  max-height: 260px;
+  object-fit: contain;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-app);
 }
 .unsupported-title {
   margin: 0;

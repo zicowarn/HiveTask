@@ -40,6 +40,12 @@ export interface PreviewContext extends PreviewFileInfo {
   theme: "dark" | "light";
   /** 缩放状态变化时回报（面板据此更新百分比显示）。 */
   onZoom?: (state: PreviewZoomState) => void;
+  /**
+   * 让**系统**生成一张预览图（macOS Quick Look）。
+   * 给 WebView 解不了的媒体与"没有内置渲染器"的格式兜底：我们没解码器，但操作系统有。
+   * 宿主实现（面板 → Rust `kb_thumbnail`）；拿不到时返回 null（调用方退化成诚实卡片）。
+   */
+  systemThumbnail?: () => Promise<Uint8Array | null>;
   /** 分页文档回报"当前第几页/共几页"（状态栏显示，可点击跳转）。 */
   onPaging?: (state: { page: number; total: number }) => void;
   /** 字流文档回报"当前章节标题"（状态栏显示；比伪页码诚实）。 */

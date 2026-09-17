@@ -20,8 +20,8 @@
 | 10 | `xps` | `xps` `oxps` | `xps` | zip + FixedPage → `Glyphs.UnicodeString` 文本视图 |
 | 11 | `xmind` | `xmind` | `xmind` | zip + `content.json` → 层级列表 |
 | 12 | `drawio` | `drawio` `dio` | —（我们补的） | `mxGraphModel` → 顶点框（不做连线路由） |
-| 13 | `audio` | 19 种（`mp3/wav/flac/m4a/aac/ogg/opus/…`） | `audio` | 原生 `<audio>` + 本地 blob；**能否播放取决于 WebView 解码器**（`wma/amr/mid` 多半解不了 → 提示用默认应用打开） |
-| 14 | `video` | 17 种（`mp4/webm/mov/mkv/avi/m3u8/…`） | `video` | 原生 `<video>` + 本地 blob；`m3u8` 走 hls.js **自定义 kb:// loader**（分片必须在知识库内）；`mkv/avi/wmv/flv` 同样看 WebView 解码器，解不了会明说 |
+| 13 | `audio` | 19 种（`mp3/wav/flac/m4a/aac/ogg/opus/…`） | `audio` | 原生 `<audio>` + 本地 blob；**能否播放取决于 WebView 解码器** —— 解不了时用**系统预览图（Quick Look）**兜底（见 §4.6） |
+| 14 | `video` | 17 种（`mp4/webm/mov/mkv/avi/m3u8/…`） | `video` | 原生 `<video>` + 本地 blob；`m3u8` 走 hls.js **自定义 kb:// loader**（分片必须在知识库内）；解不了的编码同上，用系统预览图兜底 |
 | 15 | `lrc` | `lrc` | `lrc` | **自研**：时间标签 + 元信息标签解析（纯净/带时间两种视图） |
 | 16 | `model3d` | `gltf` `glb` `obj` `stl` `ply` `vrml` `wrl`（`fbx/dae/3ds/usd*/3mf/amf` 明示不支持） | `model3d` | three + OrbitControls；贴图/`.bin` 从同根预读成 data URL |
 | 17 | `cad` | `dxf` `dwg` | `cad` + `cad-dwg` | **DXF 自研解析**（LINE/CIRCLE/ARC/ELLIPSE/多段线/**SPLINE（NURBS，de Boor）**/HATCH 边界/DIMENSION/文字；含 `$DWGCODEPAGE` 中文解码）→ SVG；**DWG** 用 libredwg wasm → SVG |
@@ -93,6 +93,20 @@
 | **`encrypted`**（加密文档） | — | ❌ **未做**（不弹口令框，直接指向默认应用打开） |
 | **`cad-webgl`**（交互式 WebGL 视图） | — | ❌ **明示不做**（改用静态 SVG，理由见 §5.5） |
 | OFV 依赖里的 `hyparquet` / `seek-bzip` / `xz-decompress`（parquet / bz2 / xz） | — | ❌ **未做**（`bz2`/`xz` 需新依赖；`parquet` 是列存数据文件，属"数据分析"范畴） |
+
+## 4.6 系统预览图兜底（Quick Look）
+
+WebView 解不了的媒体（wmv/mkv/avi…）与**没有内置渲染器的格式**（Pages/Numbers/Keynote、sketch 等），
+我们不用两套解码器硬扛 —— **操作系统有**：Rust 侧 `kb_thumbnail` 调 `qlmanage -t`（macOS 的
+Quick Look）生成 PNG，走 `ipc::Response` 回前端。用在两处：
+
+1. **媒体出错时**：`<video>` 报解不了 → 元信息行如实说明"WebView 解不了这个编码"，同时把
+   系统生成的预览帧贴在海报位（有图比只有一句话有用）；
+2. **无人认领的格式**：「暂不支持」卡片上同样先试系统预览图，出得来就展示。
+
+沙箱照旧：`kb_thumbnail` 走 `resolve_in_root`，不能借它读根外的文件。qlmanage 不可用的
+平台/会话返回明确错误，前端静默降级（卡片本身已说明情况）。这条是**桌面应用相对纯 web
+的结构性优势**（③适配：能力来自平台）。
 
 ## 5. 已知边界（不做的部分，逐条明示）
 

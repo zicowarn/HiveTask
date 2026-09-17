@@ -8,6 +8,7 @@
  * ③ 诚实降级——解不了的编码、认不出但不做的格式，必须落地区（note），不能空画布。
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { waitForDom } from "./test-support";
 import type { PreviewContext } from "../src/knowledge/preview/registry";
 
 const enc = new TextEncoder();
@@ -333,5 +334,41 @@ describe("GIS：底图默认关闭", () => {
     // 默认状态下没有任何 <img>（瓦片就是 img）——离线约束的可执行检查
     expect(ctx.container.querySelectorAll("img").length).toBe(0);
     expect(ctx.container.querySelector(".kb-gis-tiles")).not.toBeNull();
+  });
+});
+
+describe("解不了的媒体：用系统预览图兜底（Quick Look）", () => {
+  it("视频报错 → 取系统预览图贴在海报位，并说明来源", async () => {
+    const { videoPlugin } = await import("../src/knowledge/preview/plugins/media");
+    const ctx = makeCtx({ ext: "mkv", readBytes: async () => new Uint8Array([9, 9]) });
+    // jsdom 没有 URL.createObjectURL（真实引擎都有）—— 与 SVG MIME 那两条同款打桩
+    const original = URL.createObjectURL.bind(URL);
+    vi.spyOn(URL, "createObjectURL").mockImplementation((blob: Blob | MediaSource) => original(blob));
+    // 宿主提供"系统预览图"（真机上由 Rust 的 kb_thumbnail 出图）
+    const poster = new Uint8Array([0x89, 0x50, 0x4e, 0x47]);
+    let asked = 0;
+    (ctx as { systemThumbnail?: () => Promise<Uint8Array | null> }).systemThumbnail = async () => {
+      asked += 1;
+      return poster;
+    };
+    await videoPlugin.render(ctx);
+    ctx.container.querySelector("video")!.dispatchEvent(new Event("error"));
+    await waitForDom(() => {
+      expect(ctx.container.querySelector(".kb-media-poster"), "应贴出系统预览帧").not.toBeNull();
+    });
+    expect(asked).toBe(1);
+    expect(ctx.container.querySelector(".kb-media-meta")!.textContent).toContain("系统生成的预览帧");
+    expect(ctx.container.querySelector(".kb-media-meta")!.textContent).toContain("WebView 解不了");
+  });
+
+  it("宿主拿不到预览图 → 只给文案（不假装有图）", async () => {
+    const { videoPlugin } = await import("../src/knowledge/preview/plugins/media");
+    const ctx = makeCtx({ ext: "wmv", readBytes: async () => new Uint8Array([1]) });
+    (ctx as { systemThumbnail?: () => Promise<Uint8Array | null> }).systemThumbnail = async () => null;
+    await videoPlugin.render(ctx);
+    ctx.container.querySelector("video")!.dispatchEvent(new Event("error"));
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(ctx.container.querySelector(".kb-media-poster")).toBeNull();
+    expect(ctx.container.querySelector(".kb-media-meta")!.textContent).toContain("默认应用打开");
   });
 });
