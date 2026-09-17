@@ -36,6 +36,8 @@ export const zhCN = {
   // Menus
   "menu.file": "文件",
   "menu.edit": "编辑",
+  "menu.quickOpen": "快速打开…",
+  "menu.searchKnowledge": "在知识库中搜索…",
   "menu.view": "视图",
   "menu.tools": "工具",
   "menu.help": "帮助",

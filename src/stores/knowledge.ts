@@ -100,6 +100,11 @@ export const useKnowledgeStore = defineStore("knowledge", () => {
   const recentFiles = ref<string[]>(readRecentFiles());
   /** 预览面板要跳到的行（搜索命中点击后消费，用完清零）。 */
   const jumpToLine = ref<{ rel: string; line: number } | null>(null);
+  /**
+   * 待知识库面板执行的命令（菜单/全局快捷键下发的通道）。
+   * 面板消费后清零 —— 与 `pageJump` 同一套模式。
+   */
+  const pendingCommand = ref<"quickOpen" | "search" | null>(null);
   /** 编辑器光标位置（行/列）——状态栏用；非 Markdown 或未聚焦时为 null。 */
   const cursor = ref<{ line: number; col: number } | null>(null);
   /** 编辑器缩进宽度（空格数）——状态栏按 VS Code 口径显示。 */
@@ -422,6 +427,14 @@ export const useKnowledgeStore = defineStore("knowledge", () => {
     jumpToLine.value = null;
   }
 
+  function runCommand(command: "quickOpen" | "search"): void {
+    pendingCommand.value = command;
+  }
+
+  function clearCommand(): void {
+    pendingCommand.value = null;
+  }
+
   function setActiveText(value: KbText | null): void {
     activeText.value = value;
   }
@@ -727,6 +740,9 @@ export const useKnowledgeStore = defineStore("knowledge", () => {
     jumpToLine,
     requestJump,
     clearJump,
+    pendingCommand,
+    runCommand,
+    clearCommand,
     selection,
     selectOnly,
     toggleSelection,

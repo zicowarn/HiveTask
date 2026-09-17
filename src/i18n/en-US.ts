@@ -35,6 +35,8 @@ export const enUS: Record<MessageKey, string> = {
   // Menus
   "menu.file": "File",
   "menu.edit": "Edit",
+  "menu.quickOpen": "Quick Open…",
+  "menu.searchKnowledge": "Search in Knowledge Base…",
   "menu.view": "View",
   "menu.tools": "Tools",
   "menu.help": "Help",

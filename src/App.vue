@@ -168,6 +168,16 @@ const menus = computed(() =>
     gotoProjects: () => switchWorkspace("projects"),
     gotoKnowledge: () => switchWorkspace("knowledge"),
     gotoTools: () => switchWorkspace("tools"),
+    // 快速打开/搜索是**全局**入口：在任何工作区按 ⌘P 都该能到知识库
+    quickOpen: () => {
+      switchWorkspace("knowledge");
+      knowledge.runCommand("quickOpen");
+    },
+    searchKnowledge: () => {
+      switchWorkspace("knowledge");
+      knowledge.runCommand("search");
+    },
+    knowledgeReady: () => !!knowledge.root,
     statusbarVisible: () => settings.statusbarVisible,
     toggleStatusbar: () => settings.toggleStatusbar(),
     githubUrlMissing: () => currentGitHubUrl() === null,
@@ -197,7 +207,22 @@ function onKeydown(event: KeyboardEvent) {
     ",": openPreferences,
   };
   // Shifted layer only, so ⌘C/⌘O stay the webview's native copy/open.
-  const shifted: Record<string, () => void> = { o: openInGithub, c: () => void copyGithubUrl() };
+  const shifted: Record<string, () => void> = {
+    o: openInGithub,
+    c: () => void copyGithubUrl(),
+    // ⌘⇧F = 知识库搜索（Tauri 里由原生菜单的加速键送达，这里只服务浏览器预览）
+    f: () => {
+      switchWorkspace("knowledge");
+      knowledge.runCommand("search");
+    },
+  };
+  // ⌘P = 快速打开（同上：跨工作区可用）
+  if (key === "p" && !event.shiftKey) {
+    event.preventDefault();
+    switchWorkspace("knowledge");
+    knowledge.runCommand("quickOpen");
+    return;
+  }
   const handler = event.shiftKey ? shifted[key] : plain[key];
   if (handler) {
     event.preventDefault();

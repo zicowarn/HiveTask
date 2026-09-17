@@ -93,3 +93,66 @@ describe("⌘P 面板", () => {
     expect(closed.count).toBe(1);
   });
 });
+
+describe("菜单/快捷键 → 面板（全局入口）", () => {
+  it("store 下发 quickOpen：面板打开快速打开条", async () => {
+    vi.resetModules();
+    const { createApp, h, nextTick } = await import("vue");
+    const { useI18n } = await import("../src/i18n");
+    useI18n().setLocale("zh-CN");
+    const { default: KnowledgeWorkbench } = await import("../src/knowledge/KnowledgeWorkbench.vue");
+    const { useKnowledgeStore } = await import("../src/stores/knowledge");
+    const pinia = createPinia();
+    setActivePinia(pinia);
+    const store = useKnowledgeStore();
+    store.root = "/tmp/kb";
+    store.children = { "": [] } as never;
+
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const app = createApp({ render: () => h(KnowledgeWorkbench, {}) });
+    app.use(pinia);
+    app.mount(host);
+    await nextTick();
+
+    expect(host.querySelector(".qo"), "默认不该有快速打开条").toBeNull();
+    // 菜单/全局快捷键下发命令（App.vue 走的就是这条）
+    store.runCommand("quickOpen");
+    await waitForDom(() => {
+      expect(host.querySelector(".qo"), "下发 quickOpen 后应打开").not.toBeNull();
+    });
+    expect(store.pendingCommand, "命令消费后要清零").toBeNull();
+
+    app.unmount();
+    host.remove();
+  });
+
+  it("store 下发 search：左栏切到搜索视图", async () => {
+    vi.resetModules();
+    const { createApp, h, nextTick } = await import("vue");
+    const { useI18n } = await import("../src/i18n");
+    useI18n().setLocale("zh-CN");
+    const { default: KnowledgeWorkbench } = await import("../src/knowledge/KnowledgeWorkbench.vue");
+    const { useKnowledgeStore } = await import("../src/stores/knowledge");
+    const pinia = createPinia();
+    setActivePinia(pinia);
+    const store = useKnowledgeStore();
+    store.root = "/tmp/kb";
+    store.children = { "": [] } as never;
+
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const app = createApp({ render: () => h(KnowledgeWorkbench, {}) });
+    app.use(pinia);
+    app.mount(host);
+    await nextTick();
+
+    store.runCommand("search");
+    await waitForDom(() => {
+      expect(host.querySelector(".kb-search"), "应切到搜索视图").not.toBeNull();
+    });
+
+    app.unmount();
+    host.remove();
+  });
+});

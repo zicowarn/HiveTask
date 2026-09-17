@@ -7,7 +7,7 @@
  * 分栏在**面板内部**用既有的 SplitPane 原语完成（VS Code 侧栏 ≈280px 起步，
  * 拖拽下限由 SplitPane 的 min 比例兜住）。
  */
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { computed, nextTick, onMounted, ref, watch } from "vue";
 import PanelShell from "../workbench/PanelShell.vue";
 import SplitPane from "../workbench/SplitPane.vue";
 import { isTauri } from "../api";
@@ -36,23 +36,20 @@ function switchToSearch(): void {
   void nextTick(() => searchRef.value?.focusInput());
 }
 
-/** ⌘P 快速打开、⌘⇧F 搜索（VS Code 同款；⌘F 留给预览内的查找）。 */
-function onShortcut(event: KeyboardEvent): void {
-  if (!(event.metaKey || event.ctrlKey)) return;
-  const key = event.key.toLowerCase();
-  if (key === "p" && !event.shiftKey) {
-    event.preventDefault();
-    quickOpen.value = true;
-    return;
-  }
-  if (key === "f" && event.shiftKey) {
-    event.preventDefault();
-    switchToSearch();
-  }
-}
-
-onMounted(() => window.addEventListener("keydown", onShortcut));
-onBeforeUnmount(() => window.removeEventListener("keydown", onShortcut));
+/**
+ * 命令入口统一由**菜单/全局快捷键**下发（App.vue → store.pendingCommand）：
+ * 这样 ⌘P 在任何工作区都能用，面板只负责执行，不再自己监听键盘（否则两处都响应）。
+ */
+watch(
+  () => store.pendingCommand,
+  (command) => {
+    if (!command) return;
+    store.clearCommand();
+    if (command === "quickOpen") quickOpen.value = true;
+    else switchToSearch();
+  },
+  { immediate: true },
+);
 
 const WIDTH_KEY = "hivetask.kb.treeRatio";
 const ratio = ref(loadRatio());

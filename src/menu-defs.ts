@@ -37,6 +37,10 @@ export interface MenuActions {
   gotoProjects(): void;
   gotoKnowledge(): void;
   gotoTools(): void;
+  /** 快速打开（⌘P）与知识库全局搜索（⌘⇧F）——跨工作区可用，未选根时禁用。 */
+  quickOpen(): void;
+  searchKnowledge(): void;
+  knowledgeReady(): boolean;
   statusbarVisible(): boolean;
   toggleStatusbar(): void;
   githubUrlMissing(): boolean;
@@ -69,6 +73,21 @@ export function buildMenuDefs(a: MenuActions): MenuDef[] {
         { label: t("workspace.projects"), shortcut: "⌘4", action: a.gotoProjects },
         { label: t("workspace.knowledge"), shortcut: "⌘5", action: a.gotoKnowledge },
         { label: t("workspace.tools"), shortcut: "⌘3", action: a.gotoTools },
+        { separator: true },
+        // 快速打开/搜索放在「视图」：VS Code 的命令面板也在 View 下，
+        // 放这儿比塞进「工具」（那是工具工作区的语义）更符合直觉
+        {
+          label: t("menu.quickOpen"),
+          shortcut: "⌘P",
+          action: a.quickOpen,
+          disabled: !a.knowledgeReady(),
+        },
+        {
+          label: t("menu.searchKnowledge"),
+          shortcut: "⌘⇧F",
+          action: a.searchKnowledge,
+          disabled: !a.knowledgeReady(),
+        },
         { separator: true },
         {
           label: t("menu.toggleStatusbar"),
