@@ -10,7 +10,7 @@
  */
 import type { PreviewContext, PreviewInstance, PreviewTool } from "../registry";
 import { withFind } from "../dom-find";
-import { trackPages } from "../paging";
+import { scrollToElement, trackPages } from "../paging";
 
 export const EPUB_EXTENSIONS = ["epub"];
 export const XPS_EXTENSIONS = ["xps", "oxps"];
@@ -58,6 +58,7 @@ async function renderEpub(ctx: PreviewContext): Promise<PreviewInstance> {
   const wrap = document.createElement("div");
   wrap.className = "kb-epub";
   const urls: string[] = [];
+  const chapterEls: HTMLElement[] = [];
 
   for (const href of spine) {
     const path = `${opfDir}${href}`.replace(/\/{2,}/g, "/");
@@ -79,14 +80,86 @@ async function renderEpub(ctx: PreviewContext): Promise<PreviewInstance> {
       img.src = url;
     }
     wrap.appendChild(chapter);
+    chapterEls.push(chapter);
   }
 
   ctx.container.replaceChildren(wrap);
+  const titles = await epubChapterTitles(zip, opfDir, spine);
+  const normalizeHref = (href: string): string => {
+    try {
+      return decodeURIComponent(href.split("#")[0]).replace(/^\.\//, "");
+    } catch {
+      return href.split("#")[0].replace(/^\.\//, "");
+    }
+  };
   return withFind(ctx, {
+    outline: spine.map((href, index) => ({
+      level: 1,
+      title: titles.get(normalizeHref(href)) ?? `第 ${index + 1} 章`,
+      target: index + 1,
+    })),
+    reveal: (target) => {
+      const el = chapterEls[target - 1];
+      if (el) scrollToElement(ctx.container, el);
+    },
     destroy() {
       for (const url of urls) URL.revokeObjectURL(url);
     },
   });
+}
+
+/**
+ * EPUB 的章节标题：EPUB3 看 `nav.xhtml`（`<nav epub:type="toc">`），EPUB2 看 `toc.ncx`。
+ * 两者都没有时由调用方回退成「第 N 章」—— 宁可给页码式的标题，也不假装知道章节名。
+ */
+/** 只用到这两个能力（不引 JSZip 的类型导出形态，避免 `default` 兼容问题）。 */
+interface ZipFileLike {
+  async(type: "string"): Promise<string>;
+}
+interface ZipArchiveLike {
+  files: Record<string, unknown>;
+  file(name: string): ZipFileLike | null;
+}
+
+async function epubChapterTitles(
+  zip: ZipArchiveLike,
+  opfDir: string,
+  spine: string[],
+): Promise<Map<string, string>> {
+  const titles = new Map<string, string>();
+  /** 归一化：去掉 `./` 前缀并解码百分号转义，两边口径一致才匹配得上。 */
+  const normalize = (href: string): string => {
+    let value = href.split("#")[0];
+    try {
+      value = decodeURIComponent(value);
+    } catch {
+      // 非法的百分号序列就按原样用
+    }
+    return value.replace(/^\.\//, "");
+  };
+  const navName = Object.keys(zip.files).find((name) => /nav\.xhtml$/i.test(name));
+  if (navName) {
+    const doc = new DOMParser().parseFromString(await zip.file(navName)!.async("string"), "application/xml");
+    for (const link of Array.from(doc.getElementsByTagNameNS("*", "a"))) {
+      const href = link.getAttribute("href") ?? "";
+      const text = (link.textContent ?? "").trim();
+      if (href && text) titles.set(normalize(href), text);
+    }
+  }
+  if (titles.size === 0) {
+    const ncxName = Object.keys(zip.files).find((name) => /\.ncx$/i.test(name));
+    if (ncxName) {
+      const doc = new DOMParser().parseFromString(await zip.file(ncxName)!.async("string"), "application/xml");
+      for (const point of Array.from(doc.getElementsByTagNameNS("*", "navPoint"))) {
+        const src = point.getElementsByTagNameNS("*", "content")[0]?.getAttribute("src") ?? "";
+        const text = (point.getElementsByTagNameNS("*", "text")[0]?.textContent ?? "").trim();
+        if (src && text) titles.set(normalize(src), text);
+      }
+    }
+  }
+  void opfDir;
+  void spine;
+  return titles;
 }
 
 /** XPS：固定版式页面 + 文本抽取。 */
@@ -129,6 +202,7 @@ async function renderXps(ctx: PreviewContext): Promise<PreviewInstance> {
   });
   pager.refresh();
   return withFind(ctx, {
+    outline: pageNames.map((_name, index) => ({ level: 1, title: `第 ${index + 1} 页`, target: index + 1 })),
     reveal: (page) => pager.reveal(page),
     destroy: () => pager.destroy(),
   });
@@ -147,10 +221,12 @@ async function renderXmind(ctx: PreviewContext): Promise<PreviewInstance> {
 
   const wrap = document.createElement("div");
   wrap.className = "kb-xmind";
+  const topics: { level: number; title: string; el: HTMLElement }[] = [];
   const renderTopic = (topic: XmindTopic, depth: number, parent: HTMLElement): void => {
     const item = document.createElement("li");
     item.className = `kb-xmind-topic depth-${Math.min(depth, 5)}`;
     item.textContent = topic.title ?? "(无标题)";
+    topics.push({ level: Math.min(depth + 1, 6), title: topic.title ?? "(无标题)", el: item });
     parent.appendChild(item);
     const children = topic.children?.attached ?? [];
     if (children.length === 0) return;
@@ -170,7 +246,18 @@ async function renderXmind(ctx: PreviewContext): Promise<PreviewInstance> {
     wrap.appendChild(section);
   }
   ctx.container.replaceChildren(wrap);
-  return withFind(ctx);
+  return withFind(ctx, {
+    // 大纲 = 思维导图自己的主题树（层级照搬），点它滚到那个主题
+    outline: topics.map((topic, index) => ({
+      level: topic.level,
+      title: topic.title,
+      target: index + 1,
+    })),
+    reveal: (target) => {
+      const topic = topics[target - 1];
+      if (topic) scrollToElement(ctx.container, topic.el);
+    },
+  });
 }
 
 /** drawio：mxGraphModel → 顶点框与标签。 */

@@ -101,7 +101,7 @@
 |---|---|---|---|
 | 缩放（放大 / 缩小 / **适应窗口**） | `tools: ["zoom"]` | `zoom(action)` + `ctx.onZoom({percent, fit})` 回报状态 | 图片（面板侧）、CAD、PDF、3D |
 | 查找 | `tools: ["find"]` | `find(query, options)` 异步返回 `{total, current}`；`findClear()` | **PDF**（走 pdfjs 文字层）+ **docx/xlsx/pptx/epub/ofd/xps/xmind/drawio/邮件/代码/压缩包**（走共享 DOM 查找 `DomFinder`） |
-| 大纲 | `tools: ["outline"]` | `outline`（条目数组）+ `reveal(target)` | PDF（书签树） |
+| 大纲 | `tools: ["outline"]`（按钮按 `outline` 非空出现） | `outline`（条目数组）+ `reveal(target)` | 见下表 §6.1 |
 | 页码 / 跳页 | 无需声明：上报 `ctx.onPaging({page,total})` + 实现 `reveal(page)` | 状态栏显示「第 N / M 页」，点它输入页码回车跳转 | **PDF、pptx（页=幻灯片）、OFD、XPS** |
 
 口径约定（所有格式一套口径，不要各写各的）：
@@ -137,6 +137,33 @@
     段中不分页…）它复现不了，所以改用"内容高度 ÷ 一页纸高度"折算（`pageAt()`）——与你滚到哪一一对应（自洽），
     但与 Word 打印页码可能有 ±1 出入；**同时用「当前章节」兜住"我在哪"**（章节来自大纲，绝对可靠）。
     这个出入写在文档与交付说明里，不藏着。
+
+### 6.1 哪些格式有「大纲」—— 逐个格式的结论（不是拍脑袋）
+
+判据：**该格式自身有没有可提取的层级结构**（章节/书签/页/主题），有则给，没有就说清为什么没有。
+样本实测见 `tests/kb-preview-batch3.test.ts`、`tests/kb-preview-wiring.test.ts` 与样本库 `/tmp/kb-spike`。
+
+| 格式 | 结构（实测） | 结论 |
+|---|---|---|
+| Markdown | 标题 | ✅ 编辑器大纲（T6 起就有） |
+| PDF | 书签树（样本 62 页 / 4 个顶层书签 + 嵌套） | ✅ `getOutline()` |
+| docx | 标题样式（样本 **119 个标题**；级别在 `styles.xml` 里，`w:pStyle` 是数字 id） | ✅ 经 styles.xml 映射 |
+| **pptx** | 每张幻灯片的首段文本即标题（样本 `第一页：项目介绍`） | ✅ 幻灯片列表；跳转 = 滚到该张（与页码联动） |
+| **epub** | spine 章节 + **`nav.xhtml`（EPUB3）/ `toc.ncx`（EPUB2）** 提供章节名 | ✅ 有目录文档时用它的标题，否则回退「第 N 章」 |
+| **xps** | `Documents/N/Pages/M.fpage` 逐页 | ✅ 页列表 |
+| **ofd** | 有页；`ofd:Outline` 是**可选**的（样本里没有） | ✅ 有目录用它，否则页列表 |
+| **xmind** | `content.json` 的主题树（样本 8 个节点，层级完整） | ✅ 主题树即大纲 |
+| **xlsx / ods** | 工作表名（样本 `['中文表一','表二']`） | ❌ **不做**（用户口径）：它的结构就是顶部那排工作表页签，放进大纲是重复 |
+| zip / 压缩包 | 条目列表 | ❌ 条目列表本身就是内容，做成"目录"是同一份数据换个地方显示 |
+| email / eml | 无层级（附件不是目录） | ❌ |
+| drawio | `mxCell` 有父子关系，但那是**画布分组**，不是文档目录 | ❌ |
+| lrc | 时间轴 | ❌ 时间轴不是目录 |
+| 音频 / 视频 | 无 | ❌ |
+| model3d | glTF 有节点树（带名称） | ❌ 对"看模型"帮助有限；真要做应是"对象树 + 显隐"，属另一件事 |
+| CAD（dxf/dwg） | **图层**（TABLES 段） | ❌ 图层的用途是**开关/过滤**，不是目录 —— 属独立特性，见 §5.5 |
+| GIS | 图层 / 要素 | ❌ |
+| 图片 / SVG | 无 | ❌ |
+| 代码 / 纯文本 | 无解析器（VS Code 靠语言服务做符号大纲） | ❌ 我们这里没有 per-language 解析器，不假装有 |
 
 ## 7. 新增一个格式的步骤
 

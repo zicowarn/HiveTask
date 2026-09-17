@@ -90,6 +90,22 @@ export const ofdPlugin = {
 
     const bodyDoc = new DOMParser().parseFromString(docBody, "application/xml");
     const pageNodes = byLocalName(bodyDoc, "Page");
+    /**
+     * 大纲：OFD 规范里 `ofd:Outline/ofd:OutlineElem` 是**可选的**目录结构，
+     * 实名 OFD 常常没有（样本里就没有）→ 那就回退成页列表（「第 N 页」）。
+     * 有目录时用它的标题与目标页 —— 总比拿页码冒充章节名强。
+     */
+    const outlineElems = byLocalName(bodyDoc, "OutlineElem");
+    const outlineFromFile = outlineElems.length
+      ? outlineElems.map((node) => ({
+          level: Math.min(byLocalName(node, "OutlineElem").length ? 2 : 1, 3),
+          title: ((node.getAttribute("Title") ?? "").trim() || "未命名目录项"),
+          // Dest → DestPage 里的 Page 引用；解析不出就落回第 1 页
+          target: Number(
+            (node.getElementsByTagNameNS("*", "Page")[0]?.textContent ?? "").replace(/\D/g, ""),
+          ) || 1,
+        }))
+      : null;
     if (pageNodes.length === 0) throw new Error("OFD 里没有页面（可能是加密或非标准实现）");
 
     const wrap = document.createElement("div");
@@ -156,6 +172,7 @@ export const ofdPlugin = {
     }
 
     ctx.container.replaceChildren(wrap);
+    const pages = Array.from(wrap.querySelectorAll<HTMLElement>(".kb-ofd-page"));
     const pager = trackPages({
       scroller: ctx.container,
       pages: () => Array.from(wrap.querySelectorAll<HTMLElement>(".kb-ofd-page")),
@@ -163,6 +180,9 @@ export const ofdPlugin = {
     });
     pager.refresh();
     return withFind(ctx, {
+      outline:
+        outlineFromFile ??
+        pages.map((_page, index) => ({ level: 1, title: `第 ${index + 1} 页`, target: index + 1 })),
       reveal: (page) => pager.reveal(page),
       destroy() {
         pager.destroy();

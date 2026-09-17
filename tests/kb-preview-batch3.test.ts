@@ -243,3 +243,70 @@ describe("drawio：顶点框", () => {
     expect(boxes[1].style.top).toBe("100px");
   });
 });
+
+describe("大纲：有真结构的格式都要给（用户要求逐个分析，不许拍脑袋）", () => {
+  it("EPUB：章节标题优先取 nav.xhtml，跳转滚到该章", async () => {
+    const bytes = await makeZip({
+      "META-INF/container.xml": `<container><rootfiles><rootfile full-path="OEBPS/content.opf"/></rootfiles></container>`,
+      "OEBPS/content.opf": `<package><manifest>
+          <item id="c1" href="ch1.xhtml"/><item id="c2" href="ch2.xhtml"/>
+        </manifest><spine><itemref idref="c1"/><itemref idref="c2"/></spine></package>`,
+      // 真实 EPUB 的 XHTML 一定声明命名空间（不声明的话 XML 就不是良构的，解析会失败）
+      "OEBPS/nav.xhtml": `<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops"><body><nav epub:type="toc"><ol>
+          <li><a href="ch1.xhtml">第一章 前言</a></li>
+          <li><a href="ch2.xhtml">第二章 现状</a></li>
+        </ol></nav></body></html>`,
+      "OEBPS/ch1.xhtml": `<html><body><h1>第一章</h1></body></html>`,
+      "OEBPS/ch2.xhtml": `<html><body><h1>第二章</h1></body></html>`,
+    });
+    const { epubPlugin } = await import("../src/knowledge/preview/plugins/ebook");
+    const ctx = makeCtx({ ext: "epub", bytes });
+    const instance = await epubPlugin.render(ctx);
+    expect(instance.outline?.map((item) => item.title)).toEqual(["第一章 前言", "第二章 现状"]);
+    instance.reveal?.(2);
+    // 跳转不该抛（滚动本身由宿主实现）
+    expect(ctx.container.querySelectorAll(".kb-epub-chapter").length).toBe(2);
+  });
+
+  it("EPUB：没有 nav/ncx 时回退成「第 N 章」，不假装知道章节名", async () => {
+    const bytes = await makeZip({
+      "META-INF/container.xml": `<container><rootfiles><rootfile full-path="content.opf"/></rootfiles></container>`,
+      "content.opf": `<package><manifest><item id="c1" href="ch1.xhtml"/></manifest><spine><itemref idref="c1"/></spine></package>`,
+      "ch1.xhtml": `<html><body><p>x</p></body></html>`,
+    });
+    const { epubPlugin } = await import("../src/knowledge/preview/plugins/ebook");
+    const instance = await epubPlugin.render(makeCtx({ ext: "epub", bytes }));
+    expect(instance.outline?.[0].title).toBe("第 1 章");
+  });
+
+  it("XPS：页列表大纲", async () => {
+    const bytes = await makeZip({
+      "Documents/1/Pages/1.fpage": `<FixedPage><Glyphs UnicodeString="甲"/></FixedPage>`,
+      "Documents/1/Pages/2.fpage": `<FixedPage><Glyphs UnicodeString="乙"/></FixedPage>`,
+    });
+    const { xpsPlugin } = await import("../src/knowledge/preview/plugins/ebook");
+    const instance = await xpsPlugin.render(makeCtx({ ext: "xps", bytes }));
+    expect(instance.outline?.map((item) => item.title)).toEqual(["第 1 页", "第 2 页"]);
+  });
+
+  it("XMind：主题树即大纲，层级照搬", async () => {
+    const content = [
+      {
+        title: "画布",
+        rootTopic: {
+          title: "中心",
+          children: { attached: [{ title: "分支", children: { attached: [{ title: "叶子" }] } }] },
+        },
+      },
+    ];
+    const { xmindPlugin } = await import("../src/knowledge/preview/plugins/ebook");
+    const instance = await xmindPlugin.render(
+      makeCtx({ ext: "xmind", bytes: await makeZip({ "content.json": JSON.stringify(content) }) }),
+    );
+    expect(instance.outline?.map((item) => [item.level, item.title])).toEqual([
+      [1, "中心"],
+      [2, "分支"],
+      [3, "叶子"],
+    ]);
+  });
+});

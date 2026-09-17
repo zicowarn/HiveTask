@@ -358,6 +358,7 @@ async function renderSheet(ctx: PreviewContext): Promise<PreviewInstance> {
   if (workbook.SheetNames.length > 0) renderSheetByName(workbook.SheetNames[0]);
 
   ctx.container.replaceChildren(wrap);
+  // 表格**不给大纲**（用户口径）：它的结构就是顶部那排工作表页签，放进大纲是重复。
   return withFind(ctx);
 }
 
@@ -381,12 +382,15 @@ async function renderSlides(ctx: PreviewContext): Promise<PreviewInstance> {
   note.textContent = `共 ${slideNames.length} 页（本期为文本视图，版面渲染待接入渲染器）`;
   wrap.appendChild(note);
 
+  /** 幻灯片标题：优先取标题占位符里的文本，回退取该页第一段文本（实测两版 Office 都能覆盖）。 */
+  const slideTitles: string[] = [];
   for (const [index, name] of slideNames.entries()) {
     const xml = await zip.file(name)!.async("string");
     const doc = new DOMParser().parseFromString(xml, "application/xml");
     const texts = Array.from(doc.getElementsByTagName("a:t"))
       .map((node) => node.textContent ?? "")
       .filter((text) => text.trim().length > 0);
+    slideTitles.push(texts[0]?.trim() || `第 ${index + 1} 页`);
     const section = document.createElement("section");
     section.className = "kb-slide";
     const title = document.createElement("h3");
@@ -410,6 +414,8 @@ async function renderSlides(ctx: PreviewContext): Promise<PreviewInstance> {
   });
   pager.refresh();
   return withFind(ctx, {
+    // 大纲 = 幻灯片列表（「页」在这里就是「张」）；点它跳过去
+    outline: slideTitles.map((title, index) => ({ level: 1, title, target: index + 1 })),
     reveal: (page) => pager.reveal(page),
     destroy: () => pager.destroy(),
   });
@@ -438,7 +444,7 @@ export const sheetPlugin = {
 export const slidesPlugin = {
   id: "slides",
   extensions: SLIDES_EXTENSIONS,
-  tools: ["find"] satisfies PreviewTool[],
+  tools: ["find", "outline"] satisfies PreviewTool[],
   matchHead: (head: Uint8Array) => startsWith(head, OOXML_MAGIC),
   render: renderSlides,
 };
