@@ -95,7 +95,7 @@ describe("预览注册表判定", () => {
     expect(hit2?.id, "tsv 也应归 sheet").toBe("sheet");
   });
 
-  it("注册表列出批次 1–4 的格式", async () => {
+  it("注册表列出批次 1–5 的格式", async () => {
     // 注意：`vi.resetModules()` 会重置模块注册表，所以**所有**引用都必须走动态导入，
     // 否则顶层静态导入拿到的是另一个模块实例（第一版就是这么写错的：列表读出来是空的）。
     const registry = await import("../src/knowledge/preview/registry");
@@ -119,6 +119,8 @@ describe("预览注册表判定", () => {
       "model3d",
       "cad",
       "gis",
+      "odfText",
+      "odfSlides",
     ]);
   });
 

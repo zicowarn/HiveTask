@@ -220,10 +220,11 @@ describe("XMind：层级还原", () => {
     expect(ctx.container.querySelectorAll(".kb-xmind-topic.depth-2").length).toBe(1);
   });
 
-  it("旧版 XMind（无 content.json）→ 明确报错，而不是空画布", async () => {
+  it("旧版空壳（`<xmap-content/>`）→ 说明「没有内容」，而不是一片空白", async () => {
     const { xmindPlugin } = await import("../src/knowledge/preview/plugins/ebook");
     const ctx = makeCtx({ ext: "xmind", bytes: await makeZip({ "content.xml": "<xmap-content/>" }) });
-    await expect(xmindPlugin.render(ctx)).rejects.toThrow(/content\.json/);
+    await xmindPlugin.render(ctx);
+    expect(ctx.container.textContent).toContain("没有内容");
   });
 });
 
@@ -308,5 +309,49 @@ describe("大纲：有真结构的格式都要给（用户要求逐个分析，�
       [2, "分支"],
       [3, "叶子"],
     ]);
+  });
+});
+
+describe("XMind 新旧两种格式（用户问到）", () => {
+  const legacy = `<?xml version="1.0" encoding="UTF-8"?>
+<xmap-content xmlns="urn:xmind:xmap:xmlns:content:2.0">
+  <sheet id="s1"><title>旧版画布</title>
+    <topic id="root"><title>旧版中心</title><children><topics type="attached">
+      <topic id="t1"><title>旧版分支</title><children><topics type="attached">
+        <topic id="t2"><title>旧版叶子</title></topic>
+      </topics></children></topic>
+    </topics></children></topic>
+  </sheet>
+</xmap-content>`;
+
+  it("旧版（content.xml）也能还原层级与大纲", async () => {
+    const { xmindPlugin } = await import("../src/knowledge/preview/plugins/ebook");
+    const ctx = makeCtx({ ext: "xmind", bytes: await makeZip({ "content.xml": legacy }) });
+    const instance = await xmindPlugin.render(ctx);
+    const titles = Array.from(ctx.container.querySelectorAll(".kb-xmind-topic")).map(
+      (el) => el.firstChild?.textContent,
+    );
+    expect(titles).toEqual(["旧版中心", "旧版分支", "旧版叶子"]);
+    expect(instance.outline?.map((item) => [item.level, item.title])).toEqual([
+      [1, "旧版中心"],
+      [2, "旧版分支"],
+      [3, "旧版叶子"],
+    ]);
+  });
+
+  it("新版（content.json）仍走原路径", async () => {
+    const content = [{ title: "画布", rootTopic: { title: "中心", children: { attached: [{ title: "分支" }] } } }];
+    const { xmindPlugin } = await import("../src/knowledge/preview/plugins/ebook");
+    const instance = await xmindPlugin.render(
+      makeCtx({ ext: "xmind", bytes: await makeZip({ "content.json": JSON.stringify(content) }) }),
+    );
+    expect(instance.outline?.map((item) => item.title)).toEqual(["中心", "分支"]);
+  });
+
+  it("两种都没有 → 明确报错（不是空画布）", async () => {
+    const { xmindPlugin } = await import("../src/knowledge/preview/plugins/ebook");
+    await expect(
+      xmindPlugin.render(makeCtx({ ext: "xmind", bytes: await makeZip({ "other.xml": "<x/>" }) })),
+    ).rejects.toThrow(/content\.json/);
   });
 });

@@ -208,16 +208,63 @@ async function renderXps(ctx: PreviewContext): Promise<PreviewInstance> {
   });
 }
 
-/** XMind：content.json → 层级列表。 */
+/**
+ * XMind 的两种格式（**新旧确实不同**）：
+ * - 新版（XMind 8 之后 / Zen / 2020+）：`content.json`，rootTopic 树；
+ * - 旧版（XMind 8 及以前）：`content.xml`，`<sheet><topic><title>…<children><topics type="attached">`。
+ * 两者归一化成同一个内部结构，后面共用同一套渲染 —— 只是入口不同。
+ */
+async function xmindSheets(zip: ZipArchiveLike): Promise<XmindSheet[]> {
+  const json = zip.file("content.json");
+  if (json) {
+    return JSON.parse(await json.async("string")) as XmindSheet[];
+  }
+  const xml = zip.file("content.xml");
+  if (!xml) throw new Error("不支持的 XMind 版本（既没有 content.json 也没有 content.xml）");
+  const doc = new DOMParser().parseFromString(await xml.async("string"), "application/xml");
+
+  /**
+   * 旧版 `<topic>` → 新版的 topic 形状（title + children.attached）。
+   *
+   * ⚠️ 只能用**直接子节点**走位：`getElementsByTagNameNS` 返回的是所有后代，
+   * 拿它收 children 会把孙辈也挂到父节点上（实测：叶子出现两次）。
+   */
+  const directChild = (node: Element, name: string): Element | undefined =>
+    Array.from(node.children).find((child) => child.localName === name);
+
+  const toTopic = (node: Element): XmindTopic => {
+    const title = directChild(node, "title")?.textContent?.trim() ?? "";
+    const group = directChild(node, "children");
+    const topics = group ? directChild(group, "topics") : undefined;
+    const attached =
+      topics && (topics.getAttribute("type") ?? "attached") === "attached"
+        ? Array.from(topics.children)
+            .filter((child) => child.localName === "topic")
+            .map(toTopic)
+        : [];
+    return attached.length ? { title, children: { attached } } : { title };
+  };
+
+  return Array.from(doc.getElementsByTagNameNS("*", "sheet")).map((sheet) => {
+    const root = Array.from(sheet.children).find((child) => child.localName === "topic");
+    return {
+      // 画布标题是 sheet 的直接子节点（用后代查找会拿到根主题的 title）
+      title: Array.from(sheet.children).find((child) => child.localName === "title")?.textContent?.trim() || "画布",
+      rootTopic: root ? toTopic(root) : undefined,
+    };
+  });
+}
+
+interface XmindSheet {
+  title?: string;
+  rootTopic?: XmindTopic;
+}
+
+/** XMind：content.json（新版）/ content.xml（旧版）→ 层级列表。 */
 async function renderXmind(ctx: PreviewContext): Promise<PreviewInstance> {
   const JSZip = (await import("jszip")).default;
   const zip = await JSZip.loadAsync(await ctx.readBytes());
-  const contentFile = zip.file("content.json");
-  if (!contentFile) throw new Error("不支持的 XMind 版本（缺少 content.json）");
-  const sheets = JSON.parse(await contentFile.async("string")) as {
-    title?: string;
-    rootTopic?: { title?: string; children?: { attached?: XmindTopic[] } };
-  }[];
+  const sheets = await xmindSheets(zip as unknown as ZipArchiveLike);
 
   const wrap = document.createElement("div");
   wrap.className = "kb-xmind";
@@ -244,6 +291,11 @@ async function renderXmind(ctx: PreviewContext): Promise<PreviewInstance> {
     if (sheet.rootTopic) renderTopic(sheet.rootTopic, 0, list);
     section.appendChild(list);
     wrap.appendChild(section);
+  }
+  if (topics.length === 0) {
+    // 空壳（旧版导出常出现 `<xmap-content/>`）：说清"这份文件里没有内容"，
+    // 而不是给一片空白让人以为渲染坏了
+    wrap.appendChild(note("这份思维导图里没有内容（文件可能是空壳导出）。"));
   }
   ctx.container.replaceChildren(wrap);
   return withFind(ctx, {

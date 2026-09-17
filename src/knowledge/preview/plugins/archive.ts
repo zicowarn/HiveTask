@@ -8,8 +8,42 @@ import type { PreviewContext, PreviewInstance, PreviewTool } from "../registry";
 import { withFind } from "../dom-find";
 
 export const ARCHIVE_EXTENSIONS = ["zip", "jar", "war", "apk"];
-/** .tar.gz/.tgz 这类我们只认 gzip 头，内部 tar 结构本期不解析（记为待做）。 */
+/** gzip 系（`.gz` 单文件、`.tar.gz`/`.tgz` 打包）。 */
 export const ARCHIVE_GZ_EXTENSIONS = ["gz", "tgz"];
+
+/** tar 的 512 字节块：头部 + 内容（按 512 对齐）直到两个全零块。 */
+interface TarEntry {
+  name: string;
+  size: number;
+  mtime: number;
+}
+
+/** 解析 tar（USTAR/PAX 都不挑：只读文件名、大小、时间三个字段）。 */
+export function parseTar(buffer: Uint8Array): TarEntry[] {
+  const decoder = new TextDecoder();
+  const entries: TarEntry[] = [];
+  let offset = 0;
+  const readString = (start: number, length: number): string => {
+    const slice = buffer.subarray(start, start + length);
+    const end = slice.indexOf(0);
+    return decoder.decode(end >= 0 ? slice.subarray(0, end) : slice).trim();
+  };
+  while (offset + 512 <= buffer.length) {
+    const name = readString(offset, 100);
+    if (!name) break; // 全零块 = 结束
+    const octal = (start: number, length: number): number => {
+      const raw = readString(start, length).replace(/\0/g, "").trim();
+      const value = Number.parseInt(raw || "0", 8);
+      return Number.isFinite(value) ? value : 0;
+    };
+    const size = octal(offset + 124, 12);
+    const mtime = octal(offset + 136, 12) * 1000;
+    entries.push({ name, size, mtime });
+    // 内容按 512 对齐；PAX 头的扩展属性跳过但条目本身不算内容
+    offset += 512 + Math.ceil(size / 512) * 512;
+  }
+  return entries;
+}
 
 function humanSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -19,15 +53,76 @@ function humanSize(bytes: number): string {
 
 const TEXT_IN_ARCHIVE = /\.(txt|md|markdown|json|ya?ml|toml|ini|csv|tsv|log|html?|css|scss|js|jsx|ts|tsx|vue|py|rs|go|java|kt|c|h|cpp|hpp|sh|zsh|bash|sql|xml|svg|env|gitignore|editorconfig)$/i;
 
+/** gzip 系：解压后判断是不是 tar 包，分别给"条目列表"或"文本内容"。 */
+async function renderGzip(ctx: PreviewContext, bytes: Uint8Array): Promise<PreviewInstance> {
+  const { ungzip } = await import("pako");
+  let inner: Uint8Array;
+  try {
+    inner = ungzip(bytes);
+  } catch (error) {
+    throw new Error(`gzip 解压失败（文件可能损坏）：${String(error)}`);
+  }
+
+  const wrap = document.createElement("div");
+  wrap.className = "kb-archive";
+  const note = document.createElement("p");
+  note.className = "kb-note";
+  const entries = parseTar(inner);
+  if (entries.length > 0) {
+    note.textContent = `gzip 内的 tar 包 · 共 ${entries.length} 个条目 · 解压后 ${humanSize(inner.length)}`;
+    wrap.appendChild(note);
+    const list = document.createElement("div");
+    list.className = "kb-archive-list";
+    for (const entry of entries) {
+      const row = document.createElement("div");
+      row.className = "kb-archive-row";
+      const name = document.createElement("span");
+      name.className = "kb-archive-name";
+      name.textContent = entry.name;
+      const size = document.createElement("span");
+      size.className = "kb-archive-size";
+      size.textContent = entry.size ? humanSize(entry.size) : "—";
+      const time = document.createElement("span");
+      time.className = "kb-archive-time";
+      time.textContent = entry.mtime ? new Date(entry.mtime).toLocaleString() : "";
+      row.append(name, size, time);
+      list.appendChild(row);
+    }
+    wrap.appendChild(list);
+    ctx.container.replaceChildren(wrap);
+    return withFind(ctx);
+  }
+
+  // 单个文件（.gz 最常见）：能当文本读就当文本，否则只报大小
+  note.textContent = `gzip 压缩的单个文件 · 解压后 ${humanSize(inner.length)}`;
+  wrap.appendChild(note);
+  const asText = new TextDecoder("utf-8", { fatal: false }).decode(inner);
+  const binary = inner.subarray(0, 4096).some((byte) => byte === 0) || asText.includes("\uFFFD");
+  const pre = document.createElement("pre");
+  pre.className = "kb-archive-preview";
+  pre.textContent = binary ? "（二进制内容，解压后无法按文本显示）" : asText;
+  wrap.appendChild(pre);
+  ctx.container.replaceChildren(wrap);
+  return withFind(ctx);
+}
+
 export const archivePlugin = {
   tools: ["find"] satisfies PreviewTool[],
   id: "archive",
-  extensions: ARCHIVE_EXTENSIONS,
-  /** zip 的 magic：PK\x03\x04（空压缩包是 PK\x05\x06）。 */
-  matchHead: (head: Uint8Array) => head[0] === 0x50 && head[1] === 0x4b && (head[2] === 0x03 || head[2] === 0x05),
+  extensions: [...ARCHIVE_EXTENSIONS, ...ARCHIVE_GZ_EXTENSIONS],
+  /** zip 的 magic：PK\x03\x04（空压缩包是 PK\x05\x06）；gzip 是 1F 8B。 */
+  matchHead: (head: Uint8Array) => {
+    const zip = head[0] === 0x50 && head[1] === 0x4b && (head[2] === 0x03 || head[2] === 0x05);
+    const gzip = head[0] === 0x1f && head[1] === 0x8b;
+    return zip || gzip;
+  },
   async render(ctx: PreviewContext): Promise<PreviewInstance> {
-    const JSZip = (await import("jszip")).default;
     const bytes = await ctx.readBytes();
+    // gzip：先解压（pako 已经是依赖），解出来若是 tar 就列条目，否则按单个文本文件展示
+    if (ctx.ext === "gz" || ctx.ext === "tgz") {
+      return renderGzip(ctx, bytes);
+    }
+    const JSZip = (await import("jszip")).default;
     const zip = await JSZip.loadAsync(bytes);
 
     const wrap = document.createElement("div");

@@ -20,14 +20,16 @@
 | 10 | `xps` | `xps` `oxps` | `xps` | zip + FixedPage → `Glyphs.UnicodeString` 文本视图 |
 | 11 | `xmind` | `xmind` | `xmind` | zip + `content.json` → 层级列表 |
 | 12 | `drawio` | `drawio` `dio` | —（我们补的） | `mxGraphModel` → 顶点框（不做连线路由） |
-| 13 | `audio` | 19 种（`mp3/wav/flac/m4a/aac/ogg/opus/…`） | `audio` | 原生 `<audio>` + 本地 blob |
-| 14 | `video` | 17 种（`mp4/webm/mov/mkv/avi/m3u8/…`） | `video` | 原生 `<video>` + 本地 blob；`m3u8` 走 hls.js **自定义 kb:// loader** |
+| 13 | `audio` | 19 种（`mp3/wav/flac/m4a/aac/ogg/opus/…`） | `audio` | 原生 `<audio>` + 本地 blob；**能否播放取决于 WebView 解码器**（`wma/amr/mid` 多半解不了 → 提示用默认应用打开） |
+| 14 | `video` | 17 种（`mp4/webm/mov/mkv/avi/m3u8/…`） | `video` | 原生 `<video>` + 本地 blob；`m3u8` 走 hls.js **自定义 kb:// loader**（分片必须在知识库内）；`mkv/avi/wmv/flv` 同样看 WebView 解码器，解不了会明说 |
 | 15 | `lrc` | `lrc` | `lrc` | **自研**：时间标签 + 元信息标签解析（纯净/带时间两种视图） |
 | 16 | `model3d` | `gltf` `glb` `obj` `stl` `ply` `vrml` `wrl`（`fbx/dae/3ds/usd*/3mf/amf` 明示不支持） | `model3d` | three + OrbitControls；贴图/`.bin` 从同根预读成 data URL |
 | 17 | `cad` | `dxf` `dwg` | `cad` + `cad-dwg` | **DXF 自研解析**（LINE/CIRCLE/ARC/ELLIPSE/多段线/**SPLINE（NURBS，de Boor）**/HATCH 边界/DIMENSION/文字；含 `$DWGCODEPAGE` 中文解码）→ SVG；**DWG** 用 libredwg wasm → SVG |
 | 18 | `gis` | `geojson` `topojson` `kml` `kmz` `gpx` `shp` | `gis` | leaflet；**底图默认关闭**，矢量要素本地绘制 |
+| 19 | `odfText` | `odt` `ott` `fodt` | `oasis-binary` | **自研**：`content.xml` → 标题（带层级，产出大纲）/ 段落 / 列表 / 表格 |
+| 20 | `odfSlides` | `odp` `otp` `fodp` | `oasis-binary` | **自研**：`draw:page` 逐页抽文本（文本视图，如实标注） |
 
-**合计 18 个插件，覆盖 OFV 的 27 个插件能力**（OFV 的 `detect/viewer/fallback/asset/utils`
+**合计 20 个插件，覆盖 OFV 的 27 个插件能力**（OFV 的 `detect/viewer/fallback/asset/utils`
 是基础设施与"万能兜底"，我们对应的是注册表 + `unsupported` 卡片，不需要单独插件）。
 
 ## 2. 中文场景逐项处理（硬需求）
@@ -71,6 +73,26 @@
 | KaTeX 字体（19 个） | 约 1 MB | 首屏（公式要即显） |
 
 全部按需 `import()`，不进首屏 entry。
+
+## 4.5 与 OFV 的逐插件对照（"全量对标"到底齐了没有）
+
+**答案：格式面齐了，但有三类没做**（下面第 1–3 条）。这张表按 OFV 的插件文件逐个对，
+不是凭印象（OFV 源码：`packages/core/src/plugins/`）。
+
+| OFV 插件 | 我们 | 状态 |
+|---|---|---|
+| `text` `pdf` `office`(docx/xlsx/pptx) `ofd` `xps` `epub` `archive`(zip) `email` `xmind` `lrc` `audio` `video` `model3d` `cad`(dxf/dwg) `gis` `image`(常见位图) | 同名/等价插件 | ✅ 已完成（`image` 见下） |
+| `oasis-binary`（ODF 文档） | **`odfText` / `odfSlides`**（自研） | ✅ **本轮补齐**：odt/ott/fodt 文本 + odp/otp/fodp 演示（此前 `.odt` 无人认领，会落到压缩包列表） |
+| `archive` 的 gzip 系 | `archive` | ✅ **本轮补齐**：gz/tgz（pako 解压 + tar 条目解析）；此前只声明未实现 |
+| `detect` / `viewer` / `fallback` / `utils` | 预览注册表 + 「暂不支持」卡片 | ✅ 等价（我们有双路判定与按需加载） |
+| `xmind` | `xmind` | ✅ **新旧都支持**：新版 `content.json` + 旧版（XMind 8 及以前）`content.xml` |
+| **`image` 的三种特殊位图**（PSD / HEIC / TIFF） | — | ❌ **未做**（需 ag-psd / heic2any / utif 三个依赖；常见位图与 SVG 已支持） |
+| **`drawing`**（EMF / WMF 矢量图元） | — | ❌ **未做**（需 emf-converter 转 SVG） |
+| **`asset`**（字体/未知二进制元信息，OFV 3258 行） | — | ❌ **未做**（TTF/OTF 元信息卡，收益低） |
+| **`msdoc`（.doc 二进制）/ `msppt`（.ppt 二进制）/ `wordml`（Word 2003 XML）** | — | ❌ **未做**（`.doc/.ppt/.rtf` 给诚实卡片，指向默认应用打开） |
+| **`encrypted`**（加密文档） | — | ❌ **未做**（不弹口令框，直接指向默认应用打开） |
+| **`cad-webgl`**（交互式 WebGL 视图） | — | ❌ **明示不做**（改用静态 SVG，理由见 §5.5） |
+| OFV 依赖里的 `hyparquet` / `seek-bzip` / `xz-decompress`（parquet / bz2 / xz） | — | ❌ **未做**（`bz2`/`xz` 需新依赖；`parquet` 是列存数据文件，属"数据分析"范畴） |
 
 ## 5. 已知边界（不做的部分，逐条明示）
 

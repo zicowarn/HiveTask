@@ -365,8 +365,21 @@ def make_xmind(root: Path) -> None:
     p = zipfile_at(root / "02-文档" / "思维导图.xmind", {"content.json": json.dumps(content, ensure_ascii=False)})
     note(p, "xmind（content.json）", "层级列表还原（中心主题 → 三层分支），中文正常", root)
 
-    p2 = zipfile_at(root / "02-文档" / "旧版思维导图.xmind", {"content.xml": "<xmap-content/>"})
-    note(p2, "旧版 XMind（无 content.json）", "明确报错提示，而不是空列表", root)
+    # 旧版 XMind（XMind 8 及以前）：content.xml，结构与新版不同但同样有层级
+    legacy = (
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        '<xmap-content xmlns="urn:xmind:xmap:xmlns:content:2.0">'
+        '<sheet id="s1"><title>旧版画布</title>'
+        '<topic id="root"><title>旧版中心主题</title><children><topics type="attached">'
+        '<topic id="t1"><title>旧版分支一</title><children><topics type="attached">'
+        '<topic id="t2"><title>旧版叶子</title></topic>'
+        "</topics></children></topic>"
+        '<topic id="t3"><title>旧版分支二</title></topic>'
+        "</topics></children></topic>"
+        "</sheet></xmap-content>"
+    )
+    p2 = zipfile_at(root / "02-文档" / "旧版思维导图.xmind", {"content.xml": legacy})
+    note(p2, "旧版 XMind（content.xml）", "与新版同流程还原层级；中文正常", root)
 
 
 def make_drawio(root: Path) -> None:

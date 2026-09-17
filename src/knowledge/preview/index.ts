@@ -6,6 +6,7 @@
  */
 import { registerPreview } from "./registry";
 import { TEXT_EXTENSIONS } from "./plugins/text";
+import { ARCHIVE_EXTENSIONS, ARCHIVE_GZ_EXTENSIONS } from "./plugins/archive";
 import { SHEET_EXTENSIONS, SLIDES_EXTENSIONS, WORD_EXTENSIONS } from "./plugins/office";
 import { OFD_EXTENSIONS } from "./plugins/ofd";
 import {
@@ -15,6 +16,7 @@ import {
   XPS_EXTENSIONS,
 } from "./plugins/ebook";
 import { AUDIO_EXTENSIONS, LRC_EXTENSIONS, VIDEO_EXTENSIONS } from "./plugins/media";
+import { ODF_SLIDES_EXTENSIONS, ODF_TEXT_EXTENSIONS } from "./plugins/odf";
 import { MODEL_EXTENSIONS } from "./plugins/model3d";
 import { CAD_EXTENSIONS } from "./plugins/cad";
 import { GIS_EXTENSIONS } from "./plugins/gis";
@@ -31,7 +33,8 @@ registerPreview({
 });
 registerPreview({
   load: () => import("./plugins/archive").then((m) => m.archivePlugin),
-  describe: { id: "archive", extensions: ["zip", "jar", "war", "apk"], head: ["PK.."] },
+  // gz/tgz 由同一个插件处理（gzip 解出后若是 tar 再列条目）—— 声明与实现保持一致
+  describe: { id: "archive", extensions: [...ARCHIVE_EXTENSIONS, ...ARCHIVE_GZ_EXTENSIONS], head: ["PK.."] },
 });
 registerPreview({
   load: () => import("./plugins/email").then((m) => m.emailPlugin),
@@ -98,6 +101,16 @@ registerPreview({
 registerPreview({
   load: () => import("./plugins/gis").then((m) => m.gisPlugin),
   describe: { id: "gis", extensions: GIS_EXTENSIONS, head: ["PK..(kmz)"] },
+});
+
+// ---- 批次 5：ODF 文档（odt/ott/odp/otp）——与 OOXML 结构不同，自研解析 ----
+registerPreview({
+  load: () => import("./plugins/odf").then((m) => m.odfTextPlugin),
+  describe: { id: "odfText", extensions: ODF_TEXT_EXTENSIONS, head: ["PK..(content.xml)"] },
+});
+registerPreview({
+  load: () => import("./plugins/odf").then((m) => m.odfSlidesPlugin),
+  describe: { id: "odfSlides", extensions: ODF_SLIDES_EXTENSIONS, head: ["PK..(content.xml)"] },
 });
 
 export * from "./registry";
