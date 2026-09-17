@@ -473,3 +473,135 @@ describe("多选视觉语义（VS Code 口径）", () => {
     host.remove();
   });
 });
+
+describe("键盘导航（VS Code 语义）", () => {
+  beforeEach(() => {
+    setActivePinia(createPinia());
+  });
+
+  const seed = () => {
+    const store = useKnowledgeStore();
+    store.root = "/tmp/kb";
+    store.children = {
+      "": [
+        { name: "sub", rel: "sub", kind: "dir", size: 0, mtimeMs: 1, ignored: false },
+        { name: "a.md", rel: "a.md", kind: "file", size: 1, mtimeMs: 1, ignored: false },
+        { name: "b.md", rel: "b.md", kind: "file", size: 1, mtimeMs: 1, ignored: false },
+      ],
+      sub: [{ name: "inner.md", rel: "sub/inner.md", kind: "file", size: 1, mtimeMs: 1, ignored: false }],
+    } as never;
+    return store;
+  };
+
+  it("↑↓ 移动焦点并单选；Shift+↓ 从锚点扩选", () => {
+    const store = seed();
+    store.moveFocus("down");
+    expect(store.focusRel, "从无焦点按下 → 落在第一行").toBe("sub");
+    store.moveFocus("down");
+    expect([store.focusRel, store.selection]).toEqual(["a.md", ["a.md"]]);
+    // Shift 扩选：锚点保持在 a.md
+    store.moveFocus("down", true);
+    expect(store.selection).toEqual(["a.md", "b.md"]);
+    expect(store.focusRel).toBe("b.md");
+    store.moveFocus("up", true);
+    expect(store.selection).toEqual(["a.md"]);
+  });
+
+  it("Home/End 到首末，且不越界", () => {
+    const store = seed();
+    store.moveFocus("last");
+    expect(store.focusRel).toBe("b.md");
+    store.moveFocus("down");
+    expect(store.focusRel, "到底后不再移动").toBe("b.md");
+    store.moveFocus("first");
+    expect(store.focusRel).toBe("sub");
+    store.moveFocus("up");
+    expect(store.focusRel).toBe("sub");
+  });
+
+  it("→ 先展开目录，再进第一个子项；← 收起或回到父目录", async () => {
+    const store = seed();
+    store.selectOnly("sub");
+    await store.focusExpand();
+    expect(store.expanded.sub, "→ 应展开").toBe(true);
+    await store.focusExpand();
+    expect(store.focusRel, "再按 → 进第一个子项").toBe("sub/inner.md");
+
+    await store.focusCollapse();
+    expect(store.focusRel, "文件按 ← 回到父目录").toBe("sub");
+    await store.focusCollapse();
+    expect(store.expanded.sub, "目录已展开时 ← 收起它").toBe(false);
+    await store.focusCollapse();
+    expect(store.focusRel, "顶层项按 ← 不再往上跑").toBe("sub");
+  });
+
+  it("空格切换选中（不改变当前打开的项）", () => {
+    const store = seed();
+    store.selectOnly("a.md");
+    store.select("a.md"); // 打开的仍是 a.md
+    store.moveFocus("down"); // ↑↓ 会单选到 b.md（列表的标准行为）
+    expect(store.selection).toEqual(["b.md"]);
+    store.toggleSelection(store.focusRel!);
+    expect(store.selection, "空格把焦点行取消选中").toEqual([]);
+    store.toggleSelection(store.focusRel!);
+    expect(store.selection, "再按一次加回来").toEqual(["b.md"]);
+    expect(store.selected, "空格不改变当前打开的项").toBe("a.md");
+  });
+});
+
+describe("键盘导航接线（真按键事件）", () => {
+  it("↓ 移动焦点（行上有 focused 类）、Enter 打开、→ 展开目录", async () => {
+    vi.resetModules();
+    const { createApp, h, nextTick } = await import("vue");
+    const { default: KnowledgeTree } = await import("../src/knowledge/KnowledgeTree.vue");
+    const pinia = createPinia();
+    setActivePinia(pinia);
+    const store = useKnowledgeStore();
+    store.root = "/tmp/kb";
+    store.children = {
+      "": [
+        { name: "sub", rel: "sub", kind: "dir", size: 0, mtimeMs: 1, ignored: false },
+        { name: "a.md", rel: "a.md", kind: "file", size: 1, mtimeMs: 1, ignored: false },
+      ],
+      sub: [{ name: "inner.md", rel: "sub/inner.md", kind: "file", size: 1, mtimeMs: 1, ignored: false }],
+    } as never;
+
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const app = createApp({ render: () => h(KnowledgeTree, { onSwitchRoot: () => {} }) });
+    app.use(pinia);
+    app.mount(host);
+    await nextTick();
+
+    const body = host.querySelector<HTMLElement>(".tree-body")!;
+    const press = async (key: string, init: KeyboardEventInit = {}) => {
+      body.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true, ...init }));
+      await nextTick();
+    };
+
+    await press("ArrowDown");
+    expect(store.focusRel).toBe("sub");
+    expect(host.querySelector('[data-rel="sub"]')!.className).toContain("focused");
+
+    await press("ArrowRight");
+    await nextTick();
+    expect(store.expanded.sub, "→ 展开目录").toBe(true);
+
+    await press("ArrowDown");
+    expect(store.focusRel).toBe("sub/inner.md");
+
+    // Enter 打开文件（这里换成 a.md 验证"打开"这条）
+    store.selectOnly("a.md");
+    await press("Enter");
+    expect(store.selected, "Enter 打开文件").toBe("a.md");
+    expect(store.tabs, "打开会给它一个页签").toContain("a.md");
+
+    // Shift+↓ 扩选
+    store.selectOnly("sub");
+    await press("ArrowDown", { shiftKey: true });
+    expect(store.selection).toEqual(["sub", "sub/inner.md"]);
+
+    app.unmount();
+    host.remove();
+  });
+});

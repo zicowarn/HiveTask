@@ -21,6 +21,8 @@ const emit = defineEmits<{
   menu: [payload: { entry: KbEntry; x: number; y: number }];
   /** 指针按下（拖拽候选）：由宿主统一编排拖拽（HTML5 拖放会被 Tauri 吞掉）。 */
   dragStart: [payload: { rel: string; event: PointerEvent }];
+  /** 点行时把键盘焦点交给树容器（键盘导航的作用对象）。 */
+  focusTree: [];
 }>();
 
 /**
@@ -42,6 +44,8 @@ const kids = computed(() => store.visibleChildren(props.entry.rel));
 const active = computed(() => store.selected === props.entry.rel);
 /** 多选：这一行在选中集里（与"当前打开"分开，VS Code 也是两层视觉）。 */
 const selected = computed(() => store.isSelected(props.entry.rel));
+/** 键盘焦点行（与"当前打开"、"选中集"都不是一回事）。 */
+const focused = computed(() => store.focusRel === props.entry.rel);
 /** 拖拽落点反馈：整行高亮（目录）或插入线（落到某文件所在目录）。 */
 const isDropTarget = computed(() => dropDir.value === props.entry.rel && dragPaths.value.length > 0);
 const dropBeforeHere = computed(() => dropBefore.value === props.entry.rel);
@@ -82,6 +86,7 @@ function click(event: MouseEvent): void {
         active,
         selected,
         ignored: entry.ignored,
+        focused,
         'drop-target': isDropTarget,
         'drop-before': dropBeforeHere,
         dragging,
@@ -94,7 +99,7 @@ function click(event: MouseEvent): void {
       :aria-selected="active"
       :title="entry.name"
       @click="click"
-      @pointerdown="emit('dragStart', { rel: entry.rel, event: $event })"
+      @pointerdown="emit('dragStart', { rel: entry.rel, event: $event }); emit('focusTree')"
       @contextmenu.prevent.stop="emit('menu', { entry, x: $event.clientX, y: $event.clientY })"
     >
       <div v-if="depth > 0" class="guides" :style="{ width: `${depth * INDENT_STEP}px` }" />
@@ -112,6 +117,7 @@ function click(event: MouseEvent): void {
         :entry="child"
         :depth="depth + 1"
         @drag-start="emit('dragStart', $event)"
+        @focus-tree="emit('focusTree')"
         @menu="emit('menu', $event)"
       />
     </template>
@@ -158,6 +164,11 @@ function click(event: MouseEvent): void {
   background: var(--bg-selected);
 }
 /* 拖拽落点：目录整行高亮；落到"某文件所在目录"时在该行上方画插入线（VS Code 同款） */
+/* 键盘焦点环：只在树**真的拿到键盘焦点**时显示（`:focus-within`），
+   否则鼠标操作后也会一直挂着一个圈，像没点干净 */
+:global(.tree-body:focus-within) .row.focused {
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
 .row.drop-target {
   background: var(--bg-hover);
   box-shadow: inset 0 0 0 1px var(--accent);

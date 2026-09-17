@@ -457,38 +457,124 @@ function removeGhost(): void {
   document.body.classList.remove("tree-dragging");
 }
 
+/** 首字母跳转（VS Code 的 type-ahead）：连续输入 600ms 内拼成一个前缀。 */
+let typeahead = "";
+let typeaheadAt = 0;
+
 function onTreeKeydown(event: KeyboardEvent): void {
   // 只在树内响应（输入框里打字不该触发全选）
   const target = event.target as HTMLElement | null;
   if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA")) return;
-  if (event.key === "Escape") {
-    // 拖拽中按 Esc = 取消本次拖拽（不放）；否则清空选中
-    if (dragging.value) {
-      stopAutoScroll();
-      endDrag();
-      removeGhost();
-      return;
-    }
-    store.clearSelection();
+
+  // 拖拽中按 Esc = 取消本次拖拽（不放）
+  if (event.key === "Escape" && dragging.value) {
+    stopAutoScroll();
+    endDrag();
+    removeGhost();
     return;
   }
+
+  // ↑↓ 移动焦点（Shift 扩选）、←→ 收放/进出、Home/End 首末、Enter 打开、空格切换选中
+  switch (event.key) {
+    case "ArrowDown":
+      event.preventDefault();
+      store.moveFocus("down", event.shiftKey);
+      scrollFocusIntoView();
+      return;
+    case "ArrowUp":
+      event.preventDefault();
+      store.moveFocus("up", event.shiftKey);
+      scrollFocusIntoView();
+      return;
+    case "Home":
+      event.preventDefault();
+      store.moveFocus("first", event.shiftKey);
+      scrollFocusIntoView();
+      return;
+    case "End":
+      event.preventDefault();
+      store.moveFocus("last", event.shiftKey);
+      scrollFocusIntoView();
+      return;
+    case "ArrowRight":
+      event.preventDefault();
+      void store.focusExpand();
+      scrollFocusIntoView();
+      return;
+    case "ArrowLeft":
+      event.preventDefault();
+      void store.focusCollapse();
+      scrollFocusIntoView();
+      return;
+    case "Enter": {
+      const rel = store.focusRel;
+      if (!rel) return;
+      event.preventDefault();
+      const row = store.visibleRows().find((item) => item.rel === rel);
+      if (row?.kind === "dir") void store.toggleDir(rel);
+      else void store.openFile(rel);
+      return;
+    }
+    case " ":
+      if (!store.focusRel) return;
+      event.preventDefault();
+      store.toggleSelection(store.focusRel);
+      return;
+    case "Escape":
+      store.clearSelection();
+      return;
+    default:
+      break;
+  }
+
   if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "a") {
     event.preventDefault();
     store.selectAllVisible();
+    return;
   }
+  // type-ahead：打印字符时跳到下一个以该前缀开头的可见行
+  if (event.metaKey || event.ctrlKey || event.altKey || event.key.length !== 1) return;
+  const now = Date.now();
+  typeahead = now - typeaheadAt > 600 ? event.key : typeahead + event.key;
+  typeaheadAt = now;
+  const rows = store.visibleRows();
+  const index = rows.findIndex((row) => row.rel === store.focusRel);
+  const ordered = [...rows.slice(index + 1), ...rows.slice(0, index + 1)];
+  const hit = ordered.find((row) => (row.rel.split("/").pop() ?? "").toLowerCase().startsWith(typeahead.toLowerCase()));
+  if (hit) {
+    store.selectOnly(hit.rel);
+    scrollFocusIntoView();
+  }
+}
+
+/** 把键盘焦点交给树容器（点任意一行后按 ↑↓ 才有作用对象）。 */
+function focusTreeBody(): void {
+  rootEl.value?.querySelector<HTMLElement>(".tree-body")?.focus();
+}
+
+/** 键盘移动焦点后把它滚进视野（宿主没有该 API 时静默跳过）。 */
+function scrollFocusIntoView(): void {
+  void nextTick(() => {
+    const rel = store.focusRel;
+    if (!rel) return;
+    rootEl.value
+      ?.querySelector<HTMLElement>(`[data-rel="${CSS.escape(rel)}"]`)
+      ?.scrollIntoView?.({ block: "nearest" });
+  });
 }
 
 onMounted(() => {
   window.addEventListener("pointermove", onPointerMove);
   window.addEventListener("pointerup", onPointerUp);
   window.addEventListener("pointercancel", onPointerUp);
-  window.addEventListener("keydown", onTreeKeydown);
+  // 键盘**只挂在树容器上**（`.tree-body` 有 tabindex）：挂 window 会与容器上的
+  // 处理重复触发 —— 按一下 ↓ 走两格（测试当场抓到）。在树内才响应也是对的：
+  // 否则在搜索框/编辑器里打字会去驱动文件树。
 });
 onBeforeUnmount(() => {
   window.removeEventListener("pointermove", onPointerMove);
   window.removeEventListener("pointerup", onPointerUp);
   window.removeEventListener("pointercancel", onPointerUp);
-  window.removeEventListener("keydown", onTreeKeydown);
   removeGhost();
 });
 
@@ -607,8 +693,10 @@ const filtering = computed(() => !!store.filter);
       class="tree-body"
       :class="{ 'drop-root': dragging && dropDir === '' }"
       role="tree"
+      tabindex="0"
       data-rel=""
       data-kind="dir"
+      @keydown="onTreeKeydown"
     >
       <p v-if="store.rootMissing" class="tree-note warn">{{ t("kb.rootMissing") }}</p>
       <p v-else-if="!store.root" class="tree-note">{{ t("kb.noRoot") }}</p>
@@ -624,6 +712,7 @@ const filtering = computed(() => !!store.filter);
         :depth="0"
         @menu="nodeMenu = $event"
         @drag-start="onPointerDown"
+        @focus-tree="focusTreeBody"
       />
     </div>
 

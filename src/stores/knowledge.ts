@@ -130,6 +130,11 @@ export const useKnowledgeStore = defineStore("knowledge", () => {
   const selection = ref<string[]>([]);
   /** Shift 范围选择的锚点（上一次"单选"落点）。 */
   const selectionAnchor = ref<string | null>(null);
+  /**
+   * 键盘导航的**焦点行**。与 `selected`（当前打开）和 `selection`（选中集）都不同：
+   * 用 ↑↓ 移动的是它，回车才打开 —— VS Code 的树也是这三层。
+   */
+  const focusRel = ref<string | null>(null);
   /** 当前文档的字数/词数（编辑器上报；非 Markdown 为 null）。 */
   const stats = ref<{ chars: number; words: number } | null>(null);
   /** 树过滤词（空 = 不过滤）。匹配「名称或相对路径」，只作用于**已加载**的条目：
@@ -591,10 +596,83 @@ export const useKnowledgeStore = defineStore("knowledge", () => {
     return rows;
   }
 
+  /** 焦点行的下标（不在可见行里时返回 -1）。 */
+  function focusIndex(): number {
+    const rows = visibleRows();
+    return focusRel.value ? rows.findIndex((row) => row.rel === focusRel.value) : -1;
+  }
+
+  /**
+   * 移动焦点（VS Code 语义）：↑↓ 单步、Home/End 到首末。
+   * `extend` = 按住 Shift：只扩选、不改变锚点；否则单选并重置锚点。
+   */
+  function moveFocus(to: "up" | "down" | "first" | "last", extend = false): void {
+    const rows = visibleRows();
+    if (!rows.length) return;
+    const current = focusIndex();
+    let next: number;
+    switch (to) {
+      case "first":
+        next = 0;
+        break;
+      case "last":
+        next = rows.length - 1;
+        break;
+      case "down":
+        next = current < 0 ? 0 : Math.min(current + 1, rows.length - 1);
+        break;
+      default:
+        next = current <= 0 ? 0 : current - 1;
+    }
+    const rel = rows[next].rel;
+    focusRel.value = rel;
+    if (extend) {
+      if (selectionAnchor.value === null) selectionAnchor.value = rows[current < 0 ? next : current].rel;
+      selectRange(rel);
+      return;
+    }
+    selectOnly(rel);
+  }
+
+  /** →：目录展开；已展开则进到第一个子项。文件上无动作（回车才是打开）。 */
+  async function focusExpand(): Promise<void> {
+    const rel = focusRel.value;
+    if (!rel) return;
+    const row = visibleRows().find((item) => item.rel === rel);
+    if (!row || row.kind !== "dir") return;
+    if (!expanded.value[rel] && !hasMatchInside(rel)) {
+      await toggleDir(rel);
+      return;
+    }
+    const rows = visibleRows();
+    const index = rows.findIndex((item) => item.rel === rel);
+    const child = rows[index + 1];
+    if (child && child.rel.startsWith(`${rel}/`)) {
+      focusRel.value = child.rel;
+      selectOnly(child.rel);
+    }
+  }
+
+  /** ←：目录收起；否则跳到父目录（VS Code 同款）。 */
+  async function focusCollapse(): Promise<void> {
+    const rel = focusRel.value;
+    if (!rel) return;
+    const row = visibleRows().find((item) => item.rel === rel);
+    if (row?.kind === "dir" && expanded.value[rel]) {
+      await toggleDir(rel);
+      return;
+    }
+    const parent = rel.includes("/") ? rel.slice(0, rel.lastIndexOf("/")) : "";
+    if (!rel.includes("/")) return; // 顶层项没有父级
+    focusRel.value = parent;
+    selectOnly(parent);
+  }
+
   /** 只选这一项（普通点击）。 */
   function selectOnly(rel: string): void {
     selection.value = [rel];
     selectionAnchor.value = rel;
+    focusRel.value = rel;
   }
 
   /** ⌘/Ctrl 点击：加选 / 取消选择（VS Code 同款）。 */
@@ -744,6 +822,10 @@ export const useKnowledgeStore = defineStore("knowledge", () => {
     runCommand,
     clearCommand,
     selection,
+    focusRel,
+    moveFocus,
+    focusExpand,
+    focusCollapse,
     selectOnly,
     toggleSelection,
     selectRange,
