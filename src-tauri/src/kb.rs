@@ -1063,37 +1063,35 @@ mod kb_tests {
     }
 
     #[test]
-    fn app_for_prefers_extension_override_then_default() {
-        let mut by_ext = std::collections::BTreeMap::new();
-        by_ext.insert("pdf".to_string(), "Preview".to_string());
+    fn app_for_uses_extension_override_else_system_default() {
         let prefs = OpenWithPrefs {
-            default_app: "Visual Studio Code".to_string(),
-            by_ext,
+            by_ext: std::collections::BTreeMap::from([(
+                "pdf".to_string(),
+                "/Applications/Preview.app".to_string(),
+            )]),
         };
-        assert_eq!(app_for(&prefs, "docs/a.pdf"), "Preview", "扩展名覆盖优先");
-        assert_eq!(app_for(&prefs, "docs/a.md"), "Visual Studio Code", "无覆盖 → 默认应用");
-        assert_eq!(app_for(&prefs, "docs/A.PDF"), "Preview", "扩展名大小写不敏感");
-        assert_eq!(app_for(&prefs, "LICENSE"), "Visual Studio Code", "无扩展名 → 默认");
+        assert_eq!(app_for(&prefs, "docs/a.pdf"), "/Applications/Preview.app", "按扩展名命中");
+        assert_eq!(app_for(&prefs, "docs/A.PDF"), "/Applications/Preview.app", "大小写不敏感");
+        assert_eq!(app_for(&prefs, "docs/a.md"), "", "没配的扩展名 → 空 = 系统默认程序");
+        assert_eq!(app_for(&prefs, "LICENSE"), "", "无扩展名 → 空 = 系统默认程序");
 
-        let bare = OpenWithPrefs::default();
-        assert_eq!(app_for(&bare, "docs/a.pdf"), "", "都没配 → 空 = 系统默认程序");
-
-        let blank_override = OpenWithPrefs {
-            default_app: "Code".to_string(),
+        let blank = OpenWithPrefs {
             by_ext: std::collections::BTreeMap::from([("pdf".to_string(), "   ".to_string())]),
         };
-        assert_eq!(app_for(&blank_override, "a.pdf"), "Code", "空白覆盖视为未配置");
+        assert_eq!(app_for(&blank, "a.pdf"), "", "空白值视为未配置");
     }
 
     #[test]
     fn prefs_round_trip_through_app_db() {
         let conn = rusqlite::Connection::open_in_memory().unwrap();
         crate::appdb::app_migrate(&conn).unwrap();
-        assert_eq!(open_with_get(&conn).unwrap().default_app, "", "未写入时为空配置");
+        assert!(open_with_get(&conn).unwrap().by_ext.is_empty(), "未写入时为空配置");
 
         let prefs = OpenWithPrefs {
-            default_app: "Typora".to_string(),
-            by_ext: std::collections::BTreeMap::from([("pdf".to_string(), "Preview".to_string())]),
+            by_ext: std::collections::BTreeMap::from([(
+                "pdf".to_string(),
+                "/Applications/Preview.app".to_string(),
+            )]),
         };
         let json = serde_json::to_string(&prefs).unwrap();
         conn.execute(
@@ -1103,8 +1101,15 @@ mod kb_tests {
         .unwrap();
 
         let back = open_with_get(&conn).unwrap();
-        assert_eq!(back.default_app, "Typora");
-        assert_eq!(back.by_ext.get("pdf").map(String::as_str), Some("Preview"));
+        assert_eq!(
+            back.by_ext.get("pdf").map(String::as_str),
+            Some("/Applications/Preview.app")
+        );
+
+        // 旧版写过的 `defaultApp` 字段：反序列化必须照旧通过（不报错），只是不再有语义
+        let legacy = r#"{"defaultApp":"Typora","byExt":{"md":"Typora"}}"#;
+        let parsed: OpenWithPrefs = serde_json::from_str(legacy).unwrap();
+        assert_eq!(parsed.by_ext.get("md").map(String::as_str), Some("Typora"));
     }
 
     #[test]
@@ -1579,14 +1584,16 @@ pub fn write_bytes_in(root: &str, rel: &str, base64: &str) -> Result<Entry> {
 // ② **要启动的程序由 Rust 从 app.db 的偏好里读**，前端不能指定——
 // 否则「打开文件」就成了任意程序启动的入口。
 
-/// 打开方式偏好：默认应用 + 按扩展名覆盖（值为应用名或可执行文件路径）。
+/// 打开方式偏好：按扩展名指定应用；**没指定的走系统默认程序**。
+///
+/// 早期还有一个"全局默认应用"字段（让用户手打应用名）——已随设置页那次改动去掉：
+/// 它就等于"给所有扩展名各写一条规则"，却多出一条要用户自己维护、而且**和系统已有的
+/// 打开方式对着干**的配置。现在只保留按扩展名覆盖，其余交给 LaunchServices。
+/// （旧的 `defaultApp` 字段若存在于 JSON 里会被 serde 忽略，不报错。）
 #[derive(Debug, Clone, Default, Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct OpenWithPrefs {
-    /// 空 = 用系统默认程序。
-    #[serde(default)]
-    pub default_app: String,
-    /// 扩展名（小写、不含点）→ 应用。
+    /// 扩展名（小写、不含点）→ 应用（`.app` 绝对路径或应用名）。
     #[serde(default)]
     pub by_ext: std::collections::BTreeMap<String, String>,
 }
@@ -1602,7 +1609,7 @@ fn open_with_get(conn: &rusqlite::Connection) -> Result<OpenWithPrefs> {
         .unwrap_or_default())
 }
 
-/// 解析某个文件该用哪个应用打开：按扩展名优先，其次默认应用，都没有则空（系统默认）。
+/// 解析某个文件该用哪个应用打开：按扩展名命中就用它，否则空串 = 系统默认程序。
 fn app_for(prefs: &OpenWithPrefs, rel: &str) -> String {
     let ext = rel
         .rsplit('/')
@@ -1614,7 +1621,7 @@ fn app_for(prefs: &OpenWithPrefs, rel: &str) -> String {
         .get(&ext)
         .filter(|app| !app.trim().is_empty())
         .cloned()
-        .unwrap_or_else(|| prefs.default_app.clone())
+        .unwrap_or_default()
 }
 
 #[tauri::command]

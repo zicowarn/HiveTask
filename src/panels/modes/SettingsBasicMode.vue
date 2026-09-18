@@ -26,35 +26,20 @@ const connectionsOpen = ref(false);
 const feedsOpen = ref(false);
 
 // ---- 打开方式（知识库「默认应用打开」用哪个应用；存 app.db，由 Rust 读）----
+// 设计：**不再让用户手打应用名** —— 应用清单与"系统认为谁能开这个后缀"都来自系统
+// （Rust `kb_apps_list` / `kb_apps_for_ext`，后者就是 Finder「打开方式」那张表）。
 const knowledge = useKnowledgeStore();
-const openAppDraft = ref("");
-const openAppSaving = ref(false);
 onMounted(() => {
   void knowledge.loadOpenWith();
+  void knowledge.loadSystemApps();
 });
-watch(
-  () => knowledge.openWith,
-  (prefs) => {
-    openAppDraft.value = prefs.defaultApp;
-  },
-  { immediate: true, deep: true },
-);
-/** 失焦/回车提交：空串 = 系统默认程序。 */
-async function commitOpenApp(): Promise<void> {
-  const value = openAppDraft.value.trim();
-  if (value === knowledge.openWith.defaultApp) return;
-  openAppSaving.value = true;
-  try {
-    await knowledge.saveOpenWith({ ...knowledge.openWith, defaultApp: value });
-  } finally {
-    openAppSaving.value = false;
-  }
-}
-/** 按扩展名覆盖：`{ ".md": "Typora", ".dwg": "AutoCAD" }` 的 UI 行。 */
+
+/** 按扩展名覆盖：`{ ".md": "/Applications/Typora.app" }` 的 UI 行。 */
 interface ByExtRow {
   ext: string;
   app: string;
 }
+
 const byExtRows = ref<ByExtRow[]>([]);
 watch(
   () => knowledge.openWith.byExt,
@@ -64,14 +49,88 @@ watch(
   { immediate: true, deep: true },
 );
 
+/** 扩展名归一（与后端 `normalize_ext` 同一口径）。 */
+function cleanExt(ext: string): string {
+  return ext.trim().replace(/^\./, "").toLowerCase();
+}
+
+/**
+ * 每个扩展名的系统登记结果（懒加载 + 缓存）：菜单打开、或扩展名提交时才去问一次。
+ * 缓存空结果也算"问过了" —— 否则每次开菜单都白跑一趟 LaunchServices。
+ */
+const extApps = ref<Record<string, ExtApps>>({});
+const extLoading = ref<Record<string, boolean>>({});
+
+async function ensureExtApps(ext: string): Promise<void> {
+  const key = cleanExt(ext);
+  if (!key || key in extApps.value || extLoading.value[key]) return;
+  extLoading.value = { ...extLoading.value, [key]: true };
+  try {
+    const result = await knowledge.appsForExt(key);
+    extApps.value = { ...extApps.value, [key]: result };
+  } finally {
+    const next = { ...extLoading.value };
+    delete next[key];
+    extLoading.value = next;
+  }
+}
+
+/** 应用名：路径取 bundle 名（`/Applications/Typora.app` → `Typora`），旧的手填名原样。 */
+function appLabel(value: string): string {
+  const base = value.split("/").pop() ?? value;
+  return base.endsWith(".app") ? base.slice(0, -4) : base;
+}
+
+/** 选择器条目：系统登记（默认 + 候选）在上，全部已装应用在下；当前值不在其中时补一条。 */
+function appSections(row: ByExtRow): DropdownSection[] {
+  const key = cleanExt(row.ext);
+  const cached = key ? extApps.value[key] : undefined;
+  const sections: DropdownSection[] = [];
+  const seen = new Set<string>();
+
+  if (cached?.default) {
+    sections.push({
+      title: t("settings.byExtSystemDefault"),
+      options: [{ value: cached.default.path, label: cached.default.name }],
+    });
+    seen.add(cached.default.path);
+  }
+  const registered = (cached?.candidates ?? []).filter((app) => !seen.has(app.path));
+  if (registered.length) {
+    sections.push({
+      title: t("settings.byExtSystemGroup"),
+      options: registered.map((app) => ({ value: app.path, label: app.name })),
+    });
+    for (const app of registered) seen.add(app.path);
+  }
+
+  const rest = knowledge.systemApps.filter((app) => !seen.has(app.path));
+  if (rest.length) {
+    sections.push({
+      title: t("settings.byExtAllGroup"),
+      options: rest.map((app) => ({ value: app.path, label: app.name })),
+    });
+  }
+
+  // 当前值（旧配置手填的名称 / 已卸载的应用）不在上面任何一组里：补一条，
+  // 否则触发器会显示成空 —— 用户就看不见自己配了什么
+  if (row.app && !seen.has(row.app) && !rest.some((app) => app.path === row.app)) {
+    sections.unshift({
+      title: t("settings.byExtCurrentGroup"),
+      options: [{ value: row.app, label: appLabel(row.app) }],
+    });
+  }
+  return sections;
+}
+
 async function saveByExt(rows: ByExtRow[]): Promise<void> {
   const byExt: Record<string, string> = {};
   for (const row of rows) {
-    const ext = row.ext.trim().toLowerCase();
+    const ext = cleanExt(row.ext);
     const app = row.app.trim();
     if (ext && app) byExt[ext.startsWith(".") ? ext : `.${ext}`] = app;
   }
-  await knowledge.saveOpenWith({ ...knowledge.openWith, byExt });
+  await knowledge.saveOpenWith({ byExt });
 }
 
 function addByExtRow(): void {
@@ -86,18 +145,34 @@ async function removeByExtRow(index: number): Promise<void> {
 async function commitByExtRow(index: number): Promise<void> {
   const row = byExtRows.value[index];
   if (!row) return;
+  // 扩展名先落定，再去问系统"谁能开它"（选择器下次打开就有系统建议了）
+  void ensureExtApps(row.ext);
   // 两栏都有内容才写入；空行跳过
-  if (!row.ext.trim() || !row.app.trim()) return;
+  if (!cleanExt(row.ext) || !row.app.trim()) return;
   await saveByExt(byExtRows.value);
 }
 
-/** 原生选择器挑应用（macOS 选 .app / Windows 选 .exe / Linux 选可执行文件）。 */
-async function pickOpenApp(): Promise<void> {
+/** 选中某个应用（值 = `.app` 绝对路径，或旧配置里的应用名）。 */
+async function pickRowApp(index: number, value: string): Promise<void> {
+  const row = byExtRows.value[index];
+  if (!row || !value) return;
+  row.app = value;
+  // 数组里的对象是响应式的（byExtRows 在 ref 里），改完成即写盘
+  await saveByExt(byExtRows.value.map((r, i) => (i === index ? { ...r, app: value } : r)));
+}
+
+/** 菜单打开时才去问系统（懒加载：不在扩展名输入框上每敲一个字都查一次）。 */
+function onRowMenuOpen(index: number, isOpenNow: boolean): void {
+  if (!isOpenNow) return;
+  const row = byExtRows.value[index];
+  if (row) void ensureExtApps(row.ext);
+}
+
+/** 「浏览…」：原生选择器挑应用（macOS 选 .app / Windows 选 .exe / Linux 选可执行文件）。 */
+async function browseRowApp(index: number): Promise<void> {
   if (!isTauri()) return;
   const picked = await api.kbPickApp();
-  if (!picked) return;
-  openAppDraft.value = picked;
-  await commitOpenApp();
+  if (picked) await pickRowApp(index, picked);
 }
 
 // ---- GitHub 账户（Device Flow 登录；凭据归 gh 托管）----
@@ -226,24 +301,12 @@ function onThemeChange(value: string | string[]) {
       <DropdownMenu class="setting-dd" :options="shellChoices" v-model="settings.terminalShell" />
     </div>
 
+    <!-- 打开方式：不再让用户手打应用名（右侧输入框与按钮按用户要求移除）——
+         应用的选择在下面「按扩展名指定」里用系统应用选择器完成 -->
     <div class="setting-row">
       <div class="setting-text">
         <span class="setting-name">{{ t("settings.openWith") }}</span>
         <span class="setting-desc">{{ t("settings.openWithDesc") }}</span>
-      </div>
-      <div class="setting-open-with">
-        <input
-          v-model="openAppDraft"
-          class="setting-input"
-          :placeholder="t('settings.openWithPlaceholder')"
-          spellcheck="false"
-          @keydown.enter="commitOpenApp"
-          @blur="commitOpenApp"
-        />
-        <button class="setting-btn" :disabled="openAppSaving || !isTauri()" @click="pickOpenApp">
-          <EditorIcon name="o.file-directory" />
-          {{ t("settings.openWithPick") }}
-        </button>
       </div>
     </div>
 
@@ -264,13 +327,16 @@ function onThemeChange(value: string | string[]) {
           @blur="commitByExtRow(index)"
         />
         <span class="byext-arrow">→</span>
-        <input
-          v-model="row.app"
-          class="setting-input byext-app"
-          :placeholder="t('settings.byExtAppPlaceholder')"
-          spellcheck="false"
-          @keydown.enter="commitByExtRow(index)"
-          @blur="commitByExtRow(index)"
+        <DropdownMenu
+          class="byext-app"
+          filterable
+          :sections="appSections(row)"
+          :model-value="row.app"
+          :placeholder="t('settings.byExtAppPick')"
+          :action="{ value: 'browse', label: t('settings.openWithPick'), icon: 'o.file-directory' }"
+          @update:model-value="(value) => pickRowApp(index, String(value))"
+          @action="browseRowApp(index)"
+          @open-change="(open) => onRowMenuOpen(index, open)"
         />
         <button class="byext-remove" :title="t('settings.byExtRemove')" @click="removeByExtRow(index)">
           <EditorIcon name="o.x" />
@@ -414,13 +480,6 @@ function onThemeChange(value: string | string[]) {
   margin: 0;
   font-size: var(--font-sm);
   color: var(--text-dim);
-}
-/* 「打开方式」：应用名输入 + 原生选择器并排（宽度上限，免得太长挤掉说明文字） */
-.setting-open-with {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex: none;
 }
 .setting-input {
   width: 190px;

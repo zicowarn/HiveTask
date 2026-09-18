@@ -247,10 +247,31 @@ export interface KbStat {
 
 /** 「打开方式」偏好（镜像 src-tauri/src/kb.rs::OpenWithPrefs）。 */
 export interface OpenWithPrefs {
-  /** 空 = 系统默认程序。 */
-  defaultApp: string;
-  /** 扩展名（小写、不含点）→ 应用名 / 可执行文件路径。 */
+  /**
+   * 扩展名（小写、不含点）→ 应用。
+   *
+   * 值优先是 `.app` / `.exe` 的**绝对路径**（从系统应用列表里选的），也兼容早期手填的
+   * 应用名 —— `open -a` 两种都认。
+   */
   byExt: Record<string, string>;
+}
+
+/** 系统里的一个应用（镜像 src-tauri/src/openwith_apps.rs::AppInfo）。 */
+export interface SystemApp {
+  /** 显示名（Info.plist 的 CFBundleDisplayName / CFBundleName）。 */
+  name: string;
+  /** 绝对路径（.app）—— 存这个，避免同名歧义。 */
+  path: string;
+  /** 该应用在 Info.plist 里声明的扩展名（小写、不含点）；空 = 没声明。 */
+  extensions?: string[];
+}
+
+/** 某个扩展名的系统登记情况（Finder「打开方式」那张表）。 */
+export interface ExtApps {
+  /** 系统默认应用；系统没登记该扩展名时为 null。 */
+  default: SystemApp | null;
+  /** 候选应用（默认应用不在其中）。 */
+  candidates: SystemApp[];
 }
 
 export const api = {
@@ -303,6 +324,10 @@ export const api = {
     invoke<KbEntry>("kb_create", { root, rel, kind }),
   /** 「打开方式」偏好（存 app.db：打开动作由 Rust 执行，配置也由 Rust 持有）。 */
   kbPickApp: () => invoke<string | null>("kb_pick_app"),
+  /** 已安装应用清单（扫标准应用目录 + 读 Info.plist；系统给什么就是什么）。 */
+  kbAppsList: () => invoke<SystemApp[]>("kb_apps_list"),
+  /** 这个扩展名在系统里"用什么打开"：默认应用 + 候选（= Finder「打开方式」子菜单）。 */
+  kbAppsForExt: (ext: string) => invoke<ExtApps>("kb_apps_for_ext", { ext }),
   kbOpenPrefsGet: () => invoke<OpenWithPrefs>("kb_open_prefs_get"),
   kbOpenPrefsSet: (prefs: OpenWithPrefs) => invoke<void>("kb_open_prefs_set", { prefs }),
   /**

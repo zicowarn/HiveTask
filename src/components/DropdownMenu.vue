@@ -47,6 +47,8 @@ const props = withDefaults(
     /** 单选且值为空时的占位文案。 */
     placeholder?: string;
     disabled?: boolean;
+    /** 长列表（应用清单这类上百条）：菜单顶部多一个搜索框，按标签实时过滤。 */
+    filterable?: boolean;
   }>(),
   {
     options: () => [],
@@ -55,18 +57,24 @@ const props = withDefaults(
     multiple: false,
     placeholder: "",
     disabled: false,
+    filterable: false,
   },
 );
 
 const emit = defineEmits<{
   "update:modelValue": [value: string | string[]];
   action: [value: string];
+  /** 开合变化（调用方据此懒加载菜单内容，例如"这个扩展名系统里有哪些应用"）。 */
+  openChange: [value: boolean];
 }>();
 
 
 const open = ref(false);
 const root = ref<HTMLElement | null>(null);
 const menu = ref<HTMLElement | null>(null);
+const filterInput = ref<HTMLInputElement | null>(null);
+/** 搜索词（`filterable` 时菜单顶部的输入框）。 */
+const query = ref("");
 /** 菜单内联定位（position: fixed；top/bottom 二选一 + maxHeight）。 */
 const menuStyle = ref<Record<string, string>>({});
 
@@ -129,7 +137,19 @@ function place() {
 }
 
 function toggle() {
-  open.value = !open.value;
+  setOpen(!open.value);
+}
+
+function setOpen(next: boolean) {
+  if (open.value === next) return;
+  open.value = next;
+  emit("openChange", next);
+}
+
+/** 搜索框里回车：选第一个命中项（长列表里省一次鼠标）。 */
+function pickFirstMatch() {
+  const first = groups.value[0]?.options[0];
+  if (first) pick(first);
 }
 
 function pick(option: DropdownOption) {
@@ -141,7 +161,7 @@ function pick(option: DropdownOption) {
     emit("update:modelValue", next); // 多选保持展开
   } else {
     emit("update:modelValue", option.value);
-    open.value = false;
+    setOpen(false);
   }
 }
 
@@ -149,29 +169,42 @@ function onDocClick(event: MouseEvent) {
   if (!open.value) return;
   const target = event.target as Node;
   if (root.value?.contains(target) || menu.value?.contains(target)) return;
-  open.value = false;
+  setOpen(false);
 }
 
 function onDocKeydown(event: KeyboardEvent) {
   if (event.key === "Escape" && open.value) {
     event.stopPropagation();
-    open.value = false;
+    setOpen(false);
   }
 }
 
 /** 归一为分组：无 sections 时视作单组（不带标题）。 */
-const groups = computed<DropdownSection[]>(() =>
+const baseGroups = computed<DropdownSection[]>(() =>
   props.sections.length ? props.sections : [{ options: props.options }],
 );
 
+/** 搜索过滤后的分组（空组直接不渲染；未开启搜索时原样）。 */
+const groups = computed<DropdownSection[]>(() => {
+  const needle = query.value.trim().toLowerCase();
+  if (!props.filterable || !needle) return baseGroups.value;
+  return baseGroups.value
+    .map((group) => ({ ...group, options: group.options.filter((o) => o.label.toLowerCase().includes(needle)) }))
+    .filter((group) => group.options.length > 0);
+});
+
 function pickAction(item: DropdownAction) {
   emit("action", item.value);
-  open.value = false;
+  setOpen(false);
 }
 
 watch(open, (isOpenNow) => {
   if (isOpenNow) {
-    void nextTick(place);
+    query.value = "";
+    void nextTick(() => {
+      place();
+      filterInput.value?.focus();
+    });
     window.addEventListener("scroll", place, true);
     window.addEventListener("resize", place);
   } else {
@@ -218,6 +251,18 @@ onBeforeUnmount(() => {
         role="listbox"
         :aria-multiselectable="multiple"
       >
+        <!-- 搜索框（长列表用：应用清单这类上百条） -->
+        <input
+          v-if="filterable"
+          ref="filterInput"
+          v-model="query"
+          class="dd-filter"
+          type="text"
+          spellcheck="false"
+          :placeholder="placeholder"
+          @keydown.enter.prevent="pickFirstMatch"
+          @keydown.esc.stop="setOpen(false)"
+        />
         <!-- 动作行（平台菜单顶部：＋ New column，之下一条分隔线） -->
         <template v-if="action">
           <button class="dd-act" type="button" role="menuitem" @click="pickAction(action)">
@@ -250,7 +295,7 @@ onBeforeUnmount(() => {
             <span v-if="!menuForm" class="dd-check" :class="{ on: isOpen(option.value) }">✓</span>
           </button>
         </template>
-        <p v-if="allOptions.length === 0" class="dd-empty">{{ t("issue.noneAvailable") }}</p>
+        <p v-if="groups.length === 0" class="dd-empty">{{ t("issue.noneAvailable") }}</p>
       </div>
     </Teleport>
   </div>
@@ -397,6 +442,24 @@ onBeforeUnmount(() => {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+/* 搜索框（filterable）：与菜单同宽，样式走 token（无原生外观） */
+.dd-filter {
+  display: block;
+  width: 100%;
+  height: 24px;
+  margin: 2px 0 4px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--bg-app);
+  color: var(--text);
+  font-family: inherit;
+  font-size: var(--font-md);
+  outline: none;
+}
+.dd-filter:focus {
+  border-color: var(--accent);
 }
 .dd-sep {
   height: 1px;

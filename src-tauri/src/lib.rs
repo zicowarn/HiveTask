@@ -10,6 +10,7 @@ mod gitea;
 mod git;
 mod journal;
 mod kb;
+mod openwith_apps;
 mod local;
 mod models;
 mod projects;
@@ -1170,6 +1171,8 @@ pub fn run() {
             kb::kb_move,
             kb::kb_delete,
             kb::kb_pick_app,
+            openwith_apps::kb_apps_list,
+            openwith_apps::kb_apps_for_ext,
             kb::kb_open_prefs_get,
             kb::kb_open_prefs_set,
             kb::kb_open_external,

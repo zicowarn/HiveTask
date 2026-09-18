@@ -33,6 +33,11 @@ encoding_rs = "0.8.35"
 chardetng = "1.0.0"
 trash = "5.2.3"
 chinese-lunisolar-calendar = "0.2.5"
+# 「打开方式」的系统来源：读 .app 的 Info.plist（二进制/XML 都认）
+plist = "1"
+# LaunchServices（Finder「打开方式」那张表）：只在 macOS 用，见 openwith_apps.rs
+[target.'cfg(target_os = "macos")'.dependencies]
+core-foundation-sys = "0.8"
 
 [dev-dependencies]
 tempfile = "3.27.0"

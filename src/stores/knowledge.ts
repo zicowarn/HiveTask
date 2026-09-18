@@ -6,7 +6,7 @@
  */
 import { defineStore } from "pinia";
 import { computed, ref } from "vue";
-import { api, isTauri, type KbEntry, type KbText, type OpenWithPrefs } from "../api";
+import { api, isTauri, type ExtApps, type KbEntry, type KbText, type OpenWithPrefs, type SystemApp } from "../api";
 
 const ROOT_KEY = "hivetask.kb.root";
 const RECENT_KEY = "hivetask.kb.recent";
@@ -146,8 +146,15 @@ export const useKnowledgeStore = defineStore("knowledge", () => {
   const filter = ref("");
   /** 「打开方式」偏好（defaultApp + byExt）。存 app.db：打开动作由 Rust 执行，
    *  配置也由 Rust 持有——前端只读写，不能在打开时指定程序。 */
-  const openWith = ref<OpenWithPrefs>({ defaultApp: "", byExt: {} });
+  const openWith = ref<OpenWithPrefs>({ byExt: {} });
   const openWithLoaded = ref(false);
+  /**
+   * 系统应用清单。设置页每次挂载都重扫一遍 —— 扫描在 Rust 侧是几十毫秒的目录遍历，
+   * 换来的好处是**刚装的应用重开设置就出现**（省掉"重启应用才刷新"那种困惑）。
+   * 同一时刻只跑一次（in-flight 去重），失败当空表，不挡设置页。
+   */
+  const systemApps = ref<SystemApp[]>([]);
+  let systemAppsInFlight: Promise<SystemApp[]> | null = null;
 
   const rootName = computed(() => {
     const path = root.value;
@@ -574,6 +581,29 @@ export const useKnowledgeStore = defineStore("knowledge", () => {
     await api.kbOpenPrefsSet(next);
   }
 
+  /** 已安装应用（每次调用都会重扫；并发调用合并成一次）。 */
+  async function loadSystemApps(): Promise<SystemApp[]> {
+    if (!isTauri()) return [];
+    systemAppsInFlight ??= api.kbAppsList().catch(() => []);
+    try {
+      systemApps.value = await systemAppsInFlight;
+    } finally {
+      systemAppsInFlight = null;
+    }
+    return systemApps.value;
+  }
+
+  /** 某个扩展名在系统里的默认应用与候选（扩展名为空 / 非 Tauri 时返回空表）。 */
+  async function appsForExt(ext: string): Promise<ExtApps> {
+    const cleaned = ext.trim().replace(/^\./, "").toLowerCase();
+    if (!isTauri() || !cleaned) return { default: null, candidates: [] };
+    try {
+      return await api.kbAppsForExt(cleaned);
+    } catch {
+      return { default: null, candidates: [] };
+    }
+  }
+
   // ---- 树过滤 ----
 
   function setFilter(value: string): void {
@@ -805,6 +835,7 @@ export const useKnowledgeStore = defineStore("knowledge", () => {
     createParent,
     openWith,
     openWithLoaded,
+    systemApps,
     cursor,
     indentWidth,
     stats,
@@ -872,6 +903,8 @@ export const useKnowledgeStore = defineStore("knowledge", () => {
     pasteInto,
     loadOpenWith,
     saveOpenWith,
+    loadSystemApps,
+    appsForExt,
     openSwitch,
     closeSwitch,
     setShowIgnored,
