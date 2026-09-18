@@ -236,16 +236,25 @@ export const pdfPlugin = {
       report: (state) => ctx.onZoom?.(state),
     });
 
-    const observer = new IntersectionObserver(
-      (records) => {
-        for (const record of records) {
-          if (!record.isIntersecting) continue;
-          paint(Number((record.target as HTMLElement).dataset.page), record.target as HTMLElement);
-        }
-      },
-      { root: scroller, rootMargin: "400px 0px" },
-    );
-    for (const holder of holders) observer.observe(holder);
+    // 可见页惰性渲染；**功能探测照 OFV `pdf.ts`**：引擎没有 IntersectionObserver 时
+    // （jsdom / 老 WebView）退化成"全部立即渲染"，而不是在这里抛错导致整个文件打不开。
+    const observer =
+      typeof IntersectionObserver === "undefined"
+        ? null
+        : new IntersectionObserver(
+            (records) => {
+              for (const record of records) {
+                if (!record.isIntersecting) continue;
+                paint(Number((record.target as HTMLElement).dataset.page), record.target as HTMLElement);
+              }
+            },
+            { root: scroller, rootMargin: "400px 0px" },
+          );
+    if (observer) {
+      for (const holder of holders) observer.observe(holder);
+    } else {
+      for (const holder of holders) paint(Number(holder.dataset.page), holder);
+    }
 
     // 初次进入按"适应窗口"（= 100%）
     controller.fit();
@@ -447,7 +456,7 @@ export const pdfPlugin = {
 
     return {
       destroy() {
-        observer.disconnect();
+        observer?.disconnect();
         scroller.removeEventListener("scroll", reportCurrentPage);
         void loadingTask.destroy();
       },

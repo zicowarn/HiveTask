@@ -28,13 +28,14 @@ const hasCorpus = (() => {
 
 /** 已知的"环境限制"失败：原因写在注释里，实机验证在交付清单。 */
 const ALLOWED: { match: RegExp; why: string }[] = [
-  { match: /\[model3d\].*WebGL context/, why: "jsdom 没有 WebGL —— 3D 需实机验证" },
   // 注意匹配顺序：报错文本是先 ENOENT 再给路径，别把正则写成"路径在前"
   { match: /\[cad\].*ENOENT.*libredwg-web\.wasm/, why: "jsdom 没有 HTTP 服务（实机由 vite/Tauri 提供 /vendor）" },
-  { match: /\[pdf\].*IntersectionObserver/, why: "jsdom 没有 IntersectionObserver —— PDF 需实机验证" },
   { match: /\[archive\].*Corrupted zip/, why: "样本就是故意损坏的压缩包：出错是设计行为" },
   { match: /\[pdf\].*Invalid PDF structure/, why: "样本是只用 magic 认领的假 PDF：解析失败是设计行为" },
 ];
+// 曾经还有两条，已随功能补齐而删掉（留着会掩盖回归）：
+// - `[model3d] ... WebGL context`：3D 现在捕获 WebGL 创建失败 → 诚实卡片（照 OFV）
+// - `[pdf] ... IntersectionObserver`：PDF 现在探测该 API，没有就退化成"全部立即渲染"（照 OFV）
 
 /** 允许"无插件认领"的样本：面板另有分支处理（图片走 <img>、无扩展名文本走文本回退）。 */
 const ALLOWED_NO_PLUGIN = [
@@ -47,6 +48,8 @@ const ALLOWED_NO_PLUGIN = [
   // 我们在 docs/kb-preview-formats.md §5.5 里**已登记为不做**的 CAD 交换格式
   // （需要专用内核）：走通用"暂不支持 + 默认应用打开"卡片就是预期行为
   /^03-数据\/CAD\/15bias\.(GDS|oas)$/i,
+  // glTF 的外部 .bin 缓冲：是模型的附件，不是给人单开的文件（点开走"暂不支持"卡片即可）
+  /^03-数据\/3D\/模型\.bin$/,
 ];
 
 function walk(dir: string, out: string[] = []): string[] {

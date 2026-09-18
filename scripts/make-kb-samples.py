@@ -585,6 +585,18 @@ def make_3d(root: Path) -> None:
     write(d / "模型.glb", glb)
     note(d / "模型.glb", "3D（three，自动取景）", "显示一个三角形；可拖动旋转缩放；信息行给出包围盒与三角面数", root)
 
+    # 独立 .gltf + 外部 .bin 附件：走"先把同目录附件读成 data URL"的离线通道
+    write(d / "模型.bin", positions + struct.pack("<3H", 0, 1, 2))
+    write(
+        d / "模型.gltf",
+        json.dumps(
+            {**gltf, "buffers": [{"uri": "模型.bin", "byteLength": 42}]},
+            ensure_ascii=False,
+            indent=2,
+        ),
+    )
+    note(d / "模型.gltf", "独立 glTF（外部 .bin 附件）", "三角形显示——附件从知识库同目录读，不发网络请求", root)
+
     write(d / "立方体.obj", """# 立方体（中文注释）
 v 0 0 0
 v 1 0 0
@@ -625,9 +637,207 @@ end_header
 """)
     note(d / "点云.ply", "ASCII PLY", "三角形显示", root)
 
-    # 明示不支持的 3D 格式（诚实卡片）
-    write(d / "不可渲染.fbx", b"Kaydara FBX Binary  \x00\x1a\x00")
-    note(d / "不可渲染.fbx", "FBX（本期不做解码）", "诚实卡片提示用默认应用打开，**不是**空白画布", root)
+    # ---- 以下七种走 three.js 自带 Loader（OFV 同款）：每个扩展名都要有真样本，
+    #      tests/kb-model3d-loaders.test.ts 会逐个真解析一遍（判据=读出三角面）
+
+    # FBX：ASCII 文本格式（three 的 TextParser 要求 tab 缩进 + FBXVersion ≥ 7000）
+    write(d / "三角面.fbx", """; FBX 7.4.0 project file
+; kb-sample：一个三角形（ASCII 文本 FBX，无需专用二进制解码器）
+FBXHeaderExtension:  {
+\tFBXHeaderVersion: 1003
+\tFBXVersion: 7400
+}
+Objects:  {
+\tGeometry: 1000000, "Geometry::三角形", "Mesh" {
+\t\tVertices: *9 {
+\t\t\ta: 0,0,0,1,0,0,0,1,0
+\t\t}
+\t\tPolygonVertexIndex: *3 {
+\t\t\ta: 0,1,-3
+\t\t}
+\t\tGeometryVersion: 124
+\t}
+\tModel: 2000000, "Model::三角形", "Mesh" {
+\t\tVersion: 232
+\t\tProperties70:  {
+\t\t\tP: "Lcl Translation", "Lcl Translation", "", "A",0,0,0
+\t\t}
+\t\tShading: T
+\t\tCulling: "CullingOff"
+\t}
+}
+Connections:  {
+\tC: "OO",1000000,2000000
+}
+""")
+    note(d / "三角面.fbx", "FBX（ASCII 文本）", "三角形显示——three 自带 FBXLoader 直解，无需专用解码器", root)
+
+    # DAE（COLLADA 1.4.1）：一个三角形 + 材质
+    write(d / "模型.dae", """<?xml version="1.0" encoding="utf-8"?>
+<COLLADA xmlns="http://www.collada.org/2005/11/COLLADASchema" version="1.4.1">
+  <asset>
+    <unit name="meter" meter="1"/>
+    <up_axis>Y_UP</up_axis>
+  </asset>
+  <library_effects>
+    <effect id="tri-effect">
+      <profile_COMMON>
+        <technique sid="common">
+          <lambert><diffuse><color>0.8 0.4 0.2 1</color></diffuse></lambert>
+        </technique>
+      </profile_COMMON>
+    </effect>
+  </library_effects>
+  <library_materials>
+    <material id="tri-material" name="tri-material"><instance_effect url="#tri-effect"/></material>
+  </library_materials>
+  <library_geometries>
+    <geometry id="tri-mesh" name="三角形">
+      <mesh>
+        <source id="tri-positions">
+          <float_array id="tri-positions-array" count="9">0 0 0 1 0 0 0 1 0</float_array>
+          <technique_common>
+            <accessor source="#tri-positions-array" count="3" stride="3">
+              <param name="X" type="float"/><param name="Y" type="float"/><param name="Z" type="float"/>
+            </accessor>
+          </technique_common>
+        </source>
+        <vertices id="tri-vertices"><input semantic="POSITION" source="#tri-positions"/></vertices>
+        <triangles count="1">
+          <input semantic="VERTEX" source="#tri-vertices" offset="0"/>
+          <p>0 1 2</p>
+        </triangles>
+      </mesh>
+    </geometry>
+  </library_geometries>
+  <library_visual_scenes>
+    <visual_scene id="Scene" name="Scene">
+      <node id="tri-node" name="三角形" type="NODE">
+        <instance_geometry url="#tri-mesh">
+          <bind_material>
+            <technique_common><instance_material symbol="tri-material" target="#tri-material"/></technique_common>
+          </bind_material>
+        </instance_geometry>
+      </node>
+    </visual_scene>
+  </library_visual_scenes>
+  <scene><instance_visual_scene url="#Scene"/></scene>
+</COLLADA>
+""")
+    note(d / "模型.dae", "DAE（COLLADA）", "三角形显示（带材质色）", root)
+
+    # 3DS：chunk 结构（主块 0x4D4D → 编辑块 0x3D3D → 对象 0x4000 → 三角网格 0x4100）
+    def chunk(cid: int, body: bytes) -> bytes:
+        return struct.pack("<HI", cid, len(body) + 6) + body
+
+    verts = struct.pack("<H", 3) + struct.pack("<9f", 0, 0, 0, 1, 0, 0, 0, 1, 0)
+    faces = struct.pack("<H", 1) + struct.pack("<3H", 0, 1, 2) + struct.pack("<H", 0)
+    trimesh = chunk(0x4100, chunk(0x4110, verts) + chunk(0x4120, faces))
+    # ⚠️ 对象名必须是**奇数长度**：three 的 `Chunk.readString()` 读完 NUL 就接着读下一个
+    # chunk，不跳过"补到偶数字节"的那一位（3DS 规范允许补位）。名字+结尾 NUL 因此要是
+    # 偶数 —— 纯中文名（GBK 每个字 2 字节，总长必为偶数）会踩到这点，样本用 ASCII 名。
+    name = b"kb-triangle\x00"
+    write(
+        d / "模型.3ds",
+        chunk(0x4D4D, chunk(0x0002, struct.pack("<I", 3)) + chunk(0x3D3D, chunk(0x4000, name + trimesh))),
+    )
+    note(d / "模型.3ds", "3DS（3D Studio）", "三角形显示（对象名用 ASCII：纯中文名是偶数长度，会踩 three 的不跳补位 bug）", root)
+
+    # 3MF：OPC 包（内容类型 + 关系 + 3dmodel.model）
+    model_3mf = """<?xml version="1.0" encoding="UTF-8"?>
+<model unit="millimeter" xml:lang="en-US" xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02">
+  <resources>
+    <object id="1" type="model">
+      <mesh>
+        <vertices>
+          <vertex x="0" y="0" z="0"/>
+          <vertex x="1" y="0" z="0"/>
+          <vertex x="0" y="1" z="0"/>
+        </vertices>
+        <triangles><triangle v1="0" v2="1" v3="2"/></triangles>
+      </mesh>
+    </object>
+  </resources>
+  <build><item objectid="1"/></build>
+</model>
+"""
+    zipfile_at(
+        d / "模型.3mf",
+        {
+            "[Content_Types].xml": """<?xml version="1.0" encoding="UTF-8"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Default Extension="model" ContentType="application/vnd.ms-package.3dmanufacturing-3dmodel+xml"/>
+</Types>
+""",
+            "_rels/.rels": """<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Target="/3D/3dmodel.model" Id="rel0" Type="http://schemas.microsoft.com/3dmanufacturing/2013/01/3dmodel"/>
+</Relationships>
+""",
+            "3D/3dmodel.model": model_3mf,
+        },
+    )
+    note(d / "模型.3mf", "3MF（3D 打印包）", "三角形显示——zip 里取 3D/3dmodel.model", root)
+
+    # AMF（XML）
+    write(d / "模型.amf", """<?xml version="1.0" encoding="utf-8"?>
+<amf unit="millimeter">
+  <object id="1">
+    <mesh>
+      <vertices>
+        <vertex><coordinates><x>0</x><y>0</y><z>0</z></coordinates></vertex>
+        <vertex><coordinates><x>1</x><y>0</y><z>0</z></coordinates></vertex>
+        <vertex><coordinates><x>0</x><y>1</y><z>0</z></coordinates></vertex>
+      </vertices>
+      <volume>
+        <triangle><v1>0</v1><v2>1</v2><v3>2</v3></triangle>
+      </volume>
+    </mesh>
+  </object>
+</amf>
+""")
+    note(d / "模型.amf", "AMF（增材制造 XML）", "三角形显示（OFV 没做这个格式，我们补的）", root)
+
+    # VRML97（.wrl / .vrml 同一 loader）
+    write(d / "立方体.wrl", """#VRML V2.0 utf8
+# kb-sample：立方体（IndexedFaceSet）
+Shape {
+  appearance Appearance {
+    material Material { diffuseColor 0.8 0.5 0.3 }
+  }
+  geometry IndexedFaceSet {
+    coord Coordinate {
+      point [ 0 0 0, 1 0 0, 1 1 0, 0 1 0, 0 0 1, 1 0 1, 1 1 1, 0 1 1 ]
+    }
+    coordIndex [ 0 1 2 3 -1, 4 5 6 7 -1, 0 1 5 4 -1, 3 2 6 7 -1, 0 3 7 4 -1, 1 2 6 5 -1 ]
+  }
+}
+""")
+    note(d / "立方体.wrl", "VRML97", "立方体显示（.vrml 是同一格式的别名）", root)
+
+    # USDA（文本 USD）+ USDZ（zip 包一层 usda）
+    usda = """#usda 1.0
+
+def Xform "Root"
+{
+    def Mesh "Triangle"
+    {
+        int[] faceVertexCounts = [3]
+        int[] faceVertexIndices = [0, 1, 2]
+        point3f[] points = [(0, 0, 0), (1, 0, 0), (0, 1, 0)]
+    }
+}
+"""
+    write(d / "模型.usda", usda)
+    note(d / "模型.usda", "USDA（文本 USD）", "三角形显示（.usd 走同一通道）", root)
+    zipfile_at(d / "模型.usdz", {"model.usda": usda})
+    note(d / "模型.usdz", "USDZ（zip 包的 USD）", "三角形显示——解包后按文本 USD 解析", root)
+
+    # 旧版占位样本（"FBX 需要专用解码器"那个结论是错的）——留着会误导，删掉
+    stale = d / "不可渲染.fbx"
+    if stale.exists():
+        stale.unlink()
 
 
 def make_cad(root: Path, ofv: Path | None) -> None:

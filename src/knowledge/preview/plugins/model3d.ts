@@ -1,13 +1,31 @@
 /**
- * 3D 模型预览（glTF/GLB、OBJ、STL、PLY、VRML）—— three.js 渲染，**全离线**。
+ * 3D 模型预览 —— three.js 渲染，**全离线**。
  *
- * 关键决策与代价（照 OFV `model3d.ts` 的格式面，实现重写）：
+ * 支持的格式与解码器（逐条对照 OFV `packages/core/src/plugins/model3d.ts`）：
+ *
+ * | 格式 | 解码器 | OFV 有 |
+ * |---|---|---|
+ * | gltf / glb | GLTFLoader | ✓ |
+ * | obj | OBJLoader | ✓ |
+ * | fbx | FBXLoader | ✓ |
+ * | dae | ColladaLoader | ✓ |
+ * | stl | STLLoader | ✓ |
+ * | ply | PLYLoader | ✓ |
+ * | 3ds | TDSLoader | ✓ |
+ * | 3mf | ThreeMFLoader | ✓ |
+ * | usd/usda/usdc/usdz | USDLoader | ✓ |
+ * | vrml / wrl | VRMLLoader | ✓ |
+ * | amf | AMFLoader | ✗（我们补的，three 自带） |
+ *
+ * 这些 Loader **全部在 `three/examples/jsm/loaders/` 里**（three 已是本仓库依赖），
+ * 所以 FBX 之类不需要另找"专用解码器"。
+ *
+ * 关键决策与代价（照 OFV 的形态，实现重写）：
  * - `three` 按需 `import()`：只有真打开模型文件才会拉这份 chunk；
  * - 贴图 / .bin 附件从**知识库内同目录**读（`ctx.readSibling`），预先转成 data URL，
  *   再交给 `LoadingManager.setURLModifier` 映射（three 的 FileLoader 只走 XHR，不能回调异步）；
  * - 灯光用固定两灯 + 环境光，不引 HDR 资源（那要从网上下）；
- * - FBX/DAE/3DS/USDZ/3MF/VRML/AMF 用 **three.js 自带的 Loader** 按需加载
- *   （OFV 同款做法——这些 Loader 就在 three/examples/jsm/loaders/ 里）。
+ * - WebGL 创建失败**不抛**，退化成诚实卡片（OFV 的 `try/catch → renderModelFallback`）。
  */
 import type { PreviewContext, PreviewInstance, PreviewTool } from "../registry";
 
@@ -37,65 +55,62 @@ export const MODEL_EXTENSIONS = [
 
 const GLB_MAGIC = "glTF";
 
-/** 认得出、但不做渲染的重格式：明确告知而不是空白画布。 */
-export const MODEL_NOT_RENDERABLE = new Set(["fbx", "dae", "3ds", "usd", "usda", "usdc", "usdz", "3mf", "amf"]);
+/**
+ * WebGL 不可用时的诚实卡片。
+ *
+ * 形态照 OFV `renderModelFallback`（粗体标题 + 说明行）；**桌面适配**（③）：OFV 在网页里
+ * 放一个「下载文件」链接，桌面版的对应物是头部已有的「默认应用打开」，所以这里换成
+ * **系统预览图**（macOS Quick Look 能渲染 3D）——比一行文字有用，且标明来源不误导。
+ */
+async function renderFallback(ctx: PreviewContext, wrap: HTMLElement, message: string): Promise<PreviewInstance> {
+  const panel = document.createElement("div");
+  panel.className = "kb-model3d-fallback";
+  const detail = document.createElement("p");
+  detail.className = "kb-note";
+  detail.textContent = `${message}（${ctx.name}）`;
+  panel.appendChild(Object.assign(document.createElement("strong"), { textContent: "3D 预览不可用" }));
+  panel.appendChild(detail);
+  wrap.appendChild(panel);
 
-async function renderModel(ctx: PreviewContext): Promise<PreviewInstance> {
-  const wrap = document.createElement("div");
-  wrap.className = "kb-model3d";
-  ctx.container.replaceChildren(wrap);
-
-  // ① 不支持的模式先拦（放 WebGL 创建之前：不需要 WebGL 的格式不付上下文创建的代价；
-  //    且 jsdom 里 WebGL 必然失败，先后顺序反了的话诚实卡片永远出不来——测试抓到过）
-  if (MODEL_NOT_RENDERABLE.has(ctx.ext)) {
-    wrap.appendChild(
-      Object.assign(document.createElement("p"), {
-        className: "kb-note kb-model3d-note",
-        textContent: `${ctx.ext.toUpperCase()} 需要专用解码器（本期不做，避免半成品渲染误导），请用「默认应用打开」。`,
-      }),
-    );
-    ctx.onInfo?.(`不支持直接渲染（${ctx.ext.toUpperCase()} 需要专用解码器）`);
+  const bytes = await ctx.systemThumbnail?.();
+  if (!bytes) {
+    ctx.onInfo?.("无 WebGL（当前设备不支持）");
     return {};
   }
+  const url = URL.createObjectURL(new Blob([bytes], { type: "image/png" }));
+  const img = document.createElement("img");
+  img.className = "kb-model3d-poster";
+  img.alt = ctx.name;
+  img.src = url;
+  panel.insertBefore(img, detail);
+  detail.textContent = `${message} —— 上图为系统生成的预览图`;
+  ctx.onInfo?.("无 WebGL · 显示系统预览图");
+  return { destroy: () => URL.revokeObjectURL(url) };
+}
 
-  const bytes = await ctx.readBytes();
+/** 解析模型所需的最小文件信息（与 `PreviewContext` 的交集，便于单测直接调用）。 */
+export interface ModelSource {
+  ext: string;
+  /** 相对知识库根的路径 —— 用于把模型里引用的相对 uri 解析成同目录文件。 */
+  rel: string;
+  /** 读同目录附件（贴图 / .bin）；缺失时退化为"不带贴图渲染"。 */
+  readSibling?: (rel: string) => Promise<Uint8Array>;
+}
+
+/**
+ * 打开一份 3D 数据：按扩展名选 three.js 自带 Loader，返回对象树。
+ *
+ * 与渲染**分离**（不碰 WebGL / DOM），所以 jsdom 里也能真跑一遍解析 ——
+ * "loader 接通了没有"这件事必须有测试证据，不能只看类型检查通过。
+ */
+export async function parseModel(source: ModelSource, bytes: Uint8Array): Promise<import("three").Object3D> {
   const THREE = await import("three");
-  const { OrbitControls } = await import("three/examples/jsm/controls/OrbitControls.js");
-
-  const stage = document.createElement("div");
-  stage.className = "kb-model3d-stage";
-  wrap.appendChild(stage);
-
-  // ② WebGL 降级（照 OFV 的口径：创建失败给诚实提示，不抛出去白屏）
-  let renderer: import("three").WebGLRenderer;
-  try {
-    renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
-  } catch {
-    wrap.appendChild(Object.assign(document.createElement("p"), { className: "kb-note", textContent: "当前浏览器或设备不支持 WebGL，无法直接渲染 3D 模型。" }));
-    ctx.container.replaceChildren(wrap);
-    ctx.onInfo?.("无 WebGL（当前浏览器/设备不支持）");
-    return {};
-  }
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-  stage.appendChild(renderer.domElement);
-
-  const scene = new THREE.Scene();
-  const camera = new THREE.PerspectiveCamera(45, 1, 0.01, 5000);
-  camera.position.set(2, 2, 3);
-  scene.add(new THREE.AmbientLight(0xffffff, 1.6));
-  const key = new THREE.DirectionalLight(0xffffff, 1.8);
-  key.position.set(3, 5, 4);
-  scene.add(key);
-
-  const controls = new OrbitControls(camera, renderer.domElement);
-  controls.enableDamping = true;
-
-  // glTF 里的相对 uri（贴图、.bin）→ 知识库同目录文件 → data URL（离线关键点）
+  const dir = source.rel.includes("/") ? source.rel.slice(0, source.rel.lastIndexOf("/") + 1) : "";
+  // 模型里引用的相对 uri（贴图、.bin）→ 知识库同目录文件 → data URL（离线关键点）。
+  // three 的 FileLoader 只会走 XHR/fetch、不能异步回调 —— 所以策略是**先预读附件成
+  // data URL，再解析模型**；这里只做一次查表映射。
   const preloaded = new Map<string, string>();
   const manager = new THREE.LoadingManager();
-  const dir = ctx.rel.includes("/") ? ctx.rel.slice(0, ctx.rel.lastIndexOf("/") + 1) : "";
-  // three 的 FileLoader 只会走 XHR/fetch，不能异步回调 —— 所以策略是
-  // **先预读附件成 data URL，再解析模型**；这里只做一次查表映射。
   manager.setURLModifier((url) => {
     if (url.startsWith("blob:") || url.startsWith("data:")) return url;
     const rel = decodeURIComponent(url.startsWith("kb://") ? url.slice(5) : `${dir}${url}`);
@@ -113,9 +128,9 @@ async function renderModel(ctx: PreviewContext): Promise<PreviewInstance> {
           const rel = decodeURIComponent(value.startsWith("kb://") ? value.slice(5) : `${dir}${value}`);
           jobs.push(
             (async () => {
-              if (!ctx.readSibling) return;
+              if (!source.readSibling) return;
               try {
-                const data = await ctx.readSibling(rel);
+                const data = await source.readSibling(rel);
                 preloaded.set(rel, await blobToDataUrl(new Blob([data])));
               } catch {
                 /* 缺失的附件不阻断主体渲染 */
@@ -132,13 +147,8 @@ async function renderModel(ctx: PreviewContext): Promise<PreviewInstance> {
   }
 
   const buffer = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
-  let mesh: import("three").Object3D | null = null;
-  let triangleCount = 0;
-
-  // 统一加载策略：全格式走 three.js 自带 Loader（OFV 同款），按需 import()
-  // 坐标系统一由下面的 autoFrame 处理，loader 之间无差异。
   const material = () => new THREE.MeshStandardMaterial({ color: 0x9aa4b2, metalness: 0.1, roughness: 0.7 });
-  switch (ctx.ext) {
+  switch (source.ext) {
     case "gltf":
     case "glb": {
       const { GLTFLoader } = await import("three/examples/jsm/loaders/GLTFLoader.js");
@@ -146,78 +156,104 @@ async function renderModel(ctx: PreviewContext): Promise<PreviewInstance> {
       if (!isBinary) {
         try { await preloadGltf(JSON.parse(new TextDecoder().decode(bytes))); } catch { /* 坏 JSON 交给 loader */ }
       }
-      const loader = new GLTFLoader(manager);
-      const gltf = await loader.parseAsync(buffer, "");
-      mesh = gltf.scene;
-      break;
+      const gltf = await new GLTFLoader(manager).parseAsync(buffer, "");
+      return gltf.scene;
     }
-    case "obj": {
-      const { OBJLoader } = await import("three/examples/jsm/loaders/OBJLoader.js");
-      mesh = new OBJLoader(manager).parse(new TextDecoder().decode(bytes));
-      break;
-    }
+    case "obj":
+      return new (await import("three/examples/jsm/loaders/OBJLoader.js")).OBJLoader(manager).parse(
+        new TextDecoder().decode(bytes),
+      );
     case "stl": {
-      const { STLLoader } = await import("three/examples/jsm/loaders/STLLoader.js");
-      const geometry = new STLLoader().parse(buffer);
+      const geometry = new (await import("three/examples/jsm/loaders/STLLoader.js")).STLLoader().parse(buffer);
       geometry.computeVertexNormals();
-      mesh = new THREE.Mesh(geometry, material());
-      break;
+      return new THREE.Mesh(geometry, material());
     }
     case "ply": {
-      const { PLYLoader } = await import("three/examples/jsm/loaders/PLYLoader.js");
-      const geometry = new PLYLoader().parse(buffer);
+      const geometry = new (await import("three/examples/jsm/loaders/PLYLoader.js")).PLYLoader().parse(buffer);
       geometry.computeVertexNormals();
-      mesh = new THREE.Mesh(geometry, material());
-      break;
+      return new THREE.Mesh(geometry, material());
     }
-    case "fbx": {
-      const { FBXLoader } = await import("three/examples/jsm/loaders/FBXLoader.js");
-      mesh = new FBXLoader(manager).parse(buffer, "");
-      break;
-    }
+    case "fbx":
+      return new (await import("three/examples/jsm/loaders/FBXLoader.js")).FBXLoader(manager).parse(buffer, "");
     case "dae": {
       const { ColladaLoader } = await import("three/examples/jsm/loaders/ColladaLoader.js");
-      const collada = new ColladaLoader(manager).parse(new TextDecoder().decode(bytes), "");
-      mesh = collada?.scene ?? new THREE.Group();
-      break;
+      // 坏文件时 ColladaLoader 返回 null（不是抛错）——给空组，交给上面的"没有几何体"分支
+      return new ColladaLoader(manager).parse(new TextDecoder().decode(bytes), "")?.scene ?? new THREE.Group();
     }
-    case "3ds": {
-      const { TDSLoader } = await import("three/examples/jsm/loaders/TDSLoader.js");
-      mesh = new TDSLoader(manager).parse(buffer, "");
-      break;
-    }
-    case "3mf": {
-      const { ThreeMFLoader } = await import("three/examples/jsm/loaders/3MFLoader.js");
-      mesh = new ThreeMFLoader(manager).parse(buffer);
-      break;
-    }
-    case "amf": {
-      const { AMFLoader } = await import("three/examples/jsm/loaders/AMFLoader.js");
-      mesh = new AMFLoader(manager).parse(buffer);
-      break;
-    }
+    case "3ds":
+      return new (await import("three/examples/jsm/loaders/TDSLoader.js")).TDSLoader(manager).parse(buffer, "");
+    case "3mf":
+      return new (await import("three/examples/jsm/loaders/3MFLoader.js")).ThreeMFLoader(manager).parse(buffer);
+    case "amf":
+      return new (await import("three/examples/jsm/loaders/AMFLoader.js")).AMFLoader(manager).parse(buffer);
     case "usd":
     case "usda":
     case "usdc":
-    case "usdz": {
-      const { USDLoader } = await import("three/examples/jsm/loaders/USDLoader.js");
-      mesh = new USDLoader(manager).parse(buffer, "");
-      break;
-    }
-    default: {
-      // vrml / wrl
-      const { VRMLLoader } = await import("three/examples/jsm/loaders/VRMLLoader.js");
-      mesh = new VRMLLoader(manager).parse(new TextDecoder().decode(bytes), "");
-    }
+    case "usdz":
+      return new (await import("three/examples/jsm/loaders/USDLoader.js")).USDLoader(manager).parse(buffer, "");
+    case "vrml":
+    case "wrl":
+      return new (await import("three/examples/jsm/loaders/VRMLLoader.js")).VRMLLoader(manager).parse(
+        new TextDecoder().decode(bytes),
+        "",
+      );
+    default:
+      // 注册表只把 MODEL_EXTENSIONS 里的扩展名路由到这里，走到 default 说明两处不同步
+      throw new Error(`没有可用的 3D 解码器：.${source.ext}`);
   }
+}
 
-  scene.add(mesh);
+async function renderModel(ctx: PreviewContext): Promise<PreviewInstance> {
+  const wrap = document.createElement("div");
+  wrap.className = "kb-model3d";
+  ctx.container.replaceChildren(wrap);
+
+  const stage = document.createElement("div");
+  stage.className = "kb-model3d-stage";
+  wrap.appendChild(stage);
+
+  const bytes = await ctx.readBytes();
+  const THREE = await import("three");
+  const { OrbitControls } = await import("three/examples/jsm/controls/OrbitControls.js");
+
+  // WebGL 降级（照 OFV 的口径：创建失败不抛出去白屏，给诚实卡片 + 系统预览图）。
+  // 放在解析之前：WebGL 都没有，就不必再解析一遍模型。
+  let renderer: import("three").WebGLRenderer;
+  try {
+    renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+  } catch {
+    stage.remove();
+    return renderFallback(ctx, wrap, "当前设备不支持 WebGL，无法直接渲染 3D 模型。");
+  }
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  stage.appendChild(renderer.domElement);
+
+  const scene = new THREE.Scene();
+  const camera = new THREE.PerspectiveCamera(45, 1, 0.01, 5000);
+  camera.position.set(2, 2, 3);
+  scene.add(new THREE.AmbientLight(0xffffff, 1.6));
+  const key = new THREE.DirectionalLight(0xffffff, 1.8);
+  key.position.set(3, 5, 4);
+  scene.add(key);
+
+  const controls = new OrbitControls(camera, renderer.domElement);
+  controls.enableDamping = true;
+
+  const mesh = await parseModel(ctx, bytes);
+  let triangleCount = 0;
   mesh.traverse((child) => {
     const asMesh = child as import("three").Mesh;
     const index = asMesh.geometry?.index;
     if (index) triangleCount += index.count / 3;
     else if (asMesh.geometry?.attributes?.position) triangleCount += asMesh.geometry.attributes.position.count / 3;
   });
+  // 解析成功但一个面都没有（空模型 / 格式不完整）：别给一块空白画布
+  if (!triangleCount) {
+    stage.remove();
+    return renderFallback(ctx, wrap, "没能从这个文件里读出几何体（模型可能为空，或格式不完整）。");
+  }
+
+  scene.add(mesh);
 
   // 自动取景：把模型装进相机（模型单位差异极大，写死距离必翻车）
   const box = new THREE.Box3().setFromObject(mesh);

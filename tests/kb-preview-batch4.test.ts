@@ -32,6 +32,7 @@ function makeCtx(partial: Partial<PreviewContext> & { ext: string }): PreviewCon
     onSection: partial.onSection,
     onInfo: partial.onInfo,
     onBasemap: partial.onBasemap,
+    systemThumbnail: partial.systemThumbnail,
   } as PreviewContext;
 }
 
@@ -317,12 +318,28 @@ ENDSEC`.split("\n"),
   });
 });
 
-describe("3D：不做的东西给诚实卡片", () => {
-  it("FBX/USDZ 这类没有解码器的格式不出空白画布", async () => {
+describe("3D：WebGL 用不了时给诚实卡片（照 OFV 的降级口径）", () => {
+  it("不出空白画布：说明当前设备不支持，并带上文件名", async () => {
+    // 注：解析本身由 tests/kb-model3d-loaders.test.ts 逐格式真跑；
+    // 这里守的是"没有 WebGL 时退化成什么"——jsdom 恰好就是这种环境。
     const { model3dPlugin } = await import("../src/knowledge/preview/plugins/model3d");
     const ctx = makeCtx({ ext: "usdz", readBytes: async () => new Uint8Array([0x50, 0x4b]) });
     await model3dPlugin.render(ctx);
-    expect(ctx.container.textContent).toContain("默认应用打开");
+    expect(ctx.container.textContent).toContain("3D 预览不可用");
+    expect(ctx.container.textContent).toContain("WebGL");
+    expect(ctx.container.textContent).toContain("a.usdz");
+  });
+
+  it("系统能给预览图时贴出来（桌面适配：OFV 在网页里放的是「下载文件」链接）", async () => {
+    const { model3dPlugin } = await import("../src/knowledge/preview/plugins/model3d");
+    const ctx = makeCtx({
+      ext: "usdz",
+      readBytes: async () => new Uint8Array([0x50, 0x4b]),
+      systemThumbnail: async () => new Uint8Array([0x89, 0x50, 0x4e, 0x47]),
+    });
+    await model3dPlugin.render(ctx);
+    expect(ctx.container.querySelector("img")?.src).toMatch(/^blob:/);
+    expect(ctx.container.textContent).toContain("系统生成的预览图");
   });
 });
 

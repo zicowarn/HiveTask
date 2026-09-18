@@ -23,7 +23,7 @@
 | 13 | `audio` | 19 种（`mp3/wav/flac/m4a/aac/ogg/opus/…`） | `audio` | 原生 `<audio>` + 本地 blob；**能否播放取决于 WebView 解码器** —— 解不了时用**系统预览图（Quick Look）**兜底（见 §4.6） |
 | 14 | `video` | 17 种（`mp4/webm/mov/mkv/avi/m3u8/…`） | `video` | 原生 `<video>` + 本地 blob；`m3u8` 走 hls.js **自定义 kb:// loader**（分片必须在知识库内）；解不了的编码同上，用系统预览图兜底 |
 | 15 | `lrc` | `lrc` | `lrc` | **自研**：时间标签 + 元信息标签解析（纯净/带时间两种视图） |
-| 16 | `model3d` | `gltf` `glb` `obj` `stl` `ply` `vrml` `wrl`（`fbx/dae/3ds/usd*/3mf/amf` 明示不支持） | `model3d` | three + OrbitControls；贴图/`.bin` 从同根预读成 data URL |
+| 16 | `model3d` | `gltf` `glb` `obj` `stl` `ply` `fbx` `dae` `3ds` `usd/usda/usdc/usdz` `3mf` `amf` `vrml` `wrl` | `model3d` | three + OrbitControls；**全格式走 three 自带 Loader**；贴图/`.bin` 从同根预读成 data URL |
 | 17 | `cad` | `dxf` `dwg` | `cad` + `cad-dwg` | **DXF 自研解析**（LINE/CIRCLE/ARC/ELLIPSE/多段线/**SPLINE（NURBS，de Boor）**/HATCH 边界/DIMENSION/文字；含 `$DWGCODEPAGE` 中文解码）→ SVG；**DWG** 用 libredwg wasm → SVG |
 | 18 | `gis` | `geojson` `topojson` `kml` `kmz` `gpx` `shp` | `gis` | leaflet；**底图默认关闭**，矢量要素本地绘制 |
 | 19 | `odfText` | `odt` `ott` `fodt` | `oasis-binary` | **自研**：`content.xml` → 标题（带层级，产出大纲）/ 段落 / 列表 / 表格 |
@@ -86,6 +86,7 @@
 | `archive` 的 gzip 系 | `archive` | ✅ **本轮补齐**：gz/tgz（pako 解压 + tar 条目解析）；此前只声明未实现 |
 | `detect` / `viewer` / `fallback` / `utils` | 预览注册表 + 「暂不支持」卡片 | ✅ 等价（我们有双路判定与按需加载） |
 | `xmind` | `xmind` | ✅ **新旧都支持**：新版 `content.json` + 旧版（XMind 8 及以前）`content.xml` |
+| **`model3d` 的全部格式**（FBX / DAE / 3DS / USD* / 3MF / VRML） | `model3d` | ✅ **本轮补齐**。此前的"FBX 需要专用解码器、本期不做"是**错的**：OFV 用的就是 `three/examples/jsm/loaders/` 里那几个 Loader（`FBXLoader` / `ColladaLoader` / `TDSLoader` / `USDLoader` / `ThreeMFLoader` / `VRMLLoader`），而 three 已是我们的依赖。我们另多支持 `AMFLoader`（OFV 没有，代价为零）。每个扩展名都有真样本 + 解析测试（`tests/kb-model3d-loaders.test.ts`） |
 | **`image` 的三种特殊位图**（PSD / HEIC / TIFF） | — | ❌ **未做**（需 ag-psd / heic2any / utif 三个依赖；常见位图与 SVG 已支持） |
 | **`drawing`**（EMF / WMF 矢量图元） | — | ❌ **未做**（需 emf-converter 转 SVG） |
 | **`asset`**（字体/未知二进制元信息，OFV 3258 行） | — | ❌ **未做**（TTF/OTF 元信息卡，收益低） |
@@ -127,6 +128,21 @@ VS Code 有「Reopen with Encoding」（只改解读）与「Save with Encoding�
 实现要点：`kb_read_text` 支持强制编码（`read_text_in_forced`）；write 复用 `kb_write_text`
 （新文件传 `expectedMtimeMs: null` 跳过 mtime 守卫）。文本类内容一律走 `ctx.readText`
 ——csv/tsv 也算（见 §5 与 `tests/kb-preview-sheet-encoding.test.ts`）。
+
+## 4.8 运行时能力探测：WebGL / canvas / IntersectionObserver（OFV 怎么做的，我们照抄）
+
+三个"引擎里可能没有"的能力，OFV 各有明确做法（源码逐处取证，路径相对 OFV 仓库根）：
+
+| 能力 | OFV 的做法（取证） | 我们 |
+|---|---|---|
+| **WebGL** | `packages/core/src/plugins/model3d.ts`：`try { renderer = new THREE.WebGLRenderer({ antialias: true }) } catch { stage.remove(); return renderModelFallback(ctx, url, isExternal, "当前浏览器或设备不支持 WebGL…") }`。`renderModelFallback` 给的是**诚实面板**（粗体标题「3D 预览不可用」+ 说明行 + 下载链接），不是空白画布 | 同样 `try/catch`（本轮之前就照抄了）。卡片形态按桌面改：OFV 在网页里放「下载文件」，桌面版的对应物是头部已有的**「默认应用打开」**，所以这里换成**系统预览图**（Quick Look 能渲染 3D）—— ③适配，已标注 |
+| **Canvas 2D** | `plugins/pdf.ts`：`const context = canvas.getContext("2d"); if (!context) throw new Error("Canvas 2D context is not available.");` —— 抛出后由外层 `try/catch` 记错误并在该页显示「渲染失败」，不影响整篇 | 同一口径：`if (!context) throw new Error("无法创建画布上下文")` → 该页显示错误文本 + `pdf-page-error` 类 |
+| **IntersectionObserver** | `plugins/pdf.ts`：`if (typeof IntersectionObserver !== "undefined") { observer = new IntersectionObserver(...) }`；没有观测器就**逐页立即渲染**（`if (observer) observer.observe(wrapper); else void renderPage(i, size);`），并在 `destroy` 里用 `observer?.disconnect()` | **本轮照抄**：`typeof IntersectionObserver === "undefined"` 时全部立即渲染，销毁用 `observer?.disconnect()`。此前没探测 —— jsdom / 老引擎里直接 `ReferenceError`，整个 PDF 打不开 |
+| **Promise.withResolvers** | 同一文件里 `shouldUseLegacyPdfCompatibility()` 检测并 `installPromiseWithResolversPolyfill()` 打补丁 | 我们用 pdfjs 的 **legacy 构建**（自带 core-js polyfill，把 `Iterator` 等一并补上）—— 同一个问题的另一种解法，结论一致：**不能假设新全局存在**（见 AGENTS.md 的 WKWebView 约束） |
+
+另查了 OFV 里 `OffscreenCanvas` / `Worker` 构造 / `navigator.gpu` 的用法：**没有**（它不靠这些）。
+我们全仓库扫了一遍同类全局，只有 `ResizeObserver`（CAD/3D/office 用）与 `matchMedia`（主题用），
+两者在 WKWebView 与 jsdom（测试里已 stub）都有确定行为。
 
 ## 5. 已知边界（不做的部分，逐条明示）
 
