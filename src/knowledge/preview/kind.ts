@@ -36,6 +36,9 @@ export const MARKDOWN_EXT = new Set(["md", "markdown", "mdx"]);
 export function previewKind(ext: string, hasTextFallback = false): PreviewKind {
   if (MARKDOWN_EXT.has(ext)) return "markdown";
   if (IMAGE_EXT.has(ext)) return "image";
+  // 代码扩展名（CM6 语言表覆盖的）走可编辑代码视图 —— **注册表认领了也一样**：
+  // text 插件的 Prism 只读渲染已被 CM6 编辑器取代（用户实测：高亮无色、且不可编辑）。
+  if (CODE_EXT.has(ext)) return "text";
   if (hasTextFallback) return "text";
   return "other";
 }
@@ -51,6 +54,16 @@ export function previewKind(ext: string, hasTextFallback = false): PreviewKind {
  */
 const BINARY_REPLACEMENT_RATIO = 0.05;
 const BINARY_REPLACEMENT_MIN = 4;
+
+/**
+ * 代码扩展名集合：来自 CodeEditor 的语言表（CM6 语言包覆盖面）。
+ * 延迟 import 会造成循环依赖，这里静态列一份并注明与 code-languages.ts 同步维护。
+ */
+const CODE_EXT = new Set([
+  "js", "mjs", "cjs", "jsx", "ts", "mts", "cts", "tsx",
+  "json", "json5", "css", "scss", "less", "html", "htm", "vue", "xml",
+  "py", "pyw", "rs", "c", "h", "cpp", "cc", "cxx", "hpp", "java",
+]);
 
 export function looksLikeText(sample: string): boolean {
   if (sample.includes("\u0000")) return false;

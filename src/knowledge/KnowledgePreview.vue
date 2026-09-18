@@ -20,6 +20,9 @@ import SplitPane from "../workbench/SplitPane.vue";
 import KnowledgeOutline from "./KnowledgeOutline.vue";
 import KnowledgeFindBar from "./KnowledgeFindBar.vue";
 import KnowledgeConvertDialog from "./KnowledgeConvertDialog.vue";
+import DrawToolbar from "./draw/DrawToolbar.vue";
+import { drawSession, resetDrawSession } from "./draw/session";
+import { toBase64, editedFileName, editedRelPath } from "./editor/assets";
 import { activeOutlineIndex, type OutlineItem } from "./editor/outline";
 import { EDITOR_COMMAND_GROUPS } from "../components/markdown-tools";
 import { CONTEXT_MENU_GROUPS } from "./editor/commands";
@@ -43,17 +46,14 @@ import { openPathWithConfiguredApp, revealPath } from "./open-path";
 
 const props = defineProps<{ reloadTick?: number }>();
 
-const emit = defineEmits<{
-  /** 面包屑点击：在文件树中展开并定位到该路径（目录或文件）。 */
-  "reveal-in-tree": [rel: string];
-}>();
-
 /**
  * 编辑器按需加载：CM6 + KaTeX + Mermaid 合计约 1MB（未压缩），
  * 静态引入会把它们塞进启动包——不打开 Markdown 的用户不该付这份代价。
  */
 const MarkdownEditor = defineAsyncComponent(() => import("./editor/MarkdownEditor.vue"));
 const CodeEditor = defineAsyncComponent(() => import("./editor/CodeEditor.vue"));
+/** 图片编辑画布：按需加载（绘图只在编辑态挂载）。 */
+const DrawCanvas = defineAsyncComponent(() => import("./draw/DrawCanvas.vue"));
 
 const store = useKnowledgeStore();
 const { t } = useI18n();
@@ -68,7 +68,10 @@ const text = ref<KbText | null>(null);
 /** Markdown 编辑缓冲：CM6 的文档即源文本；改动先落这里，保存走 ⌘S（T7）。 */
 const mdDraft = ref("");
 const mdDirty = ref(false);
-const codeEditorRef = ref<{ setText: (value: string) => void } | null>(null);
+const codeEditorRef = ref<{
+  setText: (value: string) => void;
+  runAction: (action: string) => void;
+} | null>(null);
 const saving = ref(false);
 /** 磁盘上的文件已被外部改动（保存时 mtime 不符）——弹冲突条让用户选，而不是只丢一句错误。 */
 const conflict = ref(false);
@@ -79,6 +82,23 @@ const imageUrl = ref<string | null>(null);
 /** 没有内置渲染器时，用系统生成的预览图兜底（Quick Look；拿不到就不显示）。 */
 const systemPosterUrl = ref<string | null>(null);
 
+// ---- 图片编辑（T14）：编辑态嵌在预览面板里，头部工具条 = 绘图版「功能操作栏」----
+const imageEditing = ref(false);
+const imageSaving = ref(false);
+/** 保存时 mtime 不符（外部改过原图）→ 冲突条，与文本保存同一语法。 */
+const imageConflict = ref(false);
+/** 编辑锁：进入编辑时记下文件与根；期间 load() 早退（画面归画布管）。 */
+const editingRel = ref<string | null>(null);
+const editingRoot = ref<string | null>(null);
+/** 进入编辑时的原图 mtime（覆盖保存的守卫基准）。 */
+let imageMtime: number | null = null;
+const drawRef = ref<{
+  zoom: (action: "in" | "out" | "fit") => void;
+  undo: () => void;
+  redo: () => void;
+  exportBlob: () => Promise<Blob>;
+} | null>(null);
+
 /**
  * 当前编码（头部按钮与菜单打勾都用它）。
  *
@@ -88,24 +108,6 @@ const systemPosterUrl = ref<string | null>(null);
  */
 const currentEncoding = computed(() => store.activeText?.encoding ?? "");
 
-/**
- * 面包屑：把 rel 拆成「目录 › 子目录 › 文件名」，每段可点。
- * 点击 = 在文件树中展开定位到该段（复用既有 reveal-in-tree 通道，页签右键同款）。
- */
-const breadcrumbSegments = computed(() => {
-  const target = rel.value;
-  if (!target) return [];
-  const parts = target.split("/");
-  const segments: { name: string; path: string; isFile: boolean }[] = [];
-  for (let i = 0; i < parts.length; i += 1) {
-    segments.push({
-      name: parts[i],
-      path: parts.slice(0, i + 1).join("/"),
-      isFile: i === parts.length - 1,
-    });
-  }
-  return segments;
-});
 /** 标签把 BOM 折进来（VS Code 的 "UTF-8 with BOM" 同义），省掉一个重复 chip。 */
 const encodingLabel = computed(() => {
   const encoding = currentEncoding.value;
@@ -403,6 +405,25 @@ function openContextMenu(payload: { x: number; y: number }): void {
 }
 
 const contextItems = computed<ActionItem[]>(() => {
+  // 代码文件：Markdown 排版命令（加粗/标题/表格…）对代码无意义。
+  // 给编辑通用项（撤销/重做）+ 行操作 + 注释 + 文件动作（形态照 VS Code 的编辑器右键菜单）。
+  if (kind.value === "text") {
+    const codeItems: ActionItem[] = [
+      { value: "code:undo", label: t("md.undo"), badge: "⌘Z" },
+      { value: "code:redo", label: t("md.redo"), badge: "⇧⌘Z" },
+      { value: "code:cut", label: t("code.cut"), badge: "⌘X" },
+      { value: "code:copy", label: t("code.copy"), badge: "⌘C" },
+      { value: "code:paste", label: t("code.paste"), badge: "⌘V" },
+      { value: "code:copy-line-down", label: t("code.copyLineDown"), badge: "⇧⌥↓", dividerBefore: true },
+      { value: "code:move-line-up", label: t("code.moveLineUp"), badge: "⌥↑" },
+      { value: "code:move-line-down", label: t("code.moveLineDown"), badge: "⌥↓" },
+      { value: "code:delete-line", label: t("code.deleteLine"), dividerBefore: true },
+      { value: "code:toggle-comment", label: t("code.toggleComment"), badge: "⌘/" },
+      { value: "open", label: t("kb.openWithDefault"), icon: "o.link-external", dividerBefore: true },
+      { value: "reveal", label: t("kb.revealInFinder"), icon: "o.file-directory" },
+    ];
+    return codeItems;
+  }
   const commands = CONTEXT_MENU_GROUPS.flatMap((group, index) =>
     group
       .map((key) => commandByKey(key))
@@ -424,6 +445,12 @@ const contextItems = computed<ActionItem[]>(() => {
 });
 
 function onContextPick(value: string): void {
+  // 代码文件的编辑动作：转发给 CodeEditor（内部为 CM6 命令）；文件动作沿用旧路径
+  if (value.startsWith("code:")) {
+    codeEditorRef.value?.runAction(value.slice(5) as never);
+    contextMenu.value = null;
+    return;
+  }
   const command = commandByKey(value);
   if (command) {
     editorRef.value?.runCommand(command as never);
@@ -748,6 +775,22 @@ watch(
 );
 
 function onKeydown(event: KeyboardEvent): void {
+  const mod = event.metaKey || event.ctrlKey;
+  if (imageEditing.value) {
+    // 编辑态的快捷键（窗口级：焦点在工具条按钮上也生效）
+    const key = event.key.toLowerCase();
+    if (mod && key === "s") {
+      event.preventDefault();
+      void saveImageEdit();
+    } else if (mod && key === "z") {
+      event.preventDefault();
+      if (event.shiftKey) drawRef.value?.redo();
+      else drawRef.value?.undo();
+    } else if (event.key === "Escape") {
+      void cancelImageEdit();
+    }
+    return;
+  }
   if (!(event.metaKey || event.ctrlKey) || event.key.toLowerCase() !== "s") return;
   // Markdown 与代码文件共用同一条保存链路（kbWriteText + 冲突检测）
   if (kind.value !== "markdown" && kind.value !== "text") return;
@@ -756,6 +799,8 @@ function onKeydown(event: KeyboardEvent): void {
 }
 
 async function load(): Promise<void> {
+  // 编辑态锁定画面：切文件的放行权在 rel watcher 的「放弃确认」里
+  if (imageEditing.value) return;
   releaseImage();
   releaseSystemPoster();
   previewInstance?.destroy?.();
@@ -823,16 +868,31 @@ async function load(): Promise<void> {
 
 defineExpose({ setViewMode });
 
-watch(
-  rel,
-  (_next, previous) => {
-    // 切走前落一次缓冲（编辑器即将重挂载，草稿只在组件里）
-    const meta = text.value;
-    if (previous && meta && store.buffers[previous]) {
-      store.setBuffer(previous, { text: mdDraft.value, meta, dirty: mdDirty.value });
+watch([rel, () => store.root], async ([nextRel, nextRoot], [prevRel]) => {
+  // 切走前落一次缓冲（编辑器即将重挂载，草稿只在组件里）
+  const meta = text.value;
+  if (prevRel && meta && store.buffers[prevRel]) {
+    store.setBuffer(prevRel, { text: mdDraft.value, meta, dirty: mdDirty.value });
+  }
+  // 图片编辑锁：切到别的文件/根之前，有未保存修改先确认放弃
+  if (imageEditing.value && (nextRel !== editingRel.value || nextRoot !== editingRoot.value)) {
+    let proceed = true;
+    if (drawSession.dirty) {
+      proceed = await confirmAction(t("kb.drawDiscardConfirm"), {
+        title: t("kb.editImage"),
+        okLabel: t("kb.drawDiscardOk"),
+        cancelLabel: t("common.cancel"),
+      });
     }
-  },
-);
+    if (!proceed) {
+      // 留在原文件继续编辑：把选择拨回去（load() 在编辑态早退，画面不动）
+      if (nextRoot === editingRoot.value && prevRel) store.openFile(prevRel);
+      return;
+    }
+    imageEditing.value = false;
+    await load();
+  }
+});
 
 watch([rel, () => store.root, () => props.reloadTick], () => void load(), { immediate: true });
 onMounted(() => window.addEventListener("keydown", onKeydown));
@@ -872,6 +932,117 @@ function imageViewport(): Size {
   return { width: rect.width, height: rect.height };
 }
 
+// ---- 图片编辑：进入 / 退出 / 保存（P0 链路）----
+
+/** 进入编辑：记住原图 mtime（覆盖守卫基准），复位会话后挂载画布。 */
+async function startImageEdit(): Promise<void> {
+  const base = store.root;
+  const target = rel.value;
+  if (!base || !target || !isTauri() || !imageUrl.value) return;
+  try {
+    const stat = await api.kbStat(base, target);
+    imageMtime = stat.exists ? stat.mtimeMs : null;
+  } catch {
+    imageMtime = null;
+  }
+  editingRel.value = target;
+  editingRoot.value = base;
+  resetDrawSession(drawSession);
+  imageConflict.value = false;
+  imageEditing.value = true;
+}
+
+/** 退出编辑（有未保存修改先确认——confirmAction，WKWebView 里 confirm() 是坏的）。 */
+async function cancelImageEdit(): Promise<void> {
+  if (drawSession.dirty) {
+    const ok = await confirmAction(t("kb.drawDiscardConfirm"), {
+      title: t("kb.editImage"),
+      okLabel: t("kb.drawDiscardOk"),
+      cancelLabel: t("common.cancel"),
+    });
+    if (!ok) return;
+  }
+  imageEditing.value = false;
+}
+
+/**
+ * 保存编辑：
+ * - **PNG → 覆盖原图**（带 mtime 守卫；外部改过 → 冲突条，不静默覆盖）；
+ * - **非 PNG → 另存为新 PNG**（PNG 字节写进 jpg 容器是错的），原文件不动，打开新文件。
+ */
+async function saveImageEdit(): Promise<void> {
+  const base = store.root;
+  const target = rel.value;
+  if (!base || !target || !drawRef.value || imageSaving.value) return;
+  imageSaving.value = true;
+  try {
+    const blob = await drawRef.value.exportBlob();
+    const b64 = toBase64(new Uint8Array(await blob.arrayBuffer()));
+    if (ext.value === "png") {
+      await api.kbWriteBytes(base, target, b64, imageMtime);
+      imageEditing.value = false;
+      await load();
+      pushToast({ kind: "success", message: t("kb.imageSaved") }, 2500);
+    } else {
+      const now = new Date();
+      let index = 0;
+      let savedRel = "";
+      for (;;) {
+        savedRel = editedRelPath(target, editedFileName(now, index));
+        const existing = await api.kbStat(base, savedRel).catch(() => null);
+        if (!existing?.exists || index > 20) break;
+        index += 1;
+      }
+      await api.kbWriteBytes(base, savedRel, b64);
+      imageEditing.value = false;
+      store.invalidateFileIndex();
+      store.openFile(savedRel);
+      pushToast(
+        { kind: "success", message: t("kb.imageSavedAs", { name: savedRel.split("/").pop() ?? savedRel }) },
+        3000,
+      );
+    }
+  } catch (e) {
+    const message = String(e);
+    if (message.includes("已被外部修改")) imageConflict.value = true;
+    else error.value = message;
+  } finally {
+    imageSaving.value = false;
+  }
+}
+
+/** 冲突处理（图片）：以画布内容强制覆盖（用户已确认）。 */
+async function saveImageForced(): Promise<void> {
+  const base = store.root;
+  const target = rel.value;
+  if (!base || !target || !drawRef.value) return;
+  imageSaving.value = true;
+  try {
+    const blob = await drawRef.value.exportBlob();
+    const b64 = toBase64(new Uint8Array(await blob.arrayBuffer()));
+    await api.kbWriteBytes(base, target, b64, null);
+    imageConflict.value = false;
+    imageEditing.value = false;
+    await load();
+    pushToast({ kind: "success", message: t("kb.imageSaved") }, 2500);
+  } catch (e) {
+    error.value = String(e);
+  } finally {
+    imageSaving.value = false;
+  }
+}
+
+/** 冲突处理（图片）：丢弃画布内容，重新读磁盘。 */
+async function reloadImageFromDisk(): Promise<void> {
+  imageConflict.value = false;
+  imageEditing.value = false;
+  await load();
+}
+
+function onDrawZoom(state: { percent: number; fit: boolean }): void {
+  zoom.value = { percent: state.percent, fit: state.fit, mode: null };
+}
+
 function naturalSize(): Size {
   const el = imageEl.value;
   if (!el) return { width: 0, height: 0 };
@@ -905,6 +1076,11 @@ function toggleBasemap(): void {
 }
 
 function onZoomAction(action: ZoomAction): void {
+  if (imageEditing.value) {
+    // 编辑态：头部缩放控件路由给画布（同一套「适应窗口 = 100%」口径）
+    drawRef.value?.zoom(action === "in" || action === "out" ? action : "fit");
+    return;
+  }
   if (kind.value === "image") {
     if (action === "fit") imageZoom.fit();
     else if (action === "fit-width") imageZoom.fit("width");
@@ -918,6 +1094,28 @@ function onZoomAction(action: ZoomAction): void {
 /** 图片刚加载完：默认「适应窗口」（= 100%），与其它视图类保持一致。 */
 function onImageLoaded(): void {
   imageZoom.fit();
+}
+
+// ---- 查看态平移：抓取拖拽（内容超出视口时，滚动条之外的方式）----
+let imagePan: { x: number; y: number; left: number; top: number } | null = null;
+
+function onImagePanStart(event: PointerEvent): void {
+  if (event.button !== 0) return;
+  const box = bodyEl.value;
+  if (!box) return;
+  imagePan = { x: event.clientX, y: event.clientY, left: box.scrollLeft, top: box.scrollTop };
+  (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
+}
+
+function onImagePanMove(event: PointerEvent): void {
+  const box = bodyEl.value;
+  if (!imagePan || !box) return;
+  box.scrollLeft = imagePan.left - (event.clientX - imagePan.x);
+  box.scrollTop = imagePan.top - (event.clientY - imagePan.y);
+}
+
+function onImagePanEnd(): void {
+  imagePan = null;
 }
 </script>
 
@@ -940,6 +1138,7 @@ function onImageLoaded(): void {
         </button>
         <span v-if="text?.eol === '\r\n'" class="meta chip">CRLF</span>
         <span v-if="(kind === 'markdown' || kind === 'text') && mdDirty" class="meta dirty" :title="t('kb.unsavedTip')">●</span>
+        <span v-if="imageEditing && drawSession.dirty" class="meta dirty" :title="t('kb.unsavedTip')">●</span>
       </div>
       <MarkdownToolbar
         v-if="kind === 'markdown'"
@@ -947,6 +1146,13 @@ function onImageLoaded(): void {
         :groups="EDITOR_COMMAND_GROUPS"
         size="panel"
         @run="runEditorCommand"
+      />
+      <!-- 图片编辑工具条：与 Markdown 工具条同一槽位、同一形态语法 -->
+      <DrawToolbar
+        v-if="imageEditing && kind === 'image'"
+        class="head-toolbar"
+        @undo="drawRef?.undo()"
+        @redo="drawRef?.redo()"
       />
       <div class="head-actions">
         <!-- 只在**确实有结构**时给入口：没有书签/标题的文档点开只会是个空面板 -->
@@ -1030,26 +1236,21 @@ function onImageLoaded(): void {
         >
           {{ basemapOn ? t("kb.basemapOff") : t("kb.basemapOn") }}
         </button>
+        <!-- 图片编辑入口：与主操作同一动作区；编辑态换成 保存 / 取消 -->
+        <button v-if="kind === 'image' && !imageEditing" class="text-btn" @click="startImageEdit">
+          {{ t("kb.editImage") }}
+        </button>
+        <button v-if="imageEditing" class="text-btn primary" :disabled="imageSaving" @click="saveImageEdit">
+          {{ t("common.save") }}
+        </button>
+        <button v-if="imageEditing" class="text-btn" :disabled="imageSaving" @click="cancelImageEdit">
+          {{ t("common.cancel") }}
+        </button>
         <!-- 主操作保持可见（不折叠）：折叠后它在 ⋯ 里只剩一项，反而更差 -->
-        <button class="text-btn" @click="openDefault">{{ t("kb.openWithDefault") }}</button>
+        <button v-if="!imageEditing" class="text-btn" @click="openDefault">{{ t("kb.openWithDefault") }}</button>
       </div>
     </header>
 
-    <!-- 面包屑：路径分段可点，点击在文件树中定位（VS Code 同款交互）。
-         只有一个段（根下文件）时也显示——点击仍可定位，不省略。 -->
-    <nav v-if="rel && breadcrumbSegments.length" class="crumbs" :aria-label="t('kb.crumbsLabel')">
-      <template v-for="(segment, index) in breadcrumbSegments" :key="segment.path">
-        <span v-if="index > 0" class="crumb-sep">›</span>
-        <button
-          class="crumb"
-          :class="{ current: index === breadcrumbSegments.length - 1 }"
-          :title="segment.path"
-          @click="emit('reveal-in-tree', segment.path)"
-        >
-          {{ segment.name }}
-        </button>
-      </template>
-    </nav>
     <div ref="bodyEl" class="preview-body" :class="{ 'editor-active': (kind === 'markdown' || kind === 'text') && !!text }">
       <p v-if="!rel" class="hint">{{ t("kb.noSelection") }}</p>
       <!-- 注意：注册表格式（kind === 'other'）**不能**被加载提示挤出分支链 ——
@@ -1057,14 +1258,34 @@ function onImageLoaded(): void {
            这里放行后由容器的 data-loading 属性显示加载态。 -->
       <p v-else-if="loading && kind !== 'other'" class="hint">{{ t("common.loading") }}</p>
       <p v-else-if="error" class="hint warn">{{ error }}</p>
-      <img
-        v-else-if="kind === 'image' && imageUrl"
-        ref="imageEl"
-        class="image"
+      <!-- 图片编辑画布：先于查看分支（同一时刻只存在一个） -->
+      <DrawCanvas
+        v-else-if="kind === 'image' && imageEditing && imageUrl"
+        ref="drawRef"
+        :key="`draw:${rel ?? ''}`"
         :src="imageUrl"
-        :alt="name"
-        @load="onImageLoaded"
+        class="draw-host"
+        @zoom="onDrawZoom"
+        @error="error = $event"
       />
+      <!-- 图片查看：留白与居中由渲染器自己负责（外层内容区不垫边距的约定）。
+           flex + margin:auto：小图双轴居中；放大超出视口后 auto 归零、由 wrapper 的
+           padding 保底四周间隙（配合 FIT_MARGIN=5% 的缩放比，fit 时恰好四周 5%）；
+           抓取拖拽平移（放大后的第二种滚动方式，与 Preview.app 一致） -->
+      <div v-else-if="kind === 'image' && imageUrl" class="image-wrap">
+        <img
+          ref="imageEl"
+          class="image"
+          :src="imageUrl"
+          :alt="name"
+          draggable="false"
+          @load="onImageLoaded"
+          @pointerdown="onImagePanStart"
+          @pointermove="onImagePanMove"
+          @pointerup="onImagePanEnd"
+          @pointercancel="onImagePanEnd"
+        />
+      </div>
       <!-- 插件预览：容器**始终是同一个 div**，侧栏是它的兄弟节点。
            曾把"有侧栏"和"无侧栏"写成两个 v-if 分支、各绑一次 ref —— 切分支时 Vue 会
            卸载旧 div（插件渲染的页面都在里面）再挂个空的新 div，于是点大纲跳转毫无反应
@@ -1132,12 +1353,17 @@ function onImageLoaded(): void {
         class="code-editor"
         @update:model-value="onCodeInput"
         @cursor="store.setCursor"
+        @contextmenu="openContextMenu"
       />
-      <div v-if="conflict" class="conflict-bar">
+      <div v-if="conflict || imageConflict" class="conflict-bar">
         <EditorIcon name="o.alert" />
         <span class="conflict-text">{{ t("kb.conflictText") }}</span>
-        <button class="text-btn" @click="reloadFromDisk">{{ t("kb.conflictReload") }}</button>
-        <button class="text-btn primary" @click="saveForced">{{ t("kb.conflictOverwrite") }}</button>
+        <button class="text-btn" @click="imageConflict ? reloadImageFromDisk() : reloadFromDisk()">
+          {{ t("kb.conflictReload") }}
+        </button>
+        <button class="text-btn primary" @click="imageConflict ? saveImageForced() : saveForced()">
+          {{ t("kb.conflictOverwrite") }}
+        </button>
       </div>
 
       <div v-if="findOpen" class="find-layer">
@@ -1234,42 +1460,6 @@ function onImageLoaded(): void {
 }
 .zoom-level:hover {
   color: var(--text);
-}
-/* 面包屑：header 下的细条，路径分段可点 */
-.crumbs {
-  display: flex;
-  align-items: center;
-  gap: 2px;
-  flex: none;
-  padding: 3px 16px 2px;
-  border-bottom: 1px solid var(--border);
-  overflow: hidden;
-}
-.crumb {
-  flex: none;
-  max-width: 220px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  padding: 1px 4px;
-  border: none;
-  border-radius: 4px;
-  background: transparent;
-  color: var(--text-dim);
-  font-size: var(--font-sm);
-  cursor: pointer;
-}
-.crumb:hover {
-  color: var(--text);
-  background: var(--bg-hover);
-}
-.crumb.current {
-  color: var(--text);
-}
-.crumb-sep {
-  flex: none;
-  color: var(--text-dim);
-  font-size: var(--font-sm);
 }
 .preview-header {
   display: flex;
@@ -1407,15 +1597,32 @@ function onImageLoaded(): void {
 .hint.warn {
   color: var(--warning);
 }
+/* 图片查看：flex + margin auto 双轴居中；放大超出视口后 margin 归零，
+   由 wrapper 的 16px padding 保底四周间隙（fit 时的 5% 来自缩放比本身） */
+.image-wrap {
+  display: flex;
+  min-height: 100%;
+  padding: 16px;
+}
 .image {
+  margin: auto;
   max-width: 100%;
-  max-height: 100%;
   object-fit: contain;
   display: block;
-  margin: 0 auto;
+  cursor: grab;
+  user-select: none;
+  -webkit-user-drag: none; /* 别让 WKWebView 启动原生图片拖拽 */
+}
+.image:active {
+  cursor: grabbing;
 }
 .code-editor {
   /* 代码编辑器（CM6）：铺满预览区，滚动由 CM6 自己管 */
+  height: 100%;
+  min-height: 0;
+}
+/* 图片编辑画布：铺满预览区，滚动由画布的 stage 自己管 */
+.draw-host {
   height: 100%;
   min-height: 0;
 }

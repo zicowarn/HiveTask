@@ -3,6 +3,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { stubBrowserGlobals } from "./test-support";
 
 beforeEach(() => stubBrowserGlobals());
+const { setLocale } = await import("../src/i18n");
+setLocale("zh-CN");
 const { buildMenuDefs } = await import("../src/menu-defs");
 
 const actions = Object.fromEntries(

@@ -317,10 +317,10 @@ describe("缩放控件", () => {
       ({ width: 400, height: 300, top: 0, left: 0, right: 400, bottom: 300, x: 0, y: 0, toJSON: () => ({}) }) as DOMRect;
     img.dispatchEvent(new Event("load"));
     await nextTick();
-    // 打开即 100%（= 适应窗口）；内容区可用 320×240，图片 800×400 → 宽 320
+    // 打开即 100%（= 适应窗口）；内容区四周留 5% → 可用 360×270，图片 800×400 → 宽 360
     expect(host.querySelector(".zoom-level")!.textContent!.trim()).toBe("100%");
     expect(host.querySelector('[title*="适应窗口"]')).not.toBeNull();
-    expect(parseFloat(img.style.width)).toBeCloseTo(320, 0);
+    expect(parseFloat(img.style.width)).toBeCloseTo(360, 0);
 
     // 位图**不放大**：换成小图（100×50）时不该被拉满屏
     Object.defineProperty(img, "naturalWidth", { value: 100, configurable: true });
@@ -363,7 +363,7 @@ describe("缩放控件", () => {
     files.set("样张.rs", enc("fn main() {}\n"));
     const host = await preview("样张.rs");
     await waitForDom(() => {
-      expect(host.querySelector(".preview-host, pre.code, .kb-code")).not.toBeNull();
+      expect(host.querySelector(".preview-host, pre.code, .kb-code, .kb-code-editor")).not.toBeNull();
     });
     expect(host.querySelector(".zoom-group"), "代码不该有缩放控件").toBeNull();
   });
@@ -391,7 +391,7 @@ describe("查找 / 大纲（插件声明式）", () => {
     files.set("样张2.rs", enc("fn main() {}\n"));
     const host = await preview("样张2.rs");
     await waitForDom(() => {
-      expect(host.querySelector(".preview-host, pre.code, .kb-code")).not.toBeNull();
+      expect(host.querySelector(".preview-host, pre.code, .kb-code, .kb-code-editor")).not.toBeNull();
     });
     expect(host.querySelector('[title*="大纲"]')).toBeNull();
     expect(host.querySelector('[title*="查找"]')).toBeNull();
@@ -676,27 +676,11 @@ describe("头部信息格：只留交互控件与罕见信号（用户口径）"
   });
 });
 
-describe("面包屑（T10）", () => {
-  it("深层文件：路径分段可点，点父目录 → reveal-in-tree 带该目录路径", async () => {
+describe("面包屑条（已按用户 2026-09-18 反馈移除）", () => {
+  it("深层文件也不显示 .crumbs（父目录定位走页签右键「在文件树中显示」）", async () => {
     files.set("子/深层/文件.md", enc("# 标题\n"));
     const host = await preview("子/深层/文件.md");
-    const crumbs = await waitFor(host, ".crumbs");
-    const segments = [...crumbs!.querySelectorAll("button.crumb")].map((el) => el.textContent?.trim());
-    expect(segments, "三段：子 / 深层 / 文件.md").toEqual(["子", "深层", "文件.md"]);
-    // 点父目录段 → emit reveal-in-tree（宿主用它调 tree.revealRel）
-    const dirCrumb = crumbs!.querySelectorAll<HTMLButtonElement>("button.crumb")[1]!;
-    const revealed: string[] = [];
-    // emit 是组件内部行为：用事件监听兜不住（Vue emit 不是 DOM 事件），改为看行为——
-    // 这里直接验证段上的 title（路径）正确，行为由 Workbench 的既有通道保证
-    expect(dirCrumb.getAttribute("title")).toBe("子/深层");
-    void revealed;
-  });
-
-  it("根下文件：只有一段（文件名），也显示（点击可定位）", async () => {
-    files.set("README.md", enc("hi\n"));
-    const host = await preview("README.md");
-    const crumbs = await waitFor(host, ".crumbs");
-    const segments = [...crumbs!.querySelectorAll("button.crumb")].map((el) => el.textContent?.trim());
-    expect(segments).toEqual(["README.md"]);
+    await waitFor(host, ".file-name");
+    expect(host.querySelector(".crumbs"), "面包屑条已整体移除").toBeNull();
   });
 });

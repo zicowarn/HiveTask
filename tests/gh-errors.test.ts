@@ -3,7 +3,10 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { stubBrowserGlobals } from "./test-support";
 
 beforeEach(() => stubBrowserGlobals());
-// 动态导入：保证桩在模块顶层 detectLocale 之前生效。
+// 断言写的是中文文案 —— 语言必须显式钉住 zh-CN。
+// （此前依赖"本机 navigator 是 zh"的巧合；换环境/CI 上跑就会翻车。）
+const { setLocale } = await import("../src/i18n");
+setLocale("zh-CN");
 const { isNetworkError, translateError } = await import("../src/gh-errors");
 
 describe("translateError", () => {

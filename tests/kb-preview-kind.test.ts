@@ -25,6 +25,12 @@ describe("预览路由", () => {
     }
   });
 
+  it("代码扩展名走可编辑代码视图（CM6）——注册表的只读 Prism 渲染已弃用", () => {
+    for (const ext of ["rs", "ts", "json", "py", "java"]) {
+      expect(previewKind(ext), `.${ext} 应可编辑`).toBe("text");
+    }
+  });
+
   it("其余一律交给预览注册表 —— 不得落到纯文本", () => {
     const registryOwned = [
       "pdf",
@@ -52,9 +58,6 @@ describe("预览路由", () => {
       "kml",
       "gpx",
       "shp",
-      "rs",
-      "ts",
-      "json",
       "txt",
       "", // 无扩展名（README / Makefile）：先问注册表，认领不了再降级文本
     ];
