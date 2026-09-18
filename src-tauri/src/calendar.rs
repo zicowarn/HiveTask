@@ -1,65 +1,19 @@
 //! 日历图层（S3-b，知识库《架构设计-日历面板》§5–§7）：
 //! - ICS 订阅（`calendar_feeds`，app_008）：拉取/解析/缓存进库；断网读缓存；
-//! - 法定假日：内置 holiday-cn JSON（MIT © NateScarlet，随版本更新兜底，
-//!   含 isOffDay 放假/调休语义——权威源是 JSON 而非 ICS，见文档 §7 适配标注）；
+//!   跨度事件（DTEND/DURATION）按日展开，DTEND 为**排他端点**（RFC 5545），
+//!   上限 62 天/事件；RRULE v1 仍只取 DTSTART 首次（做半套 BY* 更危险）；
+//!   法定假日亦走订阅（内置 holiday-cn 层已于 2026-09-18 经用户定案移除）；
 //! - 农历日格副行：chinese-lunisolar-calendar（MIT），初一显示月名、其余日名。
 //!
 //! 红线：订阅 URL 属准凭据——任何错误信息**不得包含完整 URL**（reqwest 的
 //! 错误 Display 会带 URL，必须 map_err 剥离）。
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{anyhow, Result};
 use chinese_lunisolar_calendar::{LunisolarDate, SolarDate};
 use rusqlite::{Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 
 use crate::appdb;
-
-// ============ 法定假日（内置数据） ============
-
-const HOLIDAY_CN_2025: &str = include_str!("calendar_data/holiday-cn-2025.json");
-const HOLIDAY_CN_2026: &str = include_str!("calendar_data/holiday-cn-2026.json");
-
-/// 法定假日日条目（镜像 holiday-cn days[]，camelCase 对齐前端）。
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct HolidayDay {
-    /// YYYY-MM-DD。
-    pub date: String,
-    pub name: String,
-    /// false = 调休补班（上班日）。
-    pub is_off_day: bool,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-struct HolidayFile {
-    #[serde(default)]
-    days: Vec<HolidayRaw>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-struct HolidayRaw {
-    name: String,
-    date: String,
-    #[serde(rename = "isOffDay")]
-    is_off_day: bool,
-}
-
-/// 内置假日全量（2025–2026，按日期升序）。运行时零网络。
-pub fn holidays() -> Result<Vec<HolidayDay>> {
-    let mut out = Vec::new();
-    for raw in [HOLIDAY_CN_2025, HOLIDAY_CN_2026] {
-        let file: HolidayFile = serde_json::from_str(raw).context("内置假日数据解析失败")?;
-        for d in file.days {
-            out.push(HolidayDay {
-                date: d.date,
-                name: d.name,
-                is_off_day: d.is_off_day,
-            });
-        }
-    }
-    out.sort_by(|a, b| a.date.cmp(&b.date));
-    Ok(out)
-}
 
 // ============ 农历日格副行 ============
 
@@ -100,6 +54,46 @@ pub fn lunar_range(start: &str, end: &str) -> Result<Vec<LunarLabel>> {
         s = next_day(s);
     }
     Ok(out)
+}
+
+/// 日期串 +n 天（跨度展开用）。
+fn date_add_days(s: &str, n: u32) -> Option<String> {
+    let (mut y, mut m, mut d) = parse_ymd(s)?;
+    for _ in 0..n {
+        (y, m, d) = next_day((y, m, d));
+    }
+    Some(format!("{y:04}-{m:02}-{d:02}"))
+}
+
+/// 日期串 +1 天。
+fn next_date_str(s: &str) -> Option<String> {
+    let (y, m, d) = parse_ymd(s)?;
+    let (y, m, d) = next_day((y, m, d));
+    Some(format!("{y:04}-{m:02}-{d:02}"))
+}
+
+/// DURATION 最小解析：P[n]W / P[n]D（可组合），时间部分（T 之后）忽略——
+/// date 级日历不需要小时精度。
+fn parse_duration_days(value: &str) -> Option<u32> {
+    let upper = value.trim().to_uppercase();
+    let body = upper.strip_prefix('P')?;
+    let date_part = body.split('T').next()?;
+    let mut days = 0u32;
+    let mut num = String::new();
+    for ch in date_part.chars() {
+        if ch.is_ascii_digit() {
+            num.push(ch);
+        } else {
+            let n: u32 = num.parse().ok()?;
+            num.clear();
+            match ch {
+                'W' => days += n * 7,
+                'D' => days += n,
+                _ => return None,
+            }
+        }
+    }
+    Some(days).filter(|d| *d > 0)
 }
 
 /// YYYY-MM-DD → (y, m, d)；格式不符返回 None。
@@ -236,20 +230,66 @@ pub fn parse_ics(text: &str) -> Vec<IcsEvent> {
     let mut in_event = false;
     let mut dtstart: Option<String> = None;
     let mut summary: Option<String> = None;
+    let mut dtend: Option<String> = None;
+    // date-time 端点且结束时刻非零点（占用端点日）；VALUE=DATE 恒 false
+    let mut dtend_time_nonzero = false;
+    let mut duration_days: Option<u32> = None;
     for line in unfold_ics(text) {
         match line.as_str() {
             "BEGIN:VEVENT" => {
                 in_event = true;
                 dtstart = None;
                 summary = None;
+                dtend = None;
+                dtend_time_nonzero = false;
+                duration_days = None;
             }
             "END:VEVENT" => {
                 if in_event {
-                    if let Some(date) = dtstart.take() {
-                        events.push(IcsEvent {
-                            date,
-                            title: summary.take().unwrap_or_default(),
-                        });
+                    if let Some(start) = dtstart.take() {
+                        // 跨度展开：DTEND（排他）优先，其次 DURATION；同日/倒挂回落单日
+                        let end_excl: Option<String> = dtend
+                            .take()
+                            .filter(|e| e.as_str() > start.as_str())
+                            .map(|e| {
+                                // 跨日的 date-time 端点：结束时刻非零点 → 端点日仍被占用
+                                // （端点 +1 天后仍按排他日处理）；零点结束 / VALUE=DATE 不动
+                                if dtend_time_nonzero {
+                                    date_add_days(&e, 1).unwrap_or(e)
+                                } else {
+                                    e
+                                }
+                            })
+                            .or_else(|| {
+                                duration_days
+                                    .and_then(|n| date_add_days(&start, n))
+                                    .filter(|e| e.as_str() > start.as_str())
+                            });
+                        let mut cursor = start;
+                        let mut guard = 0u32; // 62 天上限：防异常源刷屏
+                        loop {
+                            // 先查排他端点再推送（推进到端点日即止）
+                            if let Some(e) = end_excl.as_deref() {
+                                if cursor.as_str() >= e {
+                                    break;
+                                }
+                            }
+                            if guard >= 62 {
+                                break;
+                            }
+                            events.push(IcsEvent {
+                                date: cursor.clone(),
+                                title: summary.clone().unwrap_or_default(),
+                            });
+                            guard += 1;
+                            if end_excl.is_none() {
+                                break; // 无跨度 = 单日
+                            }
+                            match next_date_str(&cursor) {
+                                Some(n) => cursor = n,
+                                None => break,
+                            }
+                        }
                     }
                 }
                 in_event = false;
@@ -258,6 +298,19 @@ pub fn parse_ics(text: &str) -> Vec<IcsEvent> {
                 if let Some((name, params, value)) = split_property(&line) {
                     match name.as_str() {
                         "DTSTART" => dtstart = ics_date_of(&params, &value),
+                        "DTEND" => {
+                            dtend = ics_date_of(&params, &value);
+                            dtend_time_nonzero = !params.iter().any(|p| p == "VALUE=DATE") && {
+                                let time_digits: String = value
+                                    .chars()
+                                    .skip(8)
+                                    .take(6)
+                                    .filter(|c| c.is_ascii_digit())
+                                    .collect();
+                                !time_digits.is_empty() && time_digits != "000000"
+                            };
+                        }
+                        "DURATION" => duration_days = parse_duration_days(&value),
                         "SUMMARY" => summary = Some(unescape_ics_text(&value)),
                         _ => {}
                     }
@@ -283,6 +336,8 @@ pub struct FeedRow {
     pub last_synced_at: Option<String>,
     /// 缓存事件数；None = 从未同步。
     pub cached_count: Option<u32>,
+    /// 事件色 #RRGGBB；None = 默认样式（accent 实底 + 虚线描边）。
+    pub color: Option<String>,
 }
 
 /// 订阅事件（跨启用的订阅聚合，前端日历图层用）。
@@ -297,7 +352,7 @@ pub struct FeedEvent {
 
 fn feed_row_on(conn: &Connection, id: &str) -> Result<FeedRow> {
     conn.query_row(
-        "SELECT id, name, url, enabled, last_synced_at, cached_payload FROM calendar_feeds WHERE id = ?1",
+        "SELECT id, name, url, enabled, last_synced_at, cached_payload, color FROM calendar_feeds WHERE id = ?1",
         [id],
         |row| {
             Ok((
@@ -307,17 +362,19 @@ fn feed_row_on(conn: &Connection, id: &str) -> Result<FeedRow> {
                 row.get::<_, i64>(3)?,
                 row.get::<_, Option<String>>(4)?,
                 row.get::<_, Option<String>>(5)?,
+                row.get::<_, Option<String>>(6)?,
             ))
         },
     )
     .optional()?
-    .map(|(id, name, url, enabled, last_synced_at, payload)| FeedRow {
+    .map(|(id, name, url, enabled, last_synced_at, payload, color)| FeedRow {
         id,
         name,
         url,
         enabled: enabled != 0,
         last_synced_at,
         cached_count: payload.and_then(|p| serde_json::from_str::<Vec<IcsEvent>>(&p).ok().map(|v| v.len() as u32)),
+        color,
     })
     .ok_or_else(|| anyhow!("订阅不存在"))
 }
@@ -371,6 +428,31 @@ pub fn feed_remove_on(conn: &Connection, id: &str) -> Result<()> {
 pub fn feed_set_enabled(id: &str, enabled: bool) -> Result<FeedRow> {
     let conn = appdb::open()?;
     feed_set_enabled_on(&conn, id, enabled)
+}
+
+pub fn feed_set_color(id: &str, color: Option<String>) -> Result<FeedRow> {
+    let conn = appdb::open()?;
+    feed_set_color_on(&conn, id, color)
+}
+
+pub fn feed_set_color_on(conn: &Connection, id: &str, color: Option<String>) -> Result<FeedRow> {
+    let normalized = match color.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+        None => None,
+        Some(c) => {
+            let body = c.strip_prefix('#').ok_or_else(|| anyhow!("颜色须为 #RGB 或 #RRGGBB"))?;
+            let ok = (body.len() == 3 || body.len() == 6)
+                && body.chars().all(|ch| ch.is_ascii_hexdigit());
+            if !ok {
+                return Err(anyhow!("颜色须为 #RGB 或 #RRGGBB"));
+            }
+            Some(format!("#{}", body.to_ascii_uppercase()))
+        }
+    };
+    conn.execute(
+        "UPDATE calendar_feeds SET color = ?2 WHERE id = ?1",
+        rusqlite::params![id, normalized],
+    )?;
+    feed_row_on(conn, id)
 }
 
 pub fn feed_set_enabled_on(conn: &Connection, id: &str, enabled: bool) -> Result<FeedRow> {
@@ -465,41 +547,84 @@ mod tests {
     use super::*;
 
     #[test]
-    fn parse_ics_folding_date_forms_and_escapes() {
-        let ics = "BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nDTSTART;VALUE=DATE:20260501\r\nSUMMARY:劳动节\r\nEND:VEVENT\r\nBEGIN:VEVENT\r\nDTSTART:20260701T08000\r\n0Z\r\nSUMMARY:带时区的时间事件\r\nEND:VEVENT\r\nBEGIN:VEVENT\r\nDTSTART;TZID=\"Asia/Shanghai\":20260801T090000\r\nSUMMARY:转义\\,测试\\;完成\\\\尾\r\nEND:VEVENT\r\nBEGIN:VEVENT\r\nRRULE:FREQ=WEEKLY\r\nDTSTART;VALUE=DATE:20260901\r\nSUMMARY:重复事件仅首次\r\nEND:VEVENT\r\nBEGIN:VEVENT\r\nSUMMARY:缺 DTSTART 应跳过\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
-        let events = parse_ics(ics);
-        assert_eq!(events.len(), 4, "{events:?}");
-        assert_eq!(events[0].date, "2026-05-01");
-        assert_eq!(events[0].title, "劳动节");
-        assert_eq!(events[1].date, "2026-07-01", "date-time 取本地日期部分（含续行）");
-        assert_eq!(events[2].date, "2026-08-01");
-        assert_eq!(events[2].title, "转义,测试;完成\\尾");
-        assert_eq!(events[3].date, "2026-09-01", "RRULE v1 只取 DTSTART 首次");
-        // 升序
+    fn parse_ics_folding_date_forms_escapes_and_spans() {
+        let ics = "BEGIN:VCALENDAR\r\n"
+            .to_string()
+            + "BEGIN:VEVENT\r\nDTSTART;VALUE=DATE:20260501\r\nSUMMARY:劳动节\r\nEND:VEVENT\r\n"
+            + "BEGIN:VEVENT\r\nDTSTART:20260701T08000\r\n0Z\r\nSUMMARY:带时区的时间事件\r\nEND:VEVENT\r\n"
+            + "BEGIN:VEVENT\r\nDTSTART;TZID=\"Asia/Shanghai\":20260801T090000\r\nSUMMARY:转义\\,测试\\;完成\\\\尾\r\nEND:VEVENT\r\n"
+            + "BEGIN:VEVENT\r\nRRULE:FREQ=WEEKLY\r\nDTSTART;VALUE=DATE:20260901\r\nSUMMARY:重复事件仅首次\r\nEND:VEVENT\r\n"
+            + "BEGIN:VEVENT\r\nDTSTART;VALUE=DATE:20261001\r\nDTEND;VALUE=DATE:20261008\r\nSUMMARY:休｜国庆节\r\nEND:VEVENT\r\n"
+            + "BEGIN:VEVENT\r\nDTSTART;VALUE=DATE:20260619\r\nDURATION:P2D\r\nSUMMARY:端午跨度\r\nEND:VEVENT\r\n"
+            + "BEGIN:VEVENT\r\nDTSTART:20260801T230000\r\nDTEND:20260802T010000\r\nSUMMARY:跨午夜时间事件\r\nEND:VEVENT\r\n"
+            + "BEGIN:VEVENT\r\nDTSTART;VALUE=DATE:20261101\r\nDTEND;VALUE=DATE:20261101\r\nSUMMARY:同日DTEND单日\r\nEND:VEVENT\r\n"
+            + "BEGIN:VEVENT\r\nDTSTART;VALUE=DATE:20261201\r\nDTEND;VALUE=DATE:20261130\r\nSUMMARY:倒挂DTEND单日\r\nEND:VEVENT\r\n"
+            + "BEGIN:VEVENT\r\nSUMMARY:缺 DTSTART 应跳过\r\nEND:VEVENT\r\n"
+            + "END:VCALENDAR\r\n";
+        let events = parse_ics(&ics);
+        let count_on = |d: &str| events.iter().filter(|e| e.date == d).count();
+        assert_eq!(count_on("2026-05-01"), 1);
+        assert_eq!(count_on("2026-07-01"), 1, "date-time 折行取本地日期部分");
+        assert_eq!(count_on("2026-08-01"), 2, "转义事件 + 跨午夜事件首日");
+        assert_eq!(
+            events
+                .iter()
+                .find(|e| e.date == "2026-08-01" && e.title.starts_with("转义"))
+                .unwrap()
+                .title,
+            "转义,测试;完成\\尾"
+        );
+        assert_eq!(count_on("2026-09-01"), 1);
+        assert_eq!(count_on("2026-09-08"), 0, "RRULE 不展开（v1 口径）");
+        for d in [
+            "2026-10-01",
+            "2026-10-02",
+            "2026-10-03",
+            "2026-10-04",
+            "2026-10-05",
+            "2026-10-06",
+            "2026-10-07",
+        ] {
+            assert_eq!(count_on(d), 1, "{d} 应有国庆");
+        }
+        assert_eq!(count_on("2026-10-08"), 0, "DTEND 排他，不落端点日");
+        assert!(
+            events
+                .iter()
+                .filter(|e| e.date.starts_with("2026-10-"))
+                .all(|e| e.title == "休｜国庆节")
+        );
+        assert_eq!(count_on("2026-06-19"), 1);
+        assert_eq!(count_on("2026-06-20"), 1);
+        assert_eq!(count_on("2026-06-21"), 0);
+        assert_eq!(count_on("2026-08-02"), 1, "跨午夜时间事件次日");
+        assert_eq!(count_on("2026-11-01"), 1, "同日 DTEND 单日");
+        assert_eq!(count_on("2026-12-01"), 1, "倒挂 DTEND 单日");
         assert!(events.windows(2).all(|w| w[0].date <= w[1].date));
     }
 
     #[test]
-    fn bundled_holidays_parse_with_off_and_workdays() {
-        let days = holidays().unwrap();
-        assert!(days.len() >= 60, "2025+2026 应有大量假日条目：{}", days.len());
-        let new_year = days.iter().find(|d| d.date == "2026-01-01").expect("元旦");
-        assert_eq!(new_year.name, "元旦");
-        assert!(new_year.is_off_day);
-        // 2026 JSON（39 天）应含调休补班日（isOffDay=false）
-        assert!(days.iter().any(|d| !d.is_off_day), "应存在补班日");
-        assert!(days.windows(2).all(|w| w[0].date <= w[1].date));
-    }
-
-    #[test]
     fn lunar_known_anchors_and_leap_month() {
-        // 2026-02-17 = 正月初一（春节）→ 初一显示月名
-        let cny = lunar_range("2026-02-17", "2026-02-17").unwrap();
-        assert_eq!(cny.len(), 1);
-        assert_eq!(cny[0].text, "正月");
-        // 2026-09-25 = 八月十五（中秋）→ 显示日名
-        let mid_autumn = lunar_range("2026-09-25", "2026-09-25").unwrap();
-        assert_eq!(mid_autumn[0].text, "十五");
+        // 春节（正月初一）多年锚点——初一是朔日，天文确定，逐年可公开核对
+        for (date, _y) in [
+            ("2024-02-10", 2024),
+            ("2025-01-29", 2025),
+            ("2026-02-17", 2026),
+            ("2027-02-06", 2027),
+            ("2028-01-26", 2028),
+        ] {
+            let rows = lunar_range(date, date).unwrap();
+            assert_eq!(rows[0].text, "正月", "春节锚点 {date} 应显示月名 正月");
+        }
+        // 中秋（八月十五）多年锚点
+        for date in ["2024-09-17", "2025-10-06", "2026-09-25"] {
+            let rows = lunar_range(date, date).unwrap();
+            assert_eq!(rows[0].text, "十五", "中秋锚点 {date} 应显示 十五");
+        }
+        // 交叉印证（2026-09-18，与用户订阅源比对）：节气 ICS 秋分=09-23、
+        // 假日 ICS 中秋=09-25 → 三源一致推出 09-23=十三、09-22=十二
+        assert_eq!(lunar_range("2026-09-23", "2026-09-23").unwrap()[0].text, "十三");
+        assert_eq!(lunar_range("2026-09-22", "2026-09-22").unwrap()[0].text, "十二");
         // 2025 年有闰六月：窗口内应出现「闰」开头的月名（初一）或日名——月名必现
         let leap = lunar_range("2025-07-20", "2025-08-15").unwrap();
         assert!(
@@ -549,8 +674,47 @@ mod tests {
         assert!(!listed[0].enabled);
         assert_eq!(listed[0].cached_count, Some(1));
 
+        // 颜色：合法值归一大写；非法值拒绝；None 清除
+        let colored = feed_set_color_on(&conn, &feed.id, Some("#3fb950".to_string())).unwrap();
+        assert_eq!(colored.color.as_deref(), Some("#3FB950"));
+        let short = feed_set_color_on(&conn, &feed.id, Some("#abc".to_string())).unwrap();
+        assert_eq!(short.color.as_deref(), Some("#ABC"));
+        assert!(feed_set_color_on(&conn, &feed.id, Some("green".to_string())).is_err());
+        assert!(feed_set_color_on(&conn, &feed.id, Some("#12345".to_string())).is_err());
+        let cleared = feed_set_color_on(&conn, &feed.id, None).unwrap();
+        assert_eq!(cleared.color, None);
+
         feed_remove_on(&conn, &feed.id).unwrap();
         assert!(feed_list_on(&conn).unwrap().is_empty());
+    }
+
+    #[test]
+    #[ignore = "真实网络拉取：cargo test -- --ignored"]
+    fn live_chinacalendar_2026_expands_full_spans() {
+        let text = reqwest::blocking::Client::builder()
+            .timeout(std::time::Duration::from_secs(15))
+            .build()
+            .unwrap()
+            .get("https://chinacalendar.app/ics/china-calendar-2026.ics")
+            .send()
+            .unwrap()
+            .error_for_status()
+            .unwrap()
+            .text()
+            .unwrap();
+        let events = parse_ics(&text);
+        assert!(
+            events.len() >= 35,
+            "2026 应逐日展开约 39 条（33 休 + 6 班）：{}",
+            events.len()
+        );
+        for d in ["2026-10-01", "2026-10-04", "2026-10-07"] {
+            assert!(
+                events.iter().any(|e| e.date == d && e.title.contains("国庆")),
+                "{d} 缺国庆（跨度未展开？）"
+            );
+        }
+        assert!(events.iter().any(|e| e.date == "2026-02-15" && e.title.contains("春节")));
     }
 
     #[test]

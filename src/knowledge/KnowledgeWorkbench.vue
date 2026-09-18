@@ -7,10 +7,10 @@
  * 分栏在**面板内部**用既有的 SplitPane 原语完成（VS Code 侧栏 ≈280px 起步，
  * 拖拽下限由 SplitPane 的 min 比例兜住）。
  */
-import { computed, onMounted, ref, watch } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import PanelShell from "../workbench/PanelShell.vue";
 import SplitPane from "../workbench/SplitPane.vue";
-import { isTauri } from "../api";
+import { api, isTauri } from "../api";
 import { useI18n } from "../i18n";
 import { useKnowledgeStore } from "../stores/knowledge";
 import KnowledgePreview from "./KnowledgePreview.vue";
@@ -75,6 +75,45 @@ onMounted(() => {
   void store.probeRoot();
 });
 
+// ---- 外部改动 watcher（T10）：Rust 侧 2s 轮询 mtime，变更时发 kb://changed ----
+let unlisten: (() => void) | null = null;
+let reloadTimer: number | null = null;
+
+watch(
+  () => store.root,
+  (root) => {
+    // 换根 = 重启 watcher（Rust 侧按代际替换旧线程）；清根 = 停止
+    if (isTauri() && root) void api.kbWatchStart(root).catch(() => {});
+    else if (isTauri()) void api.kbWatchStop().catch(() => {});
+  },
+  { immediate: true },
+);
+
+void (async () => {
+  if (!isTauri()) return;
+  const { listen } = await import("@tauri-apps/api/event");
+  unlisten = await listen<string>("kb://changed", (event) => {
+    if (event.payload === "root-missing") {
+      // 根被移动/删除：触发一次刷新，store 的守卫会显示"文件夹不存在"空态
+      void store.refresh();
+      return;
+    }
+    // 去抖：外部改动常是连续写入，0.8s 内只刷一次（树 + 预览）
+    if (reloadTimer !== null) window.clearTimeout(reloadTimer);
+    reloadTimer = window.setTimeout(() => {
+      reloadTimer = null;
+      reloadTick.value += 1;
+      void store.refresh();
+    }, 800);
+  });
+})();
+
+onBeforeUnmount(() => {
+  unlisten?.();
+  if (reloadTimer !== null) window.clearTimeout(reloadTimer);
+  if (isTauri()) void api.kbWatchStop().catch(() => {});
+});
+
 const emptyRoot = computed(() => isTauri() && !store.root);
 
 /** 面板级刷新：重读整棵树（含已展开分支）并让预览重读当前文件。 */
@@ -128,7 +167,7 @@ const createRequest = ref<{ kind: "file" | "dir"; parent?: string } | null>(null
           <p class="kb-welcome-note">{{ t("kb.welcomeNote") }}</p>
           <button class="text-btn primary" @click="store.openSwitch()">{{ t("kb.pickRoot") }}</button>
         </div>
-        <KnowledgePreview v-else ref="previewRef" :reload-tick="reloadTick" />
+        <KnowledgePreview v-else ref="previewRef" :reload-tick="reloadTick" @reveal-in-tree="revealInTree" />
       </template>
     </SplitPane>
 

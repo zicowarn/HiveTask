@@ -15,7 +15,6 @@ HiveTask 自身以 **AGPL-3.0-only** 发布（见 `LICENSE`）。下列许可均
 | **@vscode/codicons**（VS Code 图标集） | **CC BY 4.0** | Copyright (c) Microsoft Corporation | `src/components/EditorIcon.vue` 的 `c.*` 族：新建文件 / 新建文件夹 / 刷新 / 折叠全部（4 条路径原样取自 `@vscode/codicons@0.0.36`） | 署名 + 标明来源；已在本文件与 README 致谢中注明 |
 | **KaTeX 字体** | **SIL OFL 1.1** | Copyright (c) 2009-2010 Design Science, Inc.；2014 Khan Academy（保留字体名 KaTeX_*） | `katex/dist/fonts/*.woff2` 由 `katex.css` 打包进产物（19 个文件，约 1.1 MB）——离线排版公式所必需 | 保留版权与许可原文；不得单独售卖字体；不得用保留字体名发布改版 |
 | **libredwg-web.wasm**（LibreDWG 的 WebAssembly 构建） | **GPL-3.0**（npm 包 `@mlightcad/libredwg-web@0.7.10` 声明的许可） | LibreDWG 项目 / @mlightcad 打包 | `dist/vendor/libredwg/libredwg-web.wasm`（9.5 MB，**只在打开 .dwg 时加载**）——DWG 图纸预览 | 分发时**附许可全文与来源声明**：`resources/licenses/LICENSE-GPL-3.0.txt` 与 `NOTICE-libredwg-web.txt` 由构建拷到 `dist/vendor/libredwg/licenses/`。<br>兼容性：AGPL-3.0 第 13 条允许与 GPL-3.0 组件结合分发，整体仍按 AGPL-3.0 提供（本仓库已公开源码）。<br>⚠️ 该组件是**唯一**的强 copyleft 第三方件；不想要它时可只删 DWG 路径（DXF 为自研解析，不依赖它），见 `docs/kb-preview-formats.md` §5.5 |
-| **holiday-cn 法定假日数据**（2025/2026 JSON，vendored） | MIT | Copyright (c) 2019 NateScarlet | `src-tauri/src/calendar_data/holiday-cn-{2025,2026}.json`（`include_str!` 进二进制，运行时零网络） | 保留版权与许可声明；**更新方式 = 随版本重新抓取** raw.githubusercontent.com/NateScarlet/holiday-cn（每日自动同步国务院公告，含 isOffDay 放假/调休语义） |
 | **Visual Studio Code**（行为与度量参照） | MIT（代码） | Copyright (c) Microsoft Corporation | 未复制其代码；仅参照资源管理器/编辑器页签的**度量与行为**（行高 22px、缩进步长、页签形态等），并在交付说明中逐项标注 | 按 MIT 习惯在致谢中注明参照对象 |
 
 ## 二、逐文件对照移植（含修改）

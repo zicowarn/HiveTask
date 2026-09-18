@@ -3,6 +3,7 @@
  * 统一下拉菜单（全应用唯一下拉形态，AGENTS.md 强制约定）：
  * 触发器 = setting-select 同款描边小盒（22px、右 chevron、亮色换图）；
  * 菜单面板 = 扁平 ✓ 勾选行（纯色底、无系统渐变弹层）。单选即选即关；
+ * `checkbox` 变体（日历图层选择器这类）：行 = 色点 + 名称 + 右侧方框勾选；
  * multiple 时保持展开连续勾选，值为 string[]。外部点击 / Esc 关闭。
  *
  * 菜单 **Teleport 到 body + fixed 定位**：历史上菜单用绝对定位挂在触发器旁，
@@ -49,6 +50,8 @@ const props = withDefaults(
     disabled?: boolean;
     /** 长列表（应用清单这类上百条）：菜单顶部多一个搜索框，按标签实时过滤。 */
     filterable?: boolean;
+    /** 勾选框变体（多选）：行尾渲染方框勾选（替代文本 ✓），配合 option.color 色点。 */
+    checkbox?: boolean;
   }>(),
   {
     options: () => [],
@@ -58,6 +61,7 @@ const props = withDefaults(
     placeholder: "",
     disabled: false,
     filterable: false,
+    checkbox: false,
   },
 );
 
@@ -103,6 +107,12 @@ function isOpen(value: string): boolean {
   return selected.value.includes(value);
 }
 
+/** 色点取色：# 开头原样；CSS 颜色函数（var()/rgb()/hsl()）原样；裸值补 #。 */
+function dotColor(color: string): string {
+  if (color.startsWith("#") || /^(var\(|rgb|hsl)/.test(color)) return color;
+  return `#${color}`;
+}
+
 /** 按触发器 rect 定位菜单；下方空间不足时向上翻。 */
 function place() {
   const el = root.value;
@@ -113,7 +123,7 @@ function place() {
   const MAX = menuForm.value ? 380 : 260;
   const spaceBelow = window.innerHeight - rect.bottom - GAP - MARGIN;
   const spaceAbove = rect.top - GAP - MARGIN;
-  const width = Math.max(rect.width, menuForm.value ? 200 : 120);
+  const width = Math.max(rect.width, menuForm.value ? 200 : props.checkbox ? 190 : 120);
   const left = Math.min(Math.max(MARGIN, rect.left), Math.max(MARGIN, window.innerWidth - width - MARGIN));
   if (spaceBelow < Math.min(MAX, 140) && spaceAbove > spaceBelow) {
     menuStyle.value = {
@@ -290,9 +300,17 @@ onBeforeUnmount(() => {
               :class="{ on: isOpen(option.value) }"
             />
             <EditorIcon v-else-if="option.icon" :name="option.icon" />
-            <span v-if="option.color" class="dd-dot" :style="{ background: option.color.startsWith('#') ? option.color : `#${option.color}` }"></span>
+            <span v-if="option.color" class="dd-dot" :style="{ background: dotColor(option.color) }"></span>
             <span class="dd-row-label">{{ option.label }}</span>
-            <span v-if="!menuForm" class="dd-check" :class="{ on: isOpen(option.value) }">✓</span>
+            <span
+              v-if="checkbox"
+              class="dd-checkbox"
+              :class="{ on: isOpen(option.value) }"
+              aria-hidden="true"
+            >
+              <EditorIcon v-if="isOpen(option.value)" name="o.check" />
+            </span>
+            <span v-else-if="!menuForm" class="dd-check" :class="{ on: isOpen(option.value) }">✓</span>
           </button>
         </template>
         <p v-if="groups.length === 0" class="dd-empty">{{ t("issue.noneAvailable") }}</p>
@@ -394,6 +412,26 @@ onBeforeUnmount(() => {
 }
 .dd-check.on {
   visibility: visible;
+}
+/* 勾选框变体：方框 + 选中 accent 底白勾（日历图层选择器同款） */
+.dd-checkbox {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: var(--bg-app);
+  color: #fff;
+}
+.dd-checkbox.on {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+.dd-checkbox .editor-icon {
+  --icon-size: 10px;
 }
 .dd-empty {
   margin: 0;

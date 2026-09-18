@@ -10,6 +10,7 @@ mod gitea;
 mod git;
 mod journal;
 mod kb;
+mod kb_watch;
 mod openwith_apps;
 mod local;
 mod models;
@@ -329,6 +330,11 @@ fn calendar_feed_set_enabled(id: String, enabled: bool) -> Result<calendar::Feed
 }
 
 #[tauri::command]
+fn calendar_feed_set_color(id: String, color: Option<String>) -> Result<calendar::FeedRow, String> {
+    calendar::feed_set_color(&id, color).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 fn calendar_feed_sync(id: String) -> Result<u32, String> {
     calendar::feed_sync(&id).map_err(|e| e.to_string())
 }
@@ -336,11 +342,6 @@ fn calendar_feed_sync(id: String) -> Result<u32, String> {
 #[tauri::command]
 fn calendar_feed_events() -> Result<Vec<calendar::FeedEvent>, String> {
     calendar::feed_events().map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-fn calendar_holidays() -> Result<Vec<calendar::HolidayDay>, String> {
-    calendar::holidays().map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -1160,6 +1161,8 @@ pub fn run() {
             kb::kb_walk,
             kb::kb_search,
             kb::kb_stat,
+            kb_watch::kb_watch_start,
+            kb_watch::kb_watch_stop,
             kb::kb_thumbnail,
             kb::kb_read_text,
             kb::kb_read_bytes,
@@ -1243,9 +1246,9 @@ pub fn run() {
             calendar_feed_add,
             calendar_feed_remove,
             calendar_feed_set_enabled,
+            calendar_feed_set_color,
             calendar_feed_sync,
             calendar_feed_events,
-            calendar_holidays,
             calendar_lunar_range,
             branch_review_list,
             branch_review_diff,

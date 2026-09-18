@@ -36,6 +36,8 @@ export interface CalendarFeed {
   lastSyncedAt: string | null;
   /** 缓存事件数；null = 从未同步。 */
   cachedCount: number | null;
+  /** 事件色 #RRGGBB；null = 默认样式。 */
+  color: string | null;
 }
 
 /** 订阅缓存事件（启用的订阅聚合）。 */
@@ -44,13 +46,6 @@ export interface CalendarFeedEvent {
   feedName: string;
   date: string;
   title: string;
-}
-
-/** 法定假日（内置 holiday-cn 数据）。 */
-export interface HolidayDay {
-  date: string;
-  name: string;
-  isOffDay: boolean;
 }
 
 /** 农历日格标签。 */
@@ -283,6 +278,10 @@ export const api = {
   /** 遍历整根拿全部文件（⌘P 快速打开）——一次 IPC，比前端逐层拉快得多。 */
   kbWalk: (root: string, showIgnored = false, limit?: number) =>
     invoke<string[]>("kb_walk", { root, showIgnored, limit }),
+  /** 启动知识库根的改动监听（2s 轮询；换根时重复调用即替换旧 watcher）。 */
+  kbWatchStart: (root: string) => invoke<void>("kb_watch_start", { root }),
+  /** 停止改动监听（切走知识库工作区时调用）。 */
+  kbWatchStop: () => invoke<void>("kb_watch_stop"),
   /** 让系统生成预览图（Quick Look）；失败返回 null（不抛，调用方按"没有"处理）。 */
   kbThumbnail: (root: string, rel: string, size = 640) =>
     invoke<ArrayBuffer>("kb_thumbnail", { root, rel, size }).catch(() => null),
@@ -413,9 +412,10 @@ export const api = {
   calendarFeedRemove: (id: string) => invoke<void>("calendar_feed_remove", { id }),
   calendarFeedSetEnabled: (id: string, enabled: boolean) =>
     invoke<CalendarFeed>("calendar_feed_set_enabled", { id, enabled }),
+  calendarFeedSetColor: (id: string, color: string | null) =>
+    invoke<CalendarFeed>("calendar_feed_set_color", { id, color }),
   calendarFeedSync: (id: string) => invoke<number>("calendar_feed_sync", { id }),
   calendarFeedEvents: () => invoke<CalendarFeedEvent[]>("calendar_feed_events"),
-  calendarHolidays: () => invoke<HolidayDay[]>("calendar_holidays"),
   calendarLunarRange: (start: string, end: string) =>
     invoke<LunarLabel[]>("calendar_lunar_range", { start, end }),
   ptySpawn: (args: {

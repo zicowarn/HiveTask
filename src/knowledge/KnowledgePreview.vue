@@ -43,6 +43,11 @@ import { openPathWithConfiguredApp, revealPath } from "./open-path";
 
 const props = defineProps<{ reloadTick?: number }>();
 
+const emit = defineEmits<{
+  /** 面包屑点击：在文件树中展开并定位到该路径（目录或文件）。 */
+  "reveal-in-tree": [rel: string];
+}>();
+
 /**
  * 编辑器按需加载：CM6 + KaTeX + Mermaid 合计约 1MB（未压缩），
  * 静态引入会把它们塞进启动包——不打开 Markdown 的用户不该付这份代价。
@@ -80,6 +85,25 @@ const systemPosterUrl = ref<string | null>(null);
  * 用 text.value 会让头部按钮**根本不出现**（与状态栏那格同源的一次踩坑）。
  */
 const currentEncoding = computed(() => store.activeText?.encoding ?? "");
+
+/**
+ * 面包屑：把 rel 拆成「目录 › 子目录 › 文件名」，每段可点。
+ * 点击 = 在文件树中展开定位到该段（复用既有 reveal-in-tree 通道，页签右键同款）。
+ */
+const breadcrumbSegments = computed(() => {
+  const target = rel.value;
+  if (!target) return [];
+  const parts = target.split("/");
+  const segments: { name: string; path: string; isFile: boolean }[] = [];
+  for (let i = 0; i < parts.length; i += 1) {
+    segments.push({
+      name: parts[i],
+      path: parts.slice(0, i + 1).join("/"),
+      isFile: i === parts.length - 1,
+    });
+  }
+  return segments;
+});
 /** 标签把 BOM 折进来（VS Code 的 "UTF-8 with BOM" 同义），省掉一个重复 chip。 */
 const encodingLabel = computed(() => {
   const encoding = currentEncoding.value;
@@ -1003,6 +1027,21 @@ function onImageLoaded(): void {
       </div>
     </header>
 
+    <!-- 面包屑：路径分段可点，点击在文件树中定位（VS Code 同款交互）。
+         只有一个段（根下文件）时也显示——点击仍可定位，不省略。 -->
+    <nav v-if="rel && breadcrumbSegments.length" class="crumbs" :aria-label="t('kb.crumbsLabel')">
+      <template v-for="(segment, index) in breadcrumbSegments" :key="segment.path">
+        <span v-if="index > 0" class="crumb-sep">›</span>
+        <button
+          class="crumb"
+          :class="{ current: index === breadcrumbSegments.length - 1 }"
+          :title="segment.path"
+          @click="emit('reveal-in-tree', segment.path)"
+        >
+          {{ segment.name }}
+        </button>
+      </template>
+    </nav>
     <div ref="bodyEl" class="preview-body" :class="{ 'editor-active': kind === 'markdown' && !!text }">
       <p v-if="!rel" class="hint">{{ t("kb.noSelection") }}</p>
       <!-- 注意：注册表格式（kind === 'other'）**不能**被加载提示挤出分支链 ——
@@ -1178,6 +1217,42 @@ function onImageLoaded(): void {
 }
 .zoom-level:hover {
   color: var(--text);
+}
+/* 面包屑：header 下的细条，路径分段可点 */
+.crumbs {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex: none;
+  padding: 3px 16px 2px;
+  border-bottom: 1px solid var(--border);
+  overflow: hidden;
+}
+.crumb {
+  flex: none;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 1px 4px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: var(--font-sm);
+  cursor: pointer;
+}
+.crumb:hover {
+  color: var(--text);
+  background: var(--bg-hover);
+}
+.crumb.current {
+  color: var(--text);
+}
+.crumb-sep {
+  flex: none;
+  color: var(--text-dim);
+  font-size: var(--font-sm);
 }
 .preview-header {
   display: flex;

@@ -11,7 +11,7 @@ use serde::Serialize;
 use std::path::PathBuf;
 
 const APP_IDENTIFIER: &str = "dev.zicowarn.hivetask";
-const CURRENT_APP_SCHEMA_VERSION: i64 = 8;
+const CURRENT_APP_SCHEMA_VERSION: i64 = 9;
 
 const APP_MIGRATION_001: &str = include_str!("migrations/app_001_registry.sql");
 const APP_MIGRATION_002: &str = include_str!("migrations/app_002_projects.sql");
@@ -21,6 +21,7 @@ const APP_MIGRATION_005: &str = include_str!("migrations/app_005_project_connect
 const APP_MIGRATION_006: &str = include_str!("migrations/app_006_project_sync.sql");
 const APP_MIGRATION_007: &str = include_str!("migrations/app_007_prefs.sql");
 const APP_MIGRATION_008: &str = include_str!("migrations/app_008_calendar.sql");
+const APP_MIGRATION_009: &str = include_str!("migrations/app_009_feed_color.sql");
 
 pub fn app_data_dir() -> Option<PathBuf> {
     #[cfg(target_os = "macos")]
@@ -97,6 +98,9 @@ pub(crate) fn app_migrate(conn: &Connection) -> anyhow::Result<()> {
     }
     if version < 8 {
         conn.execute_batch(APP_MIGRATION_008).context("app 迁移 008 失败")?;
+    }
+    if version < 9 {
+        conn.execute_batch(APP_MIGRATION_009).context("app 迁移 009 失败")?;
     }
     conn.pragma_update(None, "user_version", CURRENT_APP_SCHEMA_VERSION)?;
     Ok(())

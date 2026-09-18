@@ -75,7 +75,7 @@ pub struct Stat {
 // ---- 沙箱 ----
 
 /// 根目录必须存在且是目录；返回 canonicalize 后的路径。
-fn root_path(root: &str) -> Result<PathBuf> {
+pub fn root_path(root: &str) -> Result<PathBuf> {
     let p = PathBuf::from(root);
     if !p.is_dir() {
         bail!("知识库根目录不存在或不是目录");

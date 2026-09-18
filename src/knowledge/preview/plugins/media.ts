@@ -11,6 +11,7 @@
  * 这些一律落到「用默认应用打开」，不假装能放。
  */
 import type { PreviewContext, PreviewInstance } from "../registry";
+import { mediaInfoLine, parseAudioInfo, parseVideoInfo } from "./media-info";
 
 export const AUDIO_EXTENSIONS = [
   "mp3",
@@ -270,6 +271,8 @@ async function renderAudio(ctx: PreviewContext): Promise<PreviewInstance> {
   el.src = url;
   parts.wrap.querySelector(".kb-media-stage")!.appendChild(el);
   describeMedia(el, "audio", parts, ctx);
+  // 容器头解析（照 OFV）：与播放无关，解不了的文件也能说清"它是什么"（进状态栏）
+  ctx.onInfo?.(mediaInfoLine(parseAudioInfo(bytes, ctx.ext.toUpperCase())));
   ctx.container.replaceChildren(parts.wrap);
   return {
     destroy: () => {
@@ -301,6 +304,7 @@ async function renderVideo(ctx: PreviewContext): Promise<PreviewInstance> {
     el.load();
   }
   describeMedia(el, "video", parts, ctx);
+  ctx.onInfo?.(mediaInfoLine(parseVideoInfo(bytes, ctx.ext.toUpperCase())));
   ctx.container.replaceChildren(parts.wrap);
   return {
     destroy() {

@@ -5,7 +5,6 @@
  * 图层模型（设计定案：日历 = 投影，不存数据、不做第二个日期真源）：
  *  - 投影：里程碑截止 / Issue·PR 创建 / 项目日期字段（读既有缓存，零存储）；
  *  - 提交热力：git_commit_activity 日格角标（装饰常显，不进图层菜单）；
- *  - 法定假日：内置 holiday-cn JSON（休=红 / 班=灰，随版本兜底，零网络）；
  *  - ICS 订阅：calendar_feeds（app_008），断网读缓存，URL 不进日志；管理入口在设置面板（来源连接同款模式）
  *  - 农历副行：chinese-lunisolar-calendar（Rust 侧算法），初一显月名。
  *
@@ -26,9 +25,10 @@ import { useRepoStore } from "../stores/repo";
 import { useIssuesStore } from "../stores/issues";
 import { usePullsStore } from "../stores/pulls";
 import { useProjectsStore } from "../stores/projects";
+import { useSettingsStore } from "../stores/settings";
 import { useI18n } from "../i18n";
 import { api, isTauri } from "../api";
-import type { CalendarFeed, CalendarFeedEvent, HolidayDay } from "../api";
+import type { CalendarFeed, CalendarFeedEvent } from "../api";
 import { openExternalUrl } from "../open-url";
 import { buildCalendarEvents, dateKey, heatBucket, type CalendarEventKind } from "./calendar-events";
 
@@ -39,31 +39,37 @@ const { current } = storeToRefs(repo);
 const issues = useIssuesStore();
 const pulls = usePullsStore();
 const projects = useProjectsStore();
+const settings = useSettingsStore();
 const { t, locale } = useI18n();
 
 // ---- 图层开关（DropdownMenu multiple：保持展开连续勾选） ----
 
 const PROJECTION_LAYERS: CalendarEventKind[] = ["milestone", "issue", "pull", "project"];
-const visibleLayers = ref<string[]>([...PROJECTION_LAYERS, "holiday"]);
+const visibleLayers = ref<string[]>([...PROJECTION_LAYERS]);
 
 const layerOptions = computed(() => [
-  { value: "milestone", label: t("calendar.layer.milestones") },
-  { value: "issue", label: t("calendar.layer.issues") },
-  { value: "pull", label: t("calendar.layer.pulls") },
-  { value: "project", label: t("calendar.layer.projects") },
-  { value: "holiday", label: t("calendar.layer.holidays") },
-  ...feeds.value.map((f) => ({ value: `feed:${f.id}`, label: f.name })),
+  { value: "milestone", label: t("calendar.layer.milestones"), color: "var(--accent)" },
+  { value: "issue", label: t("calendar.layer.issues"), color: "var(--success)" },
+  { value: "pull", label: t("calendar.layer.pulls"), color: "var(--merged)" },
+  { value: "project", label: t("calendar.layer.projects"), color: "var(--text-dim)" },
+  ...feeds.value.map((f) => ({
+    value: `feed:${f.id}`,
+    label: f.name,
+    color: f.color ?? "var(--accent)",
+  })),
 ]);
 
 // ---- 订阅 / 假日（应用级，不随仓库切换） ----
 
 const feeds = ref<CalendarFeed[]>([]);
 const feedEvents = ref<CalendarFeedEvent[]>([]);
-const holidayDays = ref<HolidayDay[]>([]);
 let appLoaded = false;
 let autoSyncStarted = false;
 /** 订阅过期阈值：超 6 小时在面板打开时后台重拉（离线诚实跳过）。 */
 const STALE_MS = 6 * 3600 * 1000;
+/** 解析器版本：升版时强制全量重同步一次（旧缓存是旧口径解析的）。 */
+const PARSER_VERSION = "2";
+const PARSER_FLAG_KEY = "hivetask.feedParserVersion";
 
 function reconcileLayers(): void {
   const feedIds = feeds.value.map((f) => `feed:${f.id}`);
@@ -92,10 +98,19 @@ function lastSyncMs(s: string): number {
 async function autoSyncStale(): Promise<void> {
   if (autoSyncStarted) return;
   autoSyncStarted = true;
+  let parserChanged = false;
+  try {
+    parserChanged = localStorage.getItem(PARSER_FLAG_KEY) !== PARSER_VERSION;
+  } catch {
+    parserChanged = true;
+  }
   let touched = false;
   for (const feed of feeds.value) {
     if (!feed.enabled) continue;
-    const stale = !feed.lastSyncedAt || Date.now() - lastSyncMs(feed.lastSyncedAt) > STALE_MS;
+    const stale =
+      parserChanged ||
+      !feed.lastSyncedAt ||
+      Date.now() - lastSyncMs(feed.lastSyncedAt) > STALE_MS;
     if (!stale) continue;
     try {
       await api.calendarFeedSync(feed.id);
@@ -104,18 +119,22 @@ async function autoSyncStale(): Promise<void> {
       // 断网/失败：读缓存（错误信息不含 URL，后端红线）
     }
   }
-  if (touched) await refreshFeeds();
+  if (touched) {
+    await refreshFeeds();
+  }
+  if (parserChanged) {
+    try {
+      localStorage.setItem(PARSER_FLAG_KEY, PARSER_VERSION);
+    } catch {
+      // 下次打开再试一次，无害
+    }
+  }
 }
 
 async function ensureAppData(): Promise<void> {
   if (appLoaded || !isTauri()) return;
   appLoaded = true;
   await refreshFeeds();
-  try {
-    holidayDays.value = await api.calendarHolidays();
-  } catch {
-    holidayDays.value = [];
-  }
   void autoSyncStale();
 }
 
@@ -160,6 +179,9 @@ interface FcEvent {
   start: string;
   extendedProps: { url: string | null };
   classNames: string[];
+  backgroundColor?: string;
+  borderColor?: string;
+  textColor?: string;
 }
 
 const calendarEvents = computed<FcEvent[]>(() => {
@@ -180,25 +202,19 @@ const calendarEvents = computed<FcEvent[]>(() => {
     }));
 
   const extras: FcEvent[] = [];
-  if (visibleLayers.value.includes("holiday")) {
-    for (const h of holidayDays.value) {
-      extras.push({
-        id: `holiday:${h.date}:${h.name}`,
-        title: h.isOffDay ? h.name : `${h.name} ${t("calendar.workdaySuffix")}`,
-        start: h.date,
-        extendedProps: { url: null },
-        classNames: [h.isOffDay ? "ev-holiday" : "ev-workday"],
-      });
-    }
-  }
+  const feedColor = new Map(feeds.value.map((f) => [f.id, f.color]));
   for (const f of feedEvents.value) {
     if (visibleLayers.value.includes(`feed:${f.feedId}`)) {
+      const color = feedColor.get(f.feedId) ?? null;
       extras.push({
         id: `feed:${f.feedId}:${f.date}:${f.title}`,
         title: f.title,
         start: f.date,
         extendedProps: { url: null },
-        classNames: ["ev-feed"],
+        classNames: color ? [] : ["ev-feed"],
+        backgroundColor: color ?? undefined,
+        borderColor: color ?? undefined,
+        textColor: color ? "#fff" : undefined,
       });
     }
   }
@@ -232,7 +248,7 @@ const options = computed<CalendarOptions>(() => ({
       arg.el.setAttribute("data-heat-level", String(heatBucket(n)));
       arg.el.setAttribute("title", t("calendar.heatTooltip", { n }));
     }
-    const lunarText = lunarMap.value.get(dateKey(arg.date));
+    const lunarText = settings.lunarLine ? lunarMap.value.get(dateKey(arg.date)) : undefined;
     if (lunarText) {
       const el = document.createElement("span");
       el.className = "cal-lunar";
@@ -265,6 +281,14 @@ watch(
   { immediate: true },
 );
 
+// 设置里关/开副行 → 重挂载立即生效
+watch(
+  () => settings.lunarLine,
+  () => {
+    calKey.value += 1;
+  },
+);
+
 onMounted(() => {
   void ensureAppData();
   const now = new Date();
@@ -275,10 +299,10 @@ onMounted(() => {
 <template>
   <PanelShell :leaf-id="leafId" :panel-type="panelType">
     <template #actions>
-      <DropdownMenu v-model="visibleLayers" multiple :options="layerOptions">
+      <DropdownMenu v-model="visibleLayers" multiple checkbox :options="layerOptions">
         <template #trigger="{ open, toggle }">
           <button class="layer-btn" :class="{ open }" type="button" @click="toggle">
-            <EditorIcon name="o.calendar" />
+            <EditorIcon name="o.stack" />
             <span>{{ t("calendar.layers") }}</span>
           </button>
         </template>
@@ -330,7 +354,7 @@ onMounted(() => {
 .calendar-wrap :deep(.fc) {
   --fc-page-bg-color: transparent;
   --fc-border-color: var(--border);
-  --fc-today-bg-color: var(--bg-hover);
+  --fc-today-bg-color: var(--accent-soft);
   --fc-neutral-bg-color: var(--bg-app);
   --fc-event-border-color: transparent;
   color: var(--text);
@@ -343,6 +367,10 @@ onMounted(() => {
   font-weight: 600;
 }
 .calendar-wrap :deep(.fc .fc-button) {
+  /* inline-flex 居中：fc 默认按钮内 chevron 为图标字体，22px 高下会坐不到垂直中线 */
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   height: 22px;
   padding: 0 7px;
   background: var(--bg-app);
@@ -351,8 +379,14 @@ onMounted(() => {
   color: var(--text);
   font-size: var(--font-md);
   font-weight: 400;
+  line-height: 1;
   text-transform: none;
   box-shadow: none;
+}
+.calendar-wrap :deep(.fc .fc-icon) {
+  line-height: 1;
+  font-size: var(--icon-size, 14px);
+  vertical-align: middle;
 }
 .calendar-wrap :deep(.fc .fc-button:hover) {
   background: var(--bg-app);
@@ -368,6 +402,30 @@ onMounted(() => {
   background: var(--bg-app);
   border-color: var(--border);
   color: var(--text-dim);
+}
+/* 分页组（‹|›）：接成一体——共享边框、端点圆角（今天/视图切换保持独立圆角） */
+.calendar-wrap :deep(.fc .fc-button-group) {
+  gap: 0;
+}
+.calendar-wrap :deep(.fc .fc-button-group > .fc-button) {
+  border-radius: 0;
+  margin-left: -1px;
+}
+.calendar-wrap :deep(.fc .fc-button-group > .fc-button:first-child) {
+  border-radius: 6px 0 0 6px;
+  margin-left: 0;
+}
+.calendar-wrap :deep(.fc .fc-button-group > .fc-button:last-child) {
+  border-radius: 0 6px 6px 0;
+}
+/* 今日强调（用户反馈「今日不明显」）：底色 accent-soft + 日号反色药丸 */
+.calendar-wrap :deep(.fc .fc-day-today .fc-daygrid-day-number) {
+  background: var(--accent);
+  color: #fff;
+  border-radius: 999px;
+  padding: 1px 7px;
+  margin: 1px 2px;
+  line-height: 1.25;
 }
 .calendar-wrap :deep(.fc .fc-col-header-cell-cushion),
 .calendar-wrap :deep(.fc .fc-daygrid-day-number),
@@ -405,18 +463,6 @@ onMounted(() => {
   color: var(--text);
 }
 .calendar-wrap :deep(.fc-event.ev-project .fc-event-title) {
-  color: var(--text);
-}
-/* 法定假日：休=红 / 班=灰（ holiday-cn isOffDay 语义） */
-.calendar-wrap :deep(.fc-event.ev-holiday) {
-  background: var(--danger);
-}
-.calendar-wrap :deep(.fc-event.ev-workday) {
-  background: var(--bg-selected);
-  border: 1px solid var(--border);
-  color: var(--text);
-}
-.calendar-wrap :deep(.fc-event.ev-workday .fc-event-title) {
   color: var(--text);
 }
 /* ICS 订阅：accent + 虚线描边（与里程碑实线蓝区分） */
@@ -462,11 +508,13 @@ onMounted(() => {
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.35);
 }
 
-/* 农历副行：右上日号下方（初一显示月名，其余日名）。 */
+/* 农历副行：左上角，与右上日号同行（经典日历排版）；事件 chip 在下方流式
+   排列，互不重叠；热力角标在右下。可在设置「农历副行」关闭（订阅了含农历
+   的日历源时去重用）。 */
 .calendar-wrap :deep(.cal-lunar) {
   position: absolute;
-  top: 17px;
-  right: 3px;
+  top: 3px;
+  left: 4px;
   font-size: var(--font-xs);
   color: var(--text-dim);
   line-height: 1;

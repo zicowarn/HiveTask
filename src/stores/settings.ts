@@ -11,11 +11,20 @@ import { ref, watch } from "vue";
 
 const STATUSBAR_KEY = "hivetask.statusbar";
 const TERMINAL_SHELL_KEY = "hivetask.terminalShell";
+const CALENDAR_LUNAR_KEY = "hivetask.calendarLunar";
 
 
 function loadStatusbarVisible(): boolean {
   try {
     return localStorage.getItem(STATUSBAR_KEY) !== "0";
+  } catch {
+    return true;
+  }
+}
+
+function loadLunarLine(): boolean {
+  try {
+    return localStorage.getItem(CALENDAR_LUNAR_KEY) !== "0";
   } catch {
     return true;
   }
@@ -33,6 +42,8 @@ export const useSettingsStore = defineStore("settings", () => {
   const statusbarVisible = ref(loadStatusbarVisible());
   /** "" = auto ($SHELL / COMSPEC); else an explicit shell path/name. */
   const terminalShell = ref(loadTerminalShell());
+  /** 日历面板农历副行（UI 态；订阅了含农历的日历源时可关去重）。 */
+  const lunarLine = ref(loadLunarLine());
   /** Gitea 实例地址（token 在 OS 钥匙串）。存 Rust 侧 source.json——
    * source_for 在命令内同步读取，webview localStorage 它看不见。 */
   const giteaHost = ref("");
@@ -40,6 +51,14 @@ export const useSettingsStore = defineStore("settings", () => {
   watch(statusbarVisible, (visible) => {
     try {
       localStorage.setItem(STATUSBAR_KEY, visible ? "1" : "0");
+    } catch {
+      // Storage unavailable — the choice still applies for this session.
+    }
+  });
+
+  watch(lunarLine, (v) => {
+    try {
+      localStorage.setItem(CALENDAR_LUNAR_KEY, v ? "1" : "0");
     } catch {
       // Storage unavailable — the choice still applies for this session.
     }
@@ -76,5 +95,5 @@ export const useSettingsStore = defineStore("settings", () => {
     statusbarVisible.value = !statusbarVisible.value;
   }
 
-  return { statusbarVisible, terminalShell, giteaHost, toggleStatusbar };
+  return { statusbarVisible, terminalShell, lunarLine, giteaHost, toggleStatusbar };
 });
