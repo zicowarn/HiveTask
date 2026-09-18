@@ -103,6 +103,15 @@ export const enUS: Record<MessageKey, string> = {
   "panelTitle.settings": "Settings",
   "panelTitle.git.history": "Git history",
   "panelTitle.terminal": "Terminal",
+  "panelTitle.calendar": "Calendar",
+
+  // Calendar panel (projection layers over cached data)
+  "calendar.layers": "Layers",
+  "calendar.layer.milestones": "Milestones",
+  "calendar.layer.issues": "Issues",
+  "calendar.layer.pulls": "Pull requests",
+  "calendar.layer.projects": "Project dates",
+  "calendar.noRepo": "Open a repository to see its issue and milestone dates.",
 
   // Git history panel
   "gitHistory.fetch": "Fetch",
@@ -704,6 +713,9 @@ export const enUS: Record<MessageKey, string> = {
   "kb.encodingSwitched": "Re-decoded as {encoding}; saving will write in this encoding",
   "kb.encodingAuto": "Auto-detect",
   "kb.encodingReopenGroup": "Reopen with encoding",
+  "kb.basemapOn": "Load online basemap",
+  "kb.basemapOff": "Hide basemap",
+  "kb.basemapTip": "Online basemap is off by default (offline vector-only); loading needs network",
   "kb.convertTitle": "Convert & Save As",
   "kb.convertFrom": "From",
   "kb.convertTo": "To",

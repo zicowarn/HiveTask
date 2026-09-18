@@ -295,6 +295,13 @@ fn git_fetch(repo_path: String) -> Result<(), String> {
     git::fetch(&dir.to_string_lossy()).map_err(|e| e.to_string())
 }
 
+/// 日历面板「提交热力」图层：HEAD + 本地分支的每日提交计数（窗口天数）。
+#[tauri::command]
+fn git_commit_activity(repo_path: String, days: Option<u32>) -> Result<Vec<models::CommitDayCount>, String> {
+    let dir = local_dir_of(&repo_path)?;
+    git::commit_activity(&dir.to_string_lossy(), days.unwrap_or(365)).map_err(|e| e.to_string())
+}
+
 // ---- 本地分支 review（PR 工作区本地形态，纯 git 能力不扩 Source trait）----
 
 #[tauri::command]
@@ -1183,6 +1190,7 @@ pub fn run() {
             git_file_history,
             git_branches,
             git_fetch,
+            git_commit_activity,
             branch_review_list,
             branch_review_diff,
             pr_commits_between,

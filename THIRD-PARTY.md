@@ -41,6 +41,7 @@ HiveTask 自身以 **AGPL-3.0-only** 发布（见 `LICENSE`）。下列许可均
 | `mermaid` | MIT | 图表渲染（本地渲染，无远程服务） |
 | `markdown-it` | MIT | Issue / PR 正文的 Markdown 渲染 |
 | `@xterm/xterm`、`@xterm/addon-fit` | MIT | 集成终端 |
+| `@fullcalendar/{core,vue3,daygrid,list,interaction}`（**锁 6.1.21**） | MIT（core 内含私有 preact 依赖） | 日历面板（工具类目）：月/列表视图 + 拖拽；WKWebView 六项扫描零命中，样式由包内 JS 注入 |
 | `@web-git-graph/{web,protocol}` | MIT | Git 历史泳道图 |
 | `@tauri-apps/api`、`@tauri-apps/plugin-{dialog,opener,store}` | MIT OR Apache-2.0 | 桌面壳能力 |
 | `pdfjs-dist` | Apache-2.0 | PDF 预览（cmaps / 标准字体 / wasm 全本地，见 `docs/kb-preview-formats.md` §2） |
@@ -80,6 +81,13 @@ HiveTask 自身以 **AGPL-3.0-only** 发布（见 `LICENSE`）。下列许可均
 | **MarkText / muya**（`@muyajs/core`） | MIT | 评估为**备选内核**：WYSIWYG 全内置（表格就地编辑、KaTeX+mhchem、Mermaid 块），零 Electron 依赖；未采用原因见 `docs/plan-knowledge-workspace.md` §2.2 |
 | **Vditor** | MIT | 评估其 IR（即时渲染）模式；因其为自带 DOM/CSS/工具栏/i18n 的整体件、图标自绘、按需资源默认走 unpkg 而放弃 |
 | **@headless-tree/core** | MIT | 评估为树组件候选；因自绘成本可控且需匹配本仓库 token 而放弃 |
+| **TOAST UI Calendar**（`@toast-ui/calendar`） | MIT | **停更**（2022-08 后无发版）且无官方 Vue3 封装（`@toast-ui/vue-calendar` 为 Vue2）；npm 上的 `tui.calendar` 包名不存在（那是 GitHub 仓库名） |
+| **@praisesink/calendarcn** | MIT | shadcn-vue 系（peer 依赖 tailwind-merge/cva/reka-ui），本仓库无 Tailwind 体系；周下载量个位数，维护风险高 |
+| **v-event-calendar** | MIT | 早期阶段（v0.0.x，周下载量两位数），功能与维护不足以承载日历面板 |
+| **@schedule-x/{calendar,vue}** | MIT | peer 依赖 preact + @preact/signals（第二套运行时显式入包）；FullCalendar v6 的 preact 为其私有内嵌实现，暴露面更小 |
+| **Vikunja** | AGPL-3.0 | 「笔记+任务+日历」产品架构可参考，**代码不可复制**——本项目为 AGPL-3.0-only，混入他方 AGPL 代码会锁死未来双许可/闭源的企业化路线（2026-09-17 日历选型讨论） |
+
+> FullCalendar 许可注意：标准插件 MIT；**Premium 插件对 AGPLv3 项目免费**（官方条款，v7 起以 AGPLv3 替代 GPLv3 作为开源豁免许可）——该豁免以项目保持 AGPL 为前提，与上条 Vikunja 留痕同属「开源策略与第三方许可的耦合」决策，动许可前须复核。
 
 ---
 

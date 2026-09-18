@@ -91,6 +91,8 @@ export const useKnowledgeStore = defineStore("knowledge", () => {
   const pageJump = ref<number | null>(null);
   /** 字流文档的当前章节标题（docx 这类没有可信页码的格式用它当"当前位置"）。 */
   const section = ref<string | null>(null);
+  /** 插件回报的格式信息（如「2 个要素」）——状态栏一格，避免插件自己画第二行头部。 */
+  const previewInfo = ref<string | null>(null);
   /**
    * 全部文件清单缓存（⌘P 与搜索用）。一次 `kb_walk` 拿全量；任何写操作后失效。
    * 懒加载：不打开 ⌘P 就不付这次遍历。
@@ -394,6 +396,10 @@ export const useKnowledgeStore = defineStore("knowledge", () => {
 
   function setSection(value: string | null): void {
     section.value = value;
+  }
+
+  function setPreviewInfo(value: string | null): void {
+    previewInfo.value = value;
   }
 
   function requestPageJump(page: number): void {
@@ -792,6 +798,8 @@ export const useKnowledgeStore = defineStore("knowledge", () => {
     setPaging,
     section,
     setSection,
+    previewInfo,
+    setPreviewInfo,
     pageJump,
     requestPageJump,
     createParent,

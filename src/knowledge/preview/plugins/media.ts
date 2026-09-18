@@ -245,7 +245,7 @@ async function renderVideo(ctx: PreviewContext): Promise<PreviewInstance> {
   if (ctx.ext === "m3u8") {
     // 播放列表本身是文本，播放交给 hls.js
     cleanup = await attachHls(el, ctx, (message) => {
-      parts.meta.textContent = `${parts.base} —— ${message}`;
+      parts.meta.textContent = message;
     });
   } else {
     url = URL.createObjectURL(new Blob([bytes]));

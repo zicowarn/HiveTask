@@ -6,7 +6,7 @@
 use anyhow::{anyhow, Context, Result};
 use git2::Oid;
 
-use crate::models::{BranchReviewDiff, BranchRow, CommitRow, GitRefRow, GitHistoryPage, ReviewBranch, ReviewFile};
+use crate::models::{BranchReviewDiff, BranchRow, CommitDayCount, CommitRow, GitRefRow, GitHistoryPage, ReviewBranch, ReviewFile};
 
 const HISTORY_LIMIT_DEFAULT: usize = 500;
 
@@ -163,6 +163,80 @@ pub fn file_history(repo_path: &str, file_rel: &str, limit: Option<u32>) -> Resu
         head: head_short,
         has_more: truncated,
     })
+}
+
+/// 天数（自 1970-01-01 起，可为负）→ (年, 月, 日)。Howard Hinnant 的
+/// civil_from_days 算法——不引 chrono，只为「提交按日分桶」这一个用途。
+fn civil_from_days(z: i64) -> (i64, u32, u32) {
+    let z = z + 719_468;
+    let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
+    let doe = (z - era * 146_097) as u64; // [0, 146096]
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365; // [0, 399]
+    let y = yoe as i64 + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100); // [0, 365]
+    let mp = (5 * doy + 2) / 153; // [0, 11]
+    let d = (doy - (153 * mp + 2) / 5 + 1) as u32; // [1, 31]
+    let m = if mp < 10 { mp + 3 } else { mp - 9 } as u32; // [1, 12]
+    (if m <= 2 { y + 1 } else { y }, m, d)
+}
+
+/// 每日提交计数（日历「提交热力」图层数据源）：HEAD + 全部本地分支的
+/// 去重提交，按**提交者时区的本地日期**分桶，窗口 `days` 天（1..=366）。
+/// 空仓库返回空表。远端跟踪引用不计——热力图语义 = 本地完成的工作
+/// （含未推送，相对 GitHub 贡献图的差异点，README 口径）。
+pub fn commit_activity(repo_path: &str, days: u32) -> Result<Vec<CommitDayCount>> {
+    let repo = open_repo(repo_path)?;
+    if repo.is_empty()? {
+        return Ok(vec![]);
+    }
+    let window_days = days.clamp(1, 366) as i64;
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .context("系统时钟早于 Unix 纪元")?
+        .as_secs() as i64;
+    let since = now - window_days * 86_400;
+
+    // 去重起点：HEAD + 全部本地分支（远端跟踪不计）。
+    let mut tips: Vec<Oid> = Vec::new();
+    if let Some(oid) = repo.head().ok().and_then(|h| h.target()) {
+        tips.push(oid);
+    }
+    for branch in repo.branches(Some(git2::BranchType::Local))? {
+        let (branch, _) = branch?;
+        if let Some(oid) = branch.get().target() {
+            if !tips.contains(&oid) {
+                tips.push(oid);
+            }
+        }
+    }
+
+    let mut seen: std::collections::HashSet<Oid> = Default::default();
+    let mut buckets: std::collections::BTreeMap<String, u32> = Default::default();
+    for tip in tips {
+        let mut revwalk = repo.revwalk()?;
+        revwalk.set_sorting(git2::Sort::TIME)?;
+        revwalk.push(tip)?;
+        for oid in revwalk {
+            let oid = oid?;
+            if !seen.insert(oid) {
+                continue;
+            }
+            let commit = repo.find_commit(oid)?;
+            let time = commit.time();
+            if time.seconds() < since {
+                // Sort::TIME 下时间单调向后，越过窗口即可停（本条 walk）。
+                break;
+            }
+            let local_days =
+                (time.seconds() + i64::from(time.offset_minutes()) * 60).div_euclid(86_400);
+            let (y, m, d) = civil_from_days(local_days);
+            *buckets.entry(format!("{y:04}-{m:02}-{d:02}")).or_insert(0) += 1;
+        }
+    }
+    Ok(buckets
+        .into_iter()
+        .map(|(date, count)| CommitDayCount { date, count })
+        .collect())
 }
 
 
@@ -757,5 +831,102 @@ mod git_tests {
         assert!(branch_delete(repo_path, "feature", false).is_err());
         branch_delete(repo_path, "feature", true).unwrap();
         std::fs::remove_dir_all(&dir).ok();
+    }
+}
+
+#[cfg(test)]
+mod commit_activity_tests {
+    use super::*;
+
+    /// civil_from_days 用已知历元锚点钉死（不依赖时区/当前时钟）。
+    #[test]
+    fn civil_from_days_known_dates() {
+        assert_eq!(civil_from_days(0), (1970, 1, 1));
+        // 2024-01-01T00:00:00Z = 1_704_067_200 = 19723 天
+        assert_eq!(civil_from_days(19_723), (2024, 1, 1));
+        // 1_700_000_000 = 2023-11-14T22:13:20Z → 第 19675 天
+        assert_eq!(civil_from_days(1_700_000_000 / 86_400), (2023, 11, 14));
+        // 负数分支：1969-12-31 是第 -1 天
+        assert_eq!(civil_from_days(-1), (1969, 12, 31));
+    }
+
+    /// 相对时间戳提交：300 天前（offset 0）与现在（UTC+8 偏移）各一笔，
+    /// 断言分桶与窗口截断。固定历元锚点由 civil_from_days_known_dates 钉死。
+    #[test]
+    fn commit_activity_buckets_by_local_date() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = git2::Repository::init(dir.path()).unwrap();
+        let mut config = repo.config().unwrap();
+        config.set_str("user.name", "tester").unwrap();
+        config.set_str("user.email", "t@example.com").unwrap();
+        drop(config);
+
+        let commit_at = |repo: &git2::Repository, msg: &str, unix: i64, offset_min: i32| {
+            let sig = git2::Signature::new(
+                "tester",
+                "t@example.com",
+                &git2::Time::new(unix, offset_min),
+            )
+            .unwrap();
+            let name = format!("f-{unix}-{offset_min}.txt");
+            std::fs::write(dir.path().join(&name), "x").unwrap();
+            let mut index = repo.index().unwrap();
+            index.add_path(std::path::Path::new(&name)).unwrap();
+            index.write().unwrap();
+            let tree_id = index.write_tree().unwrap();
+            let tree = repo.find_tree(tree_id).unwrap();
+            let parent = repo.head().ok().and_then(|h| h.peel_to_commit().ok());
+            let parents: Vec<&git2::Commit> = parent.iter().collect();
+            repo.commit(Some("HEAD"), &sig, &sig, msg, &tree, &parents).unwrap();
+        };
+
+        let date_of = |unix: i64, offset_min: i32| {
+            let (y, m, d) =
+                civil_from_days((unix + i64::from(offset_min) * 60).div_euclid(86_400));
+            format!("{y:04}-{m:02}-{d:02}")
+        };
+
+        // 空仓库 → 空表
+        let empty_dir = tempfile::tempdir().unwrap();
+        let empty = git2::Repository::init(empty_dir.path()).unwrap();
+        drop(empty);
+        assert!(
+            commit_activity(empty_dir.path().to_str().unwrap(), 365)
+                .unwrap()
+                .is_empty()
+        );
+
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64;
+        let old_unix = now - 300 * 86_400; // 窗口内（366 天），offset 0
+        let old_date = date_of(old_unix, 0);
+        commit_at(&repo, "old", old_unix, 0);
+        commit_at(&repo, "now", now, 480); // UTC+8 提交，归日按提交者本地
+        let today = date_of(now, 480);
+
+        let path = dir.path().to_str().unwrap();
+        let rows = commit_activity(path, 366).unwrap();
+        assert_eq!(rows.len(), 2, "应恰有两个日期桶：{rows:?}");
+        assert_eq!(
+            rows.iter().find(|r| r.date == old_date).map(|r| r.count),
+            Some(1),
+            "300 天前的提交应落在 {old_date} 桶"
+        );
+        assert_eq!(
+            rows.iter().find(|r| r.date == today).map(|r| r.count),
+            Some(1),
+            "UTC+8 偏移的今天提交应落在 {today} 桶"
+        );
+        // 输出按日期升序（BTreeMap 语义，前端直接可用）
+        assert!(rows.windows(2).all(|w| w[0].date < w[1].date));
+
+        // 窗口缩到 200 天：只剩今天
+        let rows = commit_activity(path, 200).unwrap();
+        assert_eq!(rows.len(), 1, "窗口外桶应被截断：{rows:?}");
+        assert_eq!(rows[0].date, today);
+
+        std::fs::remove_dir_all(dir.path()).ok();
     }
 }

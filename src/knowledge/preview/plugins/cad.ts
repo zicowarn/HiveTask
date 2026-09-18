@@ -710,13 +710,13 @@ function escapeXml(value: string): string {
 
 async function renderCad(ctx: PreviewContext): Promise<PreviewInstance> {
   const bytes = await ctx.readBytes();
+  // 去掉 kb-cad-bar：那会和面板头部凑成"两行头部"（用户实测指出）。
+  // 信息进 onInfo（状态栏），错误信息走 kb-note。
   const wrap = document.createElement("div");
   wrap.className = "kb-cad";
-  const bar = document.createElement("p");
-  bar.className = "kb-cad-bar";
   const canvas = document.createElement("div");
   canvas.className = "kb-cad-canvas";
-  wrap.append(bar, canvas);
+  wrap.appendChild(canvas);
   ctx.container.replaceChildren(wrap);
 
   let svg = "";
@@ -727,7 +727,7 @@ async function renderCad(ctx: PreviewContext): Promise<PreviewInstance> {
   if (ctx.ext === "dxf") {
     const head = new TextDecoder("windows-1252").decode(bytes.subarray(0, 32));
     if (head.startsWith("AutoCAD Binary DXF")) {
-      bar.textContent = "二进制 DXF 不支持（请用默认应用打开，或另存为 ASCII DXF）";
+      wrap.appendChild(Object.assign(document.createElement("p"), { className: "kb-note", textContent: "二进制 DXF 不支持（请用默认应用打开，或另存为 ASCII DXF）" }));
       return {};
     }
     const pairs = toPairs(bytes, decoderFor(bytes));
@@ -756,7 +756,7 @@ async function renderCad(ctx: PreviewContext): Promise<PreviewInstance> {
   }
 
   if (!svg) {
-    bar.textContent = "图纸里没有可绘制的图元";
+    wrap.appendChild(Object.assign(document.createElement("p"), { className: "kb-note", textContent: "图纸里没有可绘制的图元" }));
     return {};
   }
   // SVG 来自本地解析/本库生成，仍按不可信输入处理：去脚本后再挂载
@@ -772,7 +772,7 @@ async function renderCad(ctx: PreviewContext): Promise<PreviewInstance> {
     svgEl.removeAttribute("height");
     svgEl.setAttribute("preserveAspectRatio", "xMidYMid meet");
   }
-  bar.textContent = `${ctx.name} · ${info}${skippedNote}`;
+  ctx.onInfo?.(`${info}${skippedNote ? ` · ${skippedNote}` : ""}`);
 
   // ---- 缩放：矢量图按内联 width 重排（不是 transform，放大不糊）----
   // 百分比以"适应窗口"为 100%（见 zoom.ts 的 ZoomController 注释）

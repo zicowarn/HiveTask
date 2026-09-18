@@ -63,11 +63,19 @@ async function renderModel(ctx: PreviewContext): Promise<PreviewInstance> {
 
   const stage = document.createElement("div");
   stage.className = "kb-model3d-stage";
-  const bar = document.createElement("p");
-  bar.className = "kb-model3d-bar";
-  wrap.append(stage, bar);
+  wrap.appendChild(stage);
 
-  const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+  let renderer: import("three").WebGLRenderer;
+  try {
+    // ⚠️ 照 OFV 的口径：WebGL 创建失败不是抛出去，而是降级成"当前浏览器/设备不支持 WebGL"
+    // —— 否则在 jsdom 或禁用 WebGL 的 WebView 里会直接白屏，用户不知道是什么状态。
+    renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+  } catch {
+    wrap.appendChild(Object.assign(document.createElement("p"), { className: "kb-note", textContent: "当前浏览器或设备不支持 WebGL，无法直接渲染 3D 模型。" }));
+    ctx.container.replaceChildren(wrap);
+    ctx.onInfo?.("无 WebGL（当前浏览器/设备不支持）");
+    return {};
+  }
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
   stage.appendChild(renderer.domElement);
 
@@ -198,7 +206,7 @@ async function renderModel(ctx: PreviewContext): Promise<PreviewInstance> {
   camera.position.set(1, 1, 1);
   camera.updateProjectionMatrix();
   fitCamera();
-  bar.textContent = `${ctx.name} · ${size.x.toFixed(2)} × ${size.y.toFixed(2)} × ${size.z.toFixed(2)} · ${Math.round(triangleCount)} 三角面`;
+  ctx.onInfo?.(`${size.x.toFixed(2)} × ${size.y.toFixed(2)} × ${size.z.toFixed(2)} · ${Math.round(triangleCount)} 三角面`);
   ctx.onZoom?.({ percent: 100, fit: true });
 
   const resize = (): void => {

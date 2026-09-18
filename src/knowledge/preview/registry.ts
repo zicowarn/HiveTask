@@ -50,13 +50,21 @@ export interface PreviewContext extends PreviewFileInfo {
   onPaging?: (state: { page: number; total: number }) => void;
   /** 字流文档回报"当前章节标题"（状态栏显示；比伪页码诚实）。 */
   onSection?: (title: string | null) => void;
+  /** 在线底图状态回报（面板据此显示"加载/隐藏"按钮的按下态）。 */
+  onBasemap?: (on: boolean) => void;
+  /**
+   * 回报**格式相关的信息行**（如「2 个要素」「44 个图元」「2.4×1.8×1.2 · 1.2 万三角面」）。
+   * 面板把它转给状态栏显示 —— 各插件不要自己画信息条：那会和面板头部凑成"两行头部"
+   * （用户实测指出）。`null` 清除。
+   */
+  onInfo?: (text: string | null) => void;
 }
 
 /**
  * 面板工具条上的**声明式能力**：插件声明自己要哪些按钮，面板据此显示。
  * 新格式接入不用改面板 —— 声明 `zoom` 就自动有缩放控件。
  */
-export type PreviewTool = "zoom" | "find" | "outline";
+export type PreviewTool = "zoom" | "find" | "outline" | "basemap";
 
 /**
  * 缩放动作。**没有"实际大小"**：百分比以「适应窗口」为 100% 的基准，
@@ -110,6 +118,8 @@ export interface PreviewInstance {
   find?: (query: string, options: PreviewFindOptions) => Promise<PreviewFindResult>;
   /** 清空查找高亮。 */
   findClear?: () => void;
+  /** 在线底图开关（仅当声明 `tools: ["basemap"]`；返回切换后的状态）。 */
+  toggleBasemap?: (on: boolean) => boolean;
 }
 
 /** 插件对"能不能预览这个文件"的回答。 */

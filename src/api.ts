@@ -20,6 +20,13 @@ import type {
 
 // ---- Projects 看板（应用级，P4）----
 
+/** 每日提交计数（镜像 models.rs::CommitDayCount）。 */
+export interface CommitDayCount {
+  /** 本地日期 YYYY-MM-DD（按提交者时区偏移归日）。 */
+  date: string;
+  count: number;
+}
+
 /** 里程碑元数据（镜像 models.rs::MilestoneInfo，camelCase）。 */
 export interface MilestoneInfo {
   number: number;
@@ -339,6 +346,9 @@ export const api = {
     invoke<GitCommitRow[]>("pr_commits_between", { repoPath, base, head }),
   gitBranches: (repoPath: string) => invoke<GitBranchRow[]>("git_branches", { repoPath }),
   gitFetch: (repoPath: string) => invoke<void>("git_fetch", { repoPath }),
+  /** 日历「提交热力」图层：HEAD + 本地分支的每日提交计数（窗口天，默认 365）。 */
+  gitCommitActivity: (repoPath: string, days?: number) =>
+    invoke<CommitDayCount[]>("git_commit_activity", { repoPath, days: days ?? null }),
   ptySpawn: (args: {
     id: string;
     cwd?: string;

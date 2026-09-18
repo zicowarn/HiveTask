@@ -109,6 +109,8 @@ interface ZoomState {
 }
 const zoom = ref<ZoomState | null>(null);
 const pluginTools = ref<string[]>([]);
+/** 在线底图是否已打开（只有声明了 basemap 工具的格式用得到）。 */
+const basemapOn = ref(false);
 const zoomSupported = computed(() => kind.value === "image" || pluginTools.value.includes("zoom"));
 /** 该格式的「适应」口径（两个时面板把"适应"做成下拉）。 */
 const zoomModes = computed<("width" | "page")[]>(() => (kind.value === "image" ? ["page"] : pluginZoomModes.value));
@@ -471,6 +473,12 @@ async function renderViaRegistry(base: string, target: string, size: number, for
     onSection: (title) => {
       store.setSection(title);
     },
+    onInfo: (text) => {
+      store.setPreviewInfo(text);
+    },
+    onBasemap: (on) => {
+      basemapOn.value = on;
+    },
   });
   previewInstance = instance ?? null;
   pluginOutline.value = (instance?.outline ?? []).map((item) => ({
@@ -731,6 +739,8 @@ async function load(): Promise<void> {
   pluginOutline.value = [];
   store.setPaging(null);
   store.setSection(null);
+  store.setPreviewInfo(null);
+  basemapOn.value = false;
   store.setActiveFormat(null);
   findOpen.value = false;
   lastFindQuery.value = "";
@@ -857,6 +867,11 @@ const imageZoom = new ZoomController({
 });
 
 /** 缩放入口：图片与插件共用（谁持有画面谁执行）。 */
+function toggleBasemap(): void {
+  const next = previewInstance?.toggleBasemap?.(!basemapOn.value);
+  if (typeof next === "boolean") basemapOn.value = next;
+}
+
 function onZoomAction(action: ZoomAction): void {
   if (kind.value === "image") {
     if (action === "fit") imageZoom.fit();
@@ -972,6 +987,17 @@ function onImageLoaded(): void {
         <!-- 编码：显示当前编码，菜单里给两类操作（"改解读方式"与"转换另存为"）。
              头部放**命令**、状态栏留**状态**——两处入口各自符合使用习惯（VS Code 的状态栏
              编码格也是可点的）。命令型菜单按规范用 ActionMenu。 -->
+        <!-- 在线底图开关：插件声明 tools: ["basemap"] 时出现（GIS 用）。
+             放头部而不是插件自己画浮动控件/信息条 —— 那是"两行头部 + 浮动缩放"的来源。 -->
+        <button
+          v-if="pluginTools.includes('basemap')"
+          class="text-btn"
+          :class="{ on: basemapOn }"
+          :title="t('kb.basemapTip')"
+          @click="toggleBasemap"
+        >
+          {{ basemapOn ? t("kb.basemapOff") : t("kb.basemapOn") }}
+        </button>
         <!-- 主操作保持可见（不折叠）：折叠后它在 ⋯ 里只剩一项，反而更差 -->
         <button class="text-btn" @click="openDefault">{{ t("kb.openWithDefault") }}</button>
       </div>

@@ -336,6 +336,7 @@ async function probe() {
         </span>
         <span v-if="knowledge.activeText" class="status-cell" :title="t('kb.eolTip')">{{ kbEol }}</span>
         <span v-if="kbSize" class="status-cell">{{ kbSize }}</span>
+        <span v-if="knowledge.previewInfo" class="status-cell kb-preview-info">{{ knowledge.previewInfo }}</span>
       </template>
       <button
         v-if="netOnline !== null"

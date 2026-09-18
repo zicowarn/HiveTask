@@ -17,6 +17,7 @@ import ProjectPanel from "../panels/ProjectPanel.vue";
 import SettingsPanel from "../panels/SettingsPanel.vue";
 import GitHistoryPanel from "../panels/GitHistoryPanel.vue";
 import TerminalPanel from "../panels/TerminalPanel.vue";
+import CalendarPanel from "../panels/CalendarPanel.vue";
 import KnowledgeWorkbench from "../knowledge/KnowledgeWorkbench.vue";
 import IssueListMode from "../panels/modes/IssueListMode.vue";
 import IssueMilestoneMode from "../panels/modes/IssueMilestoneMode.vue";
@@ -70,6 +71,7 @@ registerPanel("project.board", ProjectPanel, [
 registerPanel("knowledge.workbench", KnowledgeWorkbench);
 registerPanel("git.history", GitHistoryPanel);
 registerPanel("terminal", TerminalPanel);
+registerPanel("calendar", CalendarPanel);
 registerPanel("settings", SettingsPanel, [
   { key: "basic", labelKey: "mode.settings.basic", component: SettingsBasicMode },
 ]);

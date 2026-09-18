@@ -11,7 +11,7 @@
  *   缺 `.prj` 时按 WGS84 处理并在信息行标注；
  * - 不做栅格（GeoTIFF/WMTS）、不做空间分析（那已超出"预览"）。
  */
-import type { PreviewContext, PreviewInstance } from "../registry";
+import type { PreviewContext, PreviewInstance, PreviewTool } from "../registry";
 
 export const GIS_EXTENSIONS = ["geojson", "topojson", "kml", "kmz", "gpx", "shp"];
 
@@ -101,27 +101,33 @@ function asCollection(input: GeoJSON.GeoJSON | GeoJSON.GeoJSON[]): GeoJSON.Featu
 
 async function renderGis(ctx: PreviewContext): Promise<PreviewInstance> {
   const bytes = await ctx.readBytes();
+  // 不再画自己的信息条：那会和面板头部凑成"两行头部"（用户实测指出）。
+  // 要素数等格式信息 → 状态栏（`ctx.onInfo`）；在线底图开关 → 头部工具（tools: ["basemap"]）。
   const wrap = document.createElement("div");
   wrap.className = "kb-gis";
-  const bar = document.createElement("p");
-  bar.className = "kb-gis-bar";
   const mapEl = document.createElement("div");
   mapEl.className = "kb-gis-map";
-  wrap.append(bar, mapEl);
+  wrap.appendChild(mapEl);
   ctx.container.replaceChildren(wrap);
 
   const { data, note } = await toGeoJson(ctx, bytes, ctx.readText);
   const featureCount = data.features.length;
-  if (featureCount === 0) {
-    bar.textContent = "这份文件里没有矢量要素";
-  }
+
+  // 格式信息**在 Leaflet 加载前就报**：import 失败也会短路整个函数，后面的 onInfo 永远不执行。
+  // 这样即使 Leaflet 在 jsdom 里加载失败（或真机里 Leaflet CDN 不可达），状态栏仍能告诉用户
+  // "这份文件里有几个要素"，而不是留空让用户以为是渲染坏了。
+  ctx.onInfo?.(
+    `${featureCount} 个要素${note ? ` · ${note}` : ""} · 底图默认关闭`,
+  );
 
   await import("leaflet/dist/leaflet.css");
   const L = await import("leaflet");
 
   const map = L.map(mapEl, {
     attributionControl: true,
-    zoomControl: true,
+    // Leaflet 自带的浮动 +/- 与"头部统一缩放"重复且风格不一致（用户实测指出）→ 关掉，
+    // 改由面板头部的缩放控件驱动（见下面的 zoom()）。
+    zoomControl: false,
     // 没有任何底图时也要能拖动/缩放：给一个空白的 L.CRS.EPSG3857 视口
     center: [0, 0],
     zoom: 2,
@@ -152,32 +158,39 @@ async function renderGis(ctx: PreviewContext): Promise<PreviewInstance> {
     map.fitBounds(bounds, { padding: [16, 16], maxZoom: 18 });
   }
 
+  // 在线底图：由头部按钮驱动（默认关闭；联网必须是用户的显式动作）
   let tiles: import("leaflet").TileLayer | null = null;
-  const button = document.createElement("button");
-  button.type = "button";
-  button.className = "kb-gis-tiles";
-  button.textContent = "加载在线底图（需联网）";
-  button.addEventListener("click", () => {
-    if (tiles) {
+  const setBasemap = (on: boolean): boolean => {
+    if (on && !tiles) {
+      tiles = L.tileLayer(OSM_URL, { maxZoom: 19, attribution: OSM_ATTRIBUTION }).addTo(map);
+    } else if (!on && tiles) {
       map.removeLayer(tiles);
       tiles = null;
-      button.textContent = "加载在线底图（需联网）";
-      return;
     }
-    tiles = L.tileLayer(OSM_URL, { maxZoom: 19, attribution: OSM_ATTRIBUTION }).addTo(map);
-    button.textContent = "隐藏在线底图";
-  });
-  bar.append(
-    document.createTextNode(
-      `${featureCount} 个要素${note ? ` · ${note}` : ""} · 底图默认关闭（离线只画矢量）`,
-    ),
-    button,
-  );
+    ctx.onBasemap?.(tiles !== null);
+    return tiles !== null;
+  };
 
   return {
     destroy() {
       map.remove();
     },
+    // 缩放交给 Leaflet 自己的动画（fitBounds / zoomIn），与头部控件同源
+    zoom(action) {
+      if (action === "fit" || action === "fit-page") {
+        let bounds = layer.getBounds();
+        if (!bounds.isValid()) bounds = map.getBounds();
+        map.fitBounds(bounds, { padding: [16, 16], maxZoom: 18 });
+        return;
+      }
+      if (action === "fit-width") {
+        map.fitBounds(layer.getBounds().isValid() ? layer.getBounds() : map.getBounds(), { padding: [8, 8] });
+        return;
+      }
+      if (action === "in") map.zoomIn();
+      else map.zoomOut();
+    },
+    toggleBasemap: setBasemap,
   };
 }
 
@@ -188,5 +201,8 @@ function escapeHtml(value: string): string {
 export const gisPlugin = {
   id: "gis",
   extensions: GIS_EXTENSIONS,
+  // 缩放与底图开关都走**面板头部**：插件不再画自己的浮动控件/信息条
+  tools: ["zoom", "basemap"] satisfies PreviewTool[],
+  zoomModes: ["page"] satisfies ("width" | "page")[],
   render: renderGis,
 };

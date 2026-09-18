@@ -104,6 +104,15 @@ export const zhCN = {
   "panelTitle.settings": "设置",
   "panelTitle.git.history": "Git 历史",
   "panelTitle.terminal": "终端",
+  "panelTitle.calendar": "日历",
+
+  // Calendar panel (projection layers over cached data)
+  "calendar.layers": "图层",
+  "calendar.layer.milestones": "里程碑",
+  "calendar.layer.issues": "Issue",
+  "calendar.layer.pulls": "PR",
+  "calendar.layer.projects": "项目日期",
+  "calendar.noRepo": "打开仓库后，这里会显示它的 Issue 与里程碑日期。",
 
   // Git history panel
   "gitHistory.fetch": "抓取远端",
@@ -705,6 +714,9 @@ export const zhCN = {
   "kb.encodingSwitched": "已按 {encoding} 重新解码；保存时将按此编码写回",
   "kb.encodingAuto": "自动探测",
   "kb.encodingReopenGroup": "以此编码重新打开",
+  "kb.basemapOn": "加载在线底图",
+  "kb.basemapOff": "隐藏在线底图",
+  "kb.basemapTip": "在线底图默认关闭（离线只画矢量）；加载需要联网",
   "kb.convertTitle": "转换并另存为",
   "kb.convertFrom": "源编码",
   "kb.convertTo": "目标编码",

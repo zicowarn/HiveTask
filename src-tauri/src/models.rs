@@ -113,6 +113,15 @@ pub struct GitHistoryPage {
     pub has_more: bool,
 }
 
+/// 每日提交计数（git::commit_activity：日历面板「提交热力」图层数据源）。
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CommitDayCount {
+    /// 本地日期 YYYY-MM-DD（按提交者时区偏移归日）。
+    pub date: String,
+    pub count: u32,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BranchRow {
