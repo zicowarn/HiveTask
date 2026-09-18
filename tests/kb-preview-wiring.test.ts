@@ -243,11 +243,11 @@ describe("面板 → 注册表接线", () => {
     expect(host.querySelector("pre.code")).toBeNull();
   });
 
-  it("注册表认领不了的**文本**文件 → 降级纯文本", async () => {
+  it("注册表认领不了的**文本**文件 → 降级代码编辑器（CM6，可编辑）", async () => {
     files.set("README", enc("这是一个没有扩展名的文本文件。\n第二行。\n"));
     const host = await preview("README");
-    const pre = await waitFor(host, "pre.code");
-    expect(pre!.textContent).toContain("第二行");
+    const editor = await waitFor(host, ".kb-code-editor .cm-content");
+    expect(editor!.textContent).toContain("第二行");
     expect(host.querySelector(".unsupported")).toBeNull();
   });
 

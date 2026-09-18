@@ -53,6 +53,7 @@ const emit = defineEmits<{
  * 静态引入会把它们塞进启动包——不打开 Markdown 的用户不该付这份代价。
  */
 const MarkdownEditor = defineAsyncComponent(() => import("./editor/MarkdownEditor.vue"));
+const CodeEditor = defineAsyncComponent(() => import("./editor/CodeEditor.vue"));
 
 const store = useKnowledgeStore();
 const { t } = useI18n();
@@ -67,6 +68,7 @@ const text = ref<KbText | null>(null);
 /** Markdown 编辑缓冲：CM6 的文档即源文本；改动先落这里，保存走 ⌘S（T7）。 */
 const mdDraft = ref("");
 const mdDirty = ref(false);
+const codeEditorRef = ref<{ setText: (value: string) => void } | null>(null);
 const saving = ref(false);
 /** 磁盘上的文件已被外部改动（保存时 mtime 不符）——弹冲突条让用户选，而不是只丢一句错误。 */
 const conflict = ref(false);
@@ -512,6 +514,11 @@ async function renderViaRegistry(base: string, target: string, size: number, for
   }));
 }
 
+/** 代码文件的编辑输入：与 Markdown 共用缓冲/保存链路（kbWriteText + mtime 冲突检测）。 */
+function onCodeInput(value: string): void {
+  onEditorInput(value);
+}
+
 function onEditorInput(value: string): void {
   mdDraft.value = value;
   mdDirty.value = true;
@@ -632,7 +639,7 @@ watch(
     const base = store.root;
     const target = rel.value;
     if (!encoding || !base || !target) return;
-    if (kind.value === "markdown" && mdDirty.value) {
+    if ((kind.value === "markdown" || kind.value === "text") && mdDirty.value) {
       const ok = await confirmAction(t("kb.encodingReloadDirty"), {
         title: t("kb.encodingSwitch"),
         okLabel: t("kb.encodingReloadOk"),
@@ -742,7 +749,8 @@ watch(
 
 function onKeydown(event: KeyboardEvent): void {
   if (!(event.metaKey || event.ctrlKey) || event.key.toLowerCase() !== "s") return;
-  if (kind.value !== "markdown") return;
+  // Markdown 与代码文件共用同一条保存链路（kbWriteText + 冲突检测）
+  if (kind.value !== "markdown" && kind.value !== "text") return;
   event.preventDefault();
   void saveDraft();
 }
@@ -931,7 +939,7 @@ function onImageLoaded(): void {
           {{ encodingLabel }}
         </button>
         <span v-if="text?.eol === '\r\n'" class="meta chip">CRLF</span>
-        <span v-if="kind === 'markdown' && mdDirty" class="meta dirty" :title="t('kb.unsavedTip')">●</span>
+        <span v-if="(kind === 'markdown' || kind === 'text') && mdDirty" class="meta dirty" :title="t('kb.unsavedTip')">●</span>
       </div>
       <MarkdownToolbar
         v-if="kind === 'markdown'"
@@ -1042,7 +1050,7 @@ function onImageLoaded(): void {
         </button>
       </template>
     </nav>
-    <div ref="bodyEl" class="preview-body" :class="{ 'editor-active': kind === 'markdown' && !!text }">
+    <div ref="bodyEl" class="preview-body" :class="{ 'editor-active': (kind === 'markdown' || kind === 'text') && !!text }">
       <p v-if="!rel" class="hint">{{ t("kb.noSelection") }}</p>
       <!-- 注意：注册表格式（kind === 'other'）**不能**被加载提示挤出分支链 ——
            插件的渲染容器必须先存在，`renderViaRegistry` 才拿得到 ref；
@@ -1115,7 +1123,16 @@ function onImageLoaded(): void {
         @find="onEditorFindKey"
         @contextmenu="openContextMenu"
       />
-      <pre v-else-if="kind === 'text' && text" class="code">{{ text.text }}</pre>
+      <CodeEditor
+        v-else-if="kind === 'text' && text"
+        ref="codeEditorRef"
+        :key="rel ?? ''"
+        :model-value="text.text"
+        :ext="ext"
+        class="code-editor"
+        @update:model-value="onCodeInput"
+        @cursor="store.setCursor"
+      />
       <div v-if="conflict" class="conflict-bar">
         <EditorIcon name="o.alert" />
         <span class="conflict-text">{{ t("kb.conflictText") }}</span>
@@ -1396,6 +1413,11 @@ function onImageLoaded(): void {
   object-fit: contain;
   display: block;
   margin: 0 auto;
+}
+.code-editor {
+  /* 代码编辑器（CM6）：铺满预览区，滚动由 CM6 自己管 */
+  height: 100%;
+  min-height: 0;
 }
 .code {
   /* 纯文本回退视图：同上，自带内边距 */

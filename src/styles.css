@@ -58,6 +58,16 @@
   --btn-primary-border: rgba(240, 246, 252, 0.1);
   --scrollbar-thumb: #45484d;
   --scrollbar-thumb-hover: #55585e;
+  /* 代码语法高亮（CM6 HighlightStyle 引用；明暗各一套，GitHub Dark/Light 取色） */
+  --syntax-comment: #8b949e;
+  --syntax-keyword: #ff7b72;
+  --syntax-function: #d2a8ff;
+  --syntax-number: #79c0ff;
+  --syntax-string: #a5d6ff;
+  --syntax-type: #ffa657;
+  --syntax-definition: #7ee787;
+  --syntax-operator: #dfe1e5;
+  --syntax-meta: #d2a8ff;
 
   color-scheme: dark;
 }
@@ -85,6 +95,16 @@
   --danger-soft: rgba(207, 34, 46, 0.12);
   --danger-banner: rgba(207, 34, 46, 0.08);
   --danger-banner-border: rgba(207, 34, 46, 0.35);
+  /* 代码语法高亮（light = GitHub Light 取色） */
+  --syntax-comment: #6e7781;
+  --syntax-keyword: #cf222e;
+  --syntax-function: #8250df;
+  --syntax-number: #0550ae;
+  --syntax-string: #0a3069;
+  --syntax-type: #953800;
+  --syntax-definition: #116329;
+  --syntax-operator: #24292f;
+  --syntax-meta: #8250df;
   /* 选项色板浅底：平台实测值（Primer *-0），逐项照抄 */
   --tint-gray: #f6f8fa;
   --tint-blue: #ddf4ff;
