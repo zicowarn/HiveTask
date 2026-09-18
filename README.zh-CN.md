@@ -20,13 +20,25 @@ Issue 与 Pull Request。当前对接 GitHub——通过已完成认证的
 
 - **以仓库为中心**：选择任意本地 Git 文件夹即可，仓库归属由 git remote
   自动解析；最近使用的仓库会被记住。
+- **多来源**：GitHub（经 `gh` CLI）、自建 **Gitea**（局域网团队）与纯本地仓库统一在同一
+  个 `Source` 抽象之上；无 remote 的仓库开箱可用本地 Issue（git 事件日志为持久真源）。
 - **Issue / PR 工作台**：按状态浏览（Issue：Open / Closed / All；PR：
   Open / Closed / Merged），列表—详情双栏展示标签、里程碑、负责人、作者
   与日期。
 - **写操作（写穿透）**：评论、关闭 / 重开、合并（merge / squash / rebase）；
   乐观更新、失败回滚、错误就近双语提示。
+- **Projects 式看板**：本地项目层上的 Board / Table / Roadmap 三视图，聚合 Issue、PR
+  与草稿卡；可镜像 GitHub Project（拉取先行，列配置可回发布）。
+- **知识库工作区**：任意文件夹即知识库——懒加载文件树、CodeMirror 6 Markdown 编辑器
+  （表格 / 待办 / KaTeX 公式 / Mermaid 图表实时预览）、**可编辑的代码文件**（同一套编辑器
+  骨架 + 按语言语法高亮，⌘S 保存、原编码回写、外部改动冲突检测）、音视频播放
+  （音频 / 视频 / HLS / FLV / MPEG-TS / LRC 歌词）、文档类富预览（PDF、Office、OFD/XPS、
+  EPUB）、3D 模型、CAD 图纸与 GIS 数据；其余格式一律"用默认应用打开"。
 - **工具工作区**：Git 历史泳道图（分支条、ahead/behind、手动 fetch）与
   集成终端（xterm.js + PTY，shell 可选）。
+- **日历**：月 / 列表视图投影里程碑、Issue·PR、项目日期字段与本地提交热力；iCal
+  订阅（Google / Outlook 私密地址、节假日、节气）支持逐订阅配色；日格农历副行；
+  断网读缓存。
 - **可调分栏**：基于可拖拽、可嵌套分栏的工作台布局，布局持久化。
 - **本地优先缓存**：拉取的数据通过版本化迁移写入
   `<repo>/.hivetask/hivetask.db`（SQLite），无网络时仍可读取。
@@ -38,10 +50,10 @@ Issue 与 Pull Request。当前对接 GitHub——通过已完成认证的
 
 | 阶段 | 内容 |
 |------|------|
-| 当前 | GitHub Issue / PR 读写工作台（经 gh CLI） |
-| 近期 | `Source` trait 抽象 → Gitea 接入（局域网团队）→ 本地 Issue（无 remote 仓库开箱可用） |
-| 中期 | Projects 式看板：统一 Issue 模型上的 Board / Table 视图，跨来源聚合 |
-| 后续 | gh sidecar 打包、OAuth Device Flow 认证 GUI、同步间隔偏好 |
+| 当前 | 多来源仓库工作台——GitHub / Gitea / 本地库：Issue·PR 工作台、Projects 式看板（Board / Table / Roadmap）、知识库工作区、工具（Git 历史 / 终端 / 日历） |
+| 近期 | 日历日程与提醒（S4）；Gitee / GitLab 来源；同步间隔偏好 |
+| 中期 | 跨来源聚合与报表；知识库图谱；项目甘特图 |
+| 后续 | 多端同步端点与账号（商用前瞻） |
 
 PR 审查（diff、行内评论、approve、CI checks）不在桌面端复刻，一律跳转浏览器。
 
@@ -146,8 +158,12 @@ HiveTask/
   **[Mermaid](https://mermaid.js.org)**（MIT），全部本地渲染、无远程服务。
 - **编辑器内核** —— **[CodeMirror 6](https://codemirror.net)**（MIT）。
 - **预览蓝图** —— **[open-file-viewer](https://github.com/xushanpei/open-file-viewer)**
-  （MIT）：各格式预览插件逐文件对照移植（18 个插件覆盖其全格式面），其默认 CDN 路径全部改由随包资源承担；
+  （MIT）：各格式预览插件逐文件对照移植（20 个插件覆盖其全格式面），其默认 CDN 路径全部改由随包资源承担；
   OFD / XPS / LRC / DXF 为自研解析，逐格式对照见 [`docs/kb-preview-formats.md`](./docs/kb-preview-formats.md)。
+- **媒体播放** —— **[hls.js](https://github.com/video-dev/hls.js)**（Apache-2.0）负责 HLS
+  播放列表（分片经自定义 loader 从知识库本地读）；**[mpegts.js](https://github.com/xqq/mpegts.js)**
+  （Apache-2.0）负责 FLV / MPEG-TS。
+- **日历** —— **[FullCalendar](https://fullcalendar.io)** v6（MIT；锁 v6 线是因为 v7 视图插件尚未跟上）负责月/列表网格；**[chinese-lunisolar-calendar](https://crates.io/crates/chinese-lunisolar-calendar)**（MIT）负责农历。节假日与节气数据一律来自用户自建 iCal 订阅，不随包内置。
 - **评估未采用** —— MarkText/muya、Vditor、headless-tree（结论留在 THIRD-PARTY.md，避免重复评估）。
 
 ## 许可证

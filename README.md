@@ -23,14 +23,32 @@ Projects-style boards over the unified model. See "Roadmap" below.
 - **Repository-centric** — point HiveTask at any local Git folder; the
   repository is resolved from its git remotes. Recent repositories are
   remembered.
+- **Multi-source** — GitHub (via the `gh` CLI), self-hosted **Gitea** instances
+  (LAN teams), and purely local repositories behind one `Source` abstraction;
+  no-remote repositories get first-class local issues backed by a git event log.
 - **Issue & PR workbench** — browse by state (issues: Open / Closed / All;
   pulls: Open / Closed / Merged) in a list–detail layout with labels,
   milestones, assignees, authors, and dates.
 - **Write actions (write-through)** — comment, close / reopen, and merge
   (merge / squash / rebase), with optimistic updates, rollback on failure,
   and localized error toasts.
+- **Projects-style boards** — Board / Table / Roadmap views over a local
+  project layer that aggregates issues, PRs and draft cards, and can mirror a
+  GitHub Project (pull-first; column edits publish back).
+- **Knowledge workspace** — open any folder as a knowledge base: a lazy file
+  tree, a CodeMirror 6 Markdown editor with live preview (tables, task lists,
+  KaTeX math, Mermaid diagrams), editable code files with syntax highlighting
+  (same editor chrome, per-language highlighting, ⌘S save with encoding
+  round-trip and external-change conflict detection), media playback
+  (audio / video / HLS / FLV / MPEG-TS / LRC), rich read-only previews for
+  documents (PDF, Office, OFD/XPS, EPUB), 3D models, CAD drawings and GIS
+  data, and an "open in default app" fallback for everything else.
 - **Tools workspace** — a git history lane graph (branch bars, ahead/behind,
   manual fetch) and an integrated terminal (xterm.js + PTY, selectable shell).
+- **Calendar** — month / list views projecting milestones, issues & PRs,
+  project date fields and local commit activity onto one grid; iCal
+  subscriptions (Google / Outlook private addresses, holidays, solar terms)
+  with per-feed colors; lunar dates in day cells; offline-cached.
 - **Resizable panes** — the workbench is built on a draggable, nestable
   split-pane layout with persisted layouts.
 - **Local-first cache** — fetched data is stored in
@@ -46,10 +64,10 @@ Projects-style boards over the unified model. See "Roadmap" below.
 
 | Stage | Scope |
 |-------|-------|
-| Now | GitHub issue / PR read-write workbench (via gh CLI) |
-| Next | `Source` trait abstraction → Gitea integration (LAN teams) → local issues (no-remote repos out of the box) |
-| Later | Projects-style boards: Board / Table views over the unified issue model, aggregated across sources |
-| Eventually | bundled gh sidecar, OAuth Device Flow GUI, sync-interval preferences |
+| Now | Multi-source repository workbench — GitHub / Gitea / local: issue & PR workbench, Projects-style boards (Board / Table / Roadmap), knowledge workspace, tools (git history / terminal / calendar) |
+| Next | Calendar schedules & reminders (S4); Gitee / GitLab sources; sync-interval preferences |
+| Later | Cross-source aggregation & reports; knowledge graph; project Gantt |
+| Eventually | Multi-device sync endpoints & accounts |
 
 PR review (diffs, inline comments, approvals, CI checks) is deliberately not
 re-implemented on the desktop — it always opens in the browser.
@@ -158,9 +176,13 @@ third-party notices. In short:
   **[Mermaid](https://mermaid.js.org)** (MIT), both rendered locally with no remote services.
 - **Editor engine** — **[CodeMirror 6](https://codemirror.net)** (MIT).
 - **Preview blueprint** — **[open-file-viewer](https://github.com/xushanpei/open-file-viewer)**
-  (MIT) for the per-format preview plugins (18 plugins covering its full format surface), with all of its
+  (MIT) for the per-format preview plugins (20 plugins covering its full format surface), with all of its
   default CDN paths replaced by bundled assets. OFD / XPS / LRC / DXF are our own parsers; the per-format
   breakdown is in [`docs/kb-preview-formats.md`](./docs/kb-preview-formats.md).
+- **Media playback** — **[hls.js](https://github.com/video-dev/hls.js)** (Apache-2.0) for HLS
+  playlists (fragments read from the knowledge base through a custom loader) and
+  **[mpegts.js](https://github.com/xqq/mpegts.js)** (Apache-2.0) for FLV / MPEG-TS.
+- **Calendar** — **[FullCalendar](https://fullcalendar.io)** v6 (MIT; the v6 line is pinned because the v7 view plugins still lag) for the month/list grid, and **[chinese-lunisolar-calendar](https://crates.io/crates/chinese-lunisolar-calendar)** (MIT) for lunar dates. Holiday and solar-term data arrive through user-added iCal subscriptions and are never bundled.
 - **Evaluated, not adopted** — MarkText/muya, Vditor, headless-tree (kept on record in THIRD-PARTY.md).
 
 ## License
