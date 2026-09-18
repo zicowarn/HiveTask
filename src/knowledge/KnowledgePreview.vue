@@ -1887,19 +1887,42 @@ function onImageLoaded(): void {
   background: var(--bg-app);
   position: relative; /* 角标以此为定位基准 */
 }
-/* 地图右上信息角标：与 Leaflet attribution 同区域，显示要素数与底图状态 */
+/* 地图右上：信息角标 + scale bar + attribution 三者归一处。
+   角标最顶，scale bar 和 attribution 由 Leaflet 排在下方。
+   `.leaflet-top` 是 Leaflet 控制容器的类，让它紧凑一些。 */
 .preview-host :deep(.kb-gis-info-corner) {
   position: absolute;
   top: 4px;
-  right: 70px; /* 给 attribution 留位 */
+  right: 4px;
   z-index: 450;
   padding: 2px 8px;
-  background: rgba(255, 255, 255, 0.85);
+  background: rgba(255, 255, 255, 0.88);
   color: var(--text);
   font-size: var(--font-sm);
   border-radius: 4px;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
   pointer-events: none;
+}
+/* Leaflet 的右上控制容器：紧凑排列，与角标视觉统一 */
+.preview-host :deep(.kb-gis-map .leaflet-top.leaflet-right) {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+  margin-top: 30px; /* 给上方的角标让位 */
+  margin-right: 4px;
+}
+.preview-host :deep(.kb-gis-map .leaflet-top.leaflet-right .leaflet-control-scale-line) {
+  border-color: var(--border);
+  background: rgba(255, 255, 255, 0.85);
+  color: var(--text);
+  font-size: var(--font-xs);
+}
+.preview-host :deep(.kb-gis-map .leaflet-top.leaflet-right .leaflet-control-attribution) {
+  background: rgba(255, 255, 255, 0.85);
+  color: var(--text-dim);
+  font-size: var(--font-xs);
+  padding: 1px 4px;
 }
 /* leaflet 自带控件要跟我们的 token 走（它默认白底黑字，深色主题下刺眼） */
 .preview-host :deep(.leaflet-container) {

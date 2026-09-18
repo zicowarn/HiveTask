@@ -204,8 +204,9 @@ fn ensure_connection_for_host(
     Ok(Some(id))
 }
 
-/// 仅远端登记仓库的缓存目录（app data 下，按 owner/repo 隔离）。
-/// storage.rs 把它当普通仓库目录用（内部建 .hivetask/）。
+/// 仅远端登记仓库的合成仓库目录（app data 下，按 owner/repo 隔离）。
+/// 当作普通仓库根用：journal 引用住它的 .git；SQLite 索引在
+/// repo-index/（见 storage.rs，不再向目录内写 .hivetask/）。
 pub fn remote_cache_dir(owner: &str, repo: &str) -> Option<PathBuf> {
     app_data_dir().map(|d| d.join("repos-cache").join(owner).join(repo))
 }

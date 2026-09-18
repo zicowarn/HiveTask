@@ -1,9 +1,25 @@
-//! Local cache: `<repo>/.hivetask/hivetask.db` (SQLite).
+//! Per-repo index cache (SQLite), stored under the **app data directory**:
+//! `repo-index/<目录名>-<路径指纹>/hivetask.db`（与 app.db 同一屋檐，见 appdb.rs）。
+//!
+//! 为什么不在仓库工作区里（历史布局 `<repo>/.hivetask/hivetask.db`）：
+//! 应用数据写进用户仓库属于入侵——要在 `.git/info/exclude` 打补丁、
+//! worktree（.git 是文件）兜不住、clone 之间不互通，还得挨个清理。
+//! 现在索引全部落在应用自己的地盘；仓库里只保留**事件日志真源**
+//! `refs/hivetask/issues`（git 隐藏引用：不进工作区、无需 gitignore、
+//! 可随仓库共享，见 journal.rs）。
+//!
+//! 索引是可重建的物化视图：GitHub 缓存靠重新拉取；本地 Issue 靠 journal
+//! 全量重放（幂等，编号随事件持久化）。因此索引永远不需要同步。
+//!
+//! 首次 `open` 会迁移历史布局：把 `<repo>/.hivetask/hivetask.db`
+//! （含两套调用约定打架产生的嵌套 `.hivetask/.hivetask/hivetask.db`）
+//! 移入索引目录，删掉空掉的 `.hivetask/`，并撤销当年追加进
+//! `.git/info/exclude` 的 `.hivetask/` 行。
 //!
 //! The migration scripts are idempotent (CREATE ... IF NOT EXISTS /
-//! INSERT OR IGNORE), so an existing .hivetask/hivetask.db created by an
-//! earlier build keeps working, including older databases that track
-//! versions in the schema_version table rather than PRAGMA user_version.
+//! INSERT OR IGNORE), so an existing database created by an earlier build
+//! keeps working, including older databases that track versions in the
+//! schema_version table rather than PRAGMA user_version.
 //! Migration 003 is an ALTER TABLE guarded solely by the user_version gate,
 //! so it runs exactly once.
 
@@ -25,41 +41,137 @@ const MIGRATION_006: &str = include_str!("migrations/006_issue_number_text.sql")
 /// Latest schema revision tracked through PRAGMA user_version.
 const CURRENT_SCHEMA_VERSION: i64 = 6;
 
-pub fn db_path(repo: &Path) -> PathBuf {
-    repo.join(".hivetask").join("hivetask.db")
+/// 索引库根目录：app data 下的 repo-index/。测试构建重定向到 temp
+/// 目录（按进程隔离），绝不写真实 app data。
+fn index_base() -> Result<PathBuf> {
+    #[cfg(test)]
+    {
+        let guard = TEST_INDEX_BASE.lock().unwrap();
+        return Ok(match guard.as_ref() {
+            Some(dir) => dir.clone(),
+            None => std::env::temp_dir().join(format!("hivetask-test-index-{}", std::process::id())),
+        });
+    }
+    #[cfg(not(test))]
+    {
+        Ok(crate::appdb::app_data_dir()
+            .context("无法定位 app data 目录")?
+            .join("repo-index"))
+    }
 }
 
-/// Open (creating if needed) the per-repo cache database and migrate it.
-pub fn open(repo: &Path) -> Result<Connection> {
-    let dir = repo.join(".hivetask");
-    std::fs::create_dir_all(&dir)
-        .with_context(|| format!("创建缓存目录失败: {}", dir.display()))?;
+/// 测试用：显式指定索引根目录（None = 默认 temp 隔离目录）。
+#[cfg(test)]
+pub(crate) static TEST_INDEX_BASE: std::sync::Mutex<Option<PathBuf>> = std::sync::Mutex::new(None);
 
-    let mut conn = Connection::open(db_path(repo))
-        .with_context(|| format!("打开数据库失败: {}", db_path(repo).display()))?;
+/// FNV-1a 64：给仓库根路径生成稳定短指纹。自实现 10 行，
+/// 不为它引入 hash 依赖。
+fn fnv1a64(data: &str) -> u64 {
+    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+    for byte in data.as_bytes() {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    hash
+}
+
+/// 仓库根 → 索引目录名：`<目录名>-<路径指纹16hex>`。同名目录靠指纹区分，
+/// 指纹让人能从目录名反查归属。
+fn index_dir_name(repo_root: &Path) -> String {
+    let path = repo_root
+        .canonicalize()
+        .unwrap_or_else(|_| repo_root.to_path_buf());
+    let name = path
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_else(|| "repo".to_string());
+    format!("{name}-{:016x}", fnv1a64(&path.to_string_lossy()))
+}
+
+/// 仓库根对应的索引目录（open 内部用；测试用它定位并清理）。
+pub(crate) fn index_dir_for(repo_root: &Path) -> Result<PathBuf> {
+    Ok(index_base()?.join(index_dir_name(repo_root)))
+}
+
+/// 仓库根 → 索引库文件路径（只读旁路用；一般走 [`open`]）。
+pub fn index_db_path(repo_root: &Path) -> Result<PathBuf> {
+    Ok(index_dir_for(repo_root)?.join("hivetask.db"))
+}
+
+/// Open (creating if needed) the per-repo index database and migrate it.
+///
+/// `repo_root` 是仓库根本身（本地克隆的工作区，或仅远端仓库在 app data
+/// 下的合成目录 repos-cache/<owner>/<repo>）——本函数**不向仓库内写任何文件**。
+pub fn open(repo_root: &Path) -> Result<Connection> {
+    let index_dir = index_dir_for(repo_root)?;
+    std::fs::create_dir_all(&index_dir)
+        .with_context(|| format!("创建索引目录失败: {}", index_dir.display()))?;
+    migrate_legacy_index(repo_root, &index_dir);
+
+    let mut conn = Connection::open(index_dir.join("hivetask.db"))
+        .with_context(|| format!("打开索引库失败: {}", index_dir.display()))?;
     conn.pragma_update(None, "foreign_keys", true)?;
 
-    ensure_git_exclude(repo);
     migrate(&mut conn)?;
     Ok(conn)
 }
 
-/// Best-effort: keep `.hivetask/` out of `git status` by appending it to the
-/// repo-local `.git/info/exclude` (works without touching the user's tracked
-/// .gitignore; silently skipped for worktrees where .git is a file).
-fn ensure_git_exclude(repo: &Path) {
-    let exclude = repo.join(".git").join("info").join("exclude");
-    let Ok(_) = std::fs::read_to_string(&exclude) else { return };
-    let Ok(existing) = std::fs::read_to_string(&exclude) else { return };
-    if existing.lines().any(|line| line.trim() == ".hivetask/") {
+/// 历史布局的遗留位置：`<repo>/.hivetask/hivetask.db` 与嵌套
+/// `.hivetask/.hivetask/hivetask.db`（lib.rs 与 local.rs 曾对 open 传
+/// 两种目录约定）。两份并存时取 mtime 较新的一份。索引可重建，迁移失败
+/// 不阻塞（旧文件原样保留，数据靠拉取/重放自愈）。
+fn migrate_legacy_index(repo_root: &Path, index_dir: &Path) {
+    let target = index_dir.join("hivetask.db");
+    if target.exists() {
         return;
     }
-    let mut content = existing;
-    if !content.ends_with('\n') && !content.is_empty() {
-        content.push('\n');
+    let shallow = repo_root.join(".hivetask").join("hivetask.db");
+    let nested = repo_root.join(".hivetask").join(".hivetask").join("hivetask.db");
+    let source = match (fresh_mtime(&shallow), fresh_mtime(&nested)) {
+        (Some(a), Some(b)) if b > a => nested,
+        (Some(_), _) => shallow,
+        (None, Some(_)) => nested,
+        (None, None) => return,
+    };
+    if std::fs::rename(&source, &target).is_err() {
+        // 跨文件系统 rename（EXDEV）→ 复制 + 删除兜底
+        if std::fs::copy(&source, &target).is_err() {
+            return;
+        }
+        let _ = std::fs::remove_file(&source);
     }
-    content.push_str(".hivetask/\n");
-    let _ = std::fs::write(&exclude, content);
+    // 清掉空目录（remove_dir 只删空目录，绝不动用户文件）。
+    let _ = std::fs::remove_dir(repo_root.join(".hivetask").join(".hivetask"));
+    let _ = std::fs::remove_dir(repo_root.join(".hivetask"));
+    unexclude(repo_root);
+}
+
+fn fresh_mtime(path: &Path) -> Option<std::time::SystemTime> {
+    std::fs::metadata(path).ok()?.modified().ok()
+}
+
+/// 撤销 ensure_git_exclude 时代写入的 `.hivetask/` 行；其余行原样保留。
+fn unexclude(repo_root: &Path) {
+    let exclude = repo_root.join(".git").join("info").join("exclude");
+    let Ok(content) = std::fs::read_to_string(&exclude) else { return };
+    let kept: Vec<&str> = content.lines().filter(|l| l.trim() != ".hivetask/").collect();
+    if kept.len() == content.lines().count() {
+        return;
+    }
+    let mut out = kept.join("\n");
+    if content.ends_with('\n') && !out.is_empty() {
+        out.push('\n');
+    }
+    let _ = std::fs::write(&exclude, out);
+}
+
+/// 测试清理：仓库临时目录 + 它在索引根下的目录一起删。
+#[cfg(test)]
+pub(crate) fn cleanup_repo_and_index(repo: &Path) {
+    std::fs::remove_dir_all(repo).ok();
+    if let Ok(dir) = index_dir_for(repo) {
+        std::fs::remove_dir_all(dir).ok();
+    }
 }
 
 fn migrate(conn: &mut Connection) -> Result<()> {
@@ -535,7 +647,7 @@ mod tests {
             conn.pragma_query_value(None, "user_version", |row| row.get(0)).unwrap();
         assert_eq!(version, CURRENT_SCHEMA_VERSION);
         assert_eq!(cached_issue_count(&conn, "all").unwrap(), 1);
-        std::fs::remove_dir_all(&repo).ok();
+        cleanup_repo_and_index(&repo);
     }
 
     #[test]
@@ -562,7 +674,7 @@ mod tests {
         assert_eq!(open_issues[0].number, "3");
         assert_eq!(open_issues[0].labels, vec!["bug".to_string()]);
 
-        std::fs::remove_dir_all(&repo).ok();
+        cleanup_repo_and_index(&repo);
     }
 
     #[test]
@@ -584,7 +696,7 @@ mod tests {
             list_issues(&conn, "open").unwrap().into_iter().map(|i| i.number).collect();
         // 纯数字编号按数值序（长度优先再字典），字母编号字典序兜底在最后。
         assert_eq!(numbers, vec!["10", "2", "1", "IKCTH7"]);
-        std::fs::remove_dir_all(&repo).ok();
+        cleanup_repo_and_index(&repo);
     }
 
     fn sample_pull(number: i64, state: &str) -> Pull {
@@ -640,7 +752,7 @@ mod tests {
         assert_eq!(open[0].review_decision.as_deref(), Some("APPROVED"));
         assert_eq!(open[0].head_ref.as_deref(), Some("feature"));
 
-        std::fs::remove_dir_all(&repo).ok();
+        cleanup_repo_and_index(&repo);
     }
 }
 
@@ -699,7 +811,7 @@ mod comment_tests {
         assert_eq!(resynced.len(), 1);
         assert_eq!(resynced[0].author.as_deref(), Some("dave"));
 
-        std::fs::remove_dir_all(&repo).ok();
+        cleanup_repo_and_index(&repo);
     }
 
     #[test]
@@ -728,7 +840,7 @@ mod comment_tests {
         assert_eq!(closed_bucket.len(), 1);
         assert_eq!(closed_bucket[0].state, "CLOSED");
 
-        std::fs::remove_dir_all(&repo).ok();
+        cleanup_repo_and_index(&repo);
     }
 
     #[test]
@@ -758,7 +870,7 @@ mod comment_tests {
         let comments = list_comments(&conn, "issue", "7").unwrap();
         assert_eq!(comments.len(), 1);
         assert_eq!(comments[0].author.as_deref(), Some("alice"));
-        std::fs::remove_dir_all(&repo).ok();
+        cleanup_repo_and_index(&repo);
     }
 }
 
@@ -796,17 +908,17 @@ mod meta_tests {
         // RFC3339 shape from strftime.
         assert!(value.ends_with('Z') && value.contains('T'), "got {value}");
 
-        std::fs::remove_dir_all(&repo).ok();
+        cleanup_repo_and_index(&repo);
     }
 }
 
 #[cfg(test)]
-mod exclude_tests {
+mod layout_tests {
     use super::*;
 
     fn temp_repo() -> PathBuf {
         let dir = std::env::temp_dir().join(format!(
-            "hivetask-excl-{}-{}",
+            "hivetask-layout-{}-{}",
             std::process::id(),
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -818,21 +930,72 @@ mod exclude_tests {
     }
 
     #[test]
-    fn hivetask_excluded_once() {
+    fn open_never_writes_inside_the_repo() {
         let repo = temp_repo();
-        // init a real git repo so .git/info/ exists
         git2::Repository::init(&repo).unwrap();
+        let exclude_before =
+            std::fs::read_to_string(repo.join(".git/info/exclude")).unwrap();
+
         open(&repo).unwrap();
-        open(&repo).unwrap(); // idempotent second open
+        open(&repo).unwrap(); // 重复 open 同样不动仓库
 
-        let exclude = std::fs::read_to_string(repo.join(".git/info/exclude")).unwrap();
-        assert_eq!(exclude.lines().filter(|l| l.trim() == ".hivetask/").count(), 1);
+        assert!(!repo.join(".hivetask").exists(), "仓库内不得出现 .hivetask/");
+        let exclude_after =
+            std::fs::read_to_string(repo.join(".git/info/exclude")).unwrap();
+        assert_eq!(exclude_before, exclude_after, ".git/info/exclude 不得被改动");
+        cleanup_repo_and_index(&repo);
+    }
 
-        // A repo without .git dir must not crash storage::open.
-        let plain = std::env::temp_dir().join(format!("hivetask-plain-{}", std::process::id()));
-        std::fs::create_dir_all(&plain).unwrap();
-        let _ = open(&plain);
-        std::fs::remove_dir_all(&plain).ok();
-        std::fs::remove_dir_all(&repo).ok();
+    #[test]
+    fn legacy_index_is_migrated_out_of_the_repo() {
+        let repo = temp_repo();
+        git2::Repository::init(&repo).unwrap();
+        // ① 历史布局：<repo>/.hivetask/hivetask.db（带数据）+ 当年追加的 exclude 行
+        let legacy_dir = repo.join(".hivetask");
+        std::fs::create_dir_all(&legacy_dir).unwrap();
+        {
+            let conn = Connection::open(legacy_dir.join("hivetask.db")).unwrap();
+            conn.execute_batch(MIGRATION_001).unwrap();
+            conn.execute("INSERT INTO issues (number, title, state) VALUES ('7', 'legacy', 'OPEN')", [])
+                .unwrap();
+        }
+        let exclude = repo.join(".git/info/exclude");
+        let existing = std::fs::read_to_string(&exclude).unwrap_or_default();
+        let mut exclude_content = existing;
+        exclude_content.push_str("# 我自己的规则\n.hivetask/\n");
+        std::fs::write(&exclude, &exclude_content).unwrap();
+
+        // ② open：迁移 + 正常可用
+        let conn = open(&repo).unwrap();
+        assert_eq!(cached_issue_count(&conn, "open").unwrap(), 1, "旧数据应随库迁入");
+
+        // ③ 仓库目录被还原干净
+        assert!(!repo.join(".hivetask").exists(), "迁移后 .hivetask/ 应被清掉");
+        let cleaned = std::fs::read_to_string(&exclude).unwrap();
+        assert!(!cleaned.lines().any(|l| l.trim() == ".hivetask/"), "exclude 里的 .hivetask/ 行应被撤销");
+        assert!(cleaned.lines().any(|l| l.trim() == "# 我自己的规则"), "exclude 原有内容应保留");
+
+        // ④ 库真的落在索引目录里
+        assert!(index_dir_for(&repo).unwrap().join("hivetask.db").is_file());
+        cleanup_repo_and_index(&repo);
+    }
+
+    #[test]
+    fn nested_legacy_index_is_migrated_and_both_dirs_removed() {
+        let repo = temp_repo();
+        git2::Repository::init(&repo).unwrap();
+        // 历史双拼 bug：lib.rs 传 <repo>/.hivetask、open 再 join 一次
+        let nested_dir = repo.join(".hivetask").join(".hivetask");
+        std::fs::create_dir_all(&nested_dir).unwrap();
+        {
+            let conn = Connection::open(nested_dir.join("hivetask.db")).unwrap();
+            conn.execute_batch(MIGRATION_001).unwrap();
+            conn.execute("INSERT INTO issues (number, title, state) VALUES ('8', 'nested', 'OPEN')", [])
+                .unwrap();
+        }
+        let conn = open(&repo).unwrap();
+        assert_eq!(cached_issue_count(&conn, "open").unwrap(), 1);
+        assert!(!repo.join(".hivetask").exists(), "嵌套的两层都应被清掉");
+        cleanup_repo_and_index(&repo);
     }
 }

@@ -23,20 +23,22 @@ fn resolve(target: &str) -> Result<source::RepoRef, String> {
     source::resolve_target(target).map_err(|e| e.to_string())
 }
 
-/// Git 面板命令需要真实本地路径（git2）；仅远端登记明确报错。
-/// hivetask.db 所在目录：本地克隆 → <repo>/.hivetask/；仅远端 →
-/// app data 的 repos-cache/<owner>/<repo>/（storage.rs 零改动）。
+/// 缓存/索引类命令的仓库根：本地克隆 → 工作区本身；仅远端 →
+/// app data 的 repos-cache/<owner>/<repo>/（合成仓库目录，journal 引用
+/// 住它的 .git；SQLite 索引在 app data 的 repo-index/，见 storage.rs）。
 /// 缓存命令的容错版：target 无法解析（非 git 目录）时退到 temp 隔离目录，
 /// 让缓存读写降级为空集而不是报错。
-fn storage_dir_for_target(target: &str) -> PathBuf {
+fn repo_root_for_target(target: &str) -> PathBuf {
     source::resolve_target(target)
-        .map(|r| storage_dir_of(&r))
+        .map(|r| repo_root_of(&r))
         .unwrap_or_else(|_| std::env::temp_dir().join("hivetask-orphan").join(target.replace('/', "_")))
 }
 
-fn storage_dir_of(repo: &source::RepoRef) -> PathBuf {
+/// 传给 storage::open 的是仓库根本身——索引不再写进仓库（历史布局
+/// `<repo>/.hivetask/` 由 storage 首次 open 时自动迁出）。
+fn repo_root_of(repo: &source::RepoRef) -> PathBuf {
     if let Some(workdir) = &repo.workdir {
-        return workdir.join(".hivetask");
+        return workdir.clone();
     }
     appdb::remote_cache_dir(&repo.owner, &repo.repo)
         .unwrap_or_else(|| std::env::temp_dir().join(format!("hivetask-{}-{}", repo.owner, repo.repo)))
@@ -189,7 +191,7 @@ fn refresh_issues(repo_path: String, state: String, limit: u32) -> Result<Vec<Is
     let repo = resolve(&repo_path)?;
     let filter = IssueStateFilter::parse(&state).map_err(|e| e.to_string())?;
     let issues = source::source_for_ref(repo.platform.as_deref(), &repo.host).fetch_issues(&repo, filter, limit).map_err(|e| e.to_string())?;
-    let mut conn = storage::open(&storage_dir_of(&repo)).map_err(|e| e.to_string())?;
+    let mut conn = storage::open(&repo_root_of(&repo)).map_err(|e| e.to_string())?;
     storage::replace_issues(&mut conn, &state, &issues).map_err(|e| e.to_string())?;
     storage::stamp_synced(&conn, &format!("synced:issues:{state}")).map_err(|e| e.to_string())?;
     Ok(issues)
@@ -198,13 +200,13 @@ fn refresh_issues(repo_path: String, state: String, limit: u32) -> Result<Vec<Is
 /// Read issues from the offline cache without touching the network.
 #[tauri::command]
 fn list_cached_issues(repo_path: String, state: String) -> Result<Vec<Issue>, String> {
-    let conn = storage::open(&storage_dir_for_target(&repo_path)).map_err(|e| e.to_string())?;
+    let conn = storage::open(&repo_root_for_target(&repo_path)).map_err(|e| e.to_string())?;
     storage::list_issues(&conn, &state).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 fn cached_issue_count(repo_path: String, state: String) -> Result<i64, String> {
-    let conn = storage::open(&storage_dir_for_target(&repo_path)).map_err(|e| e.to_string())?;
+    let conn = storage::open(&repo_root_for_target(&repo_path)).map_err(|e| e.to_string())?;
     storage::cached_issue_count(&conn, &state).map_err(|e| e.to_string())
 }
 
@@ -215,7 +217,7 @@ fn refresh_pulls(repo_path: String, state: String, limit: u32) -> Result<Vec<Pul
     let repo = resolve(&repo_path)?;
     let filter = PullStateFilter::parse(&state).map_err(|e| e.to_string())?;
     let pulls = source::source_for_ref(repo.platform.as_deref(), &repo.host).fetch_pulls(&repo, filter, limit).map_err(|e| e.to_string())?;
-    let mut conn = storage::open(&storage_dir_of(&repo)).map_err(|e| e.to_string())?;
+    let mut conn = storage::open(&repo_root_of(&repo)).map_err(|e| e.to_string())?;
     storage::replace_pulls(&mut conn, &state, &pulls).map_err(|e| e.to_string())?;
     storage::stamp_synced(&conn, &format!("synced:pulls:{state}")).map_err(|e| e.to_string())?;
     Ok(pulls)
@@ -227,7 +229,7 @@ fn refresh_pulls(repo_path: String, state: String, limit: u32) -> Result<Vec<Pul
 fn refresh_pull_detail(repo_path: String, number: i64) -> Result<Pull, String> {
     let repo = resolve(&repo_path)?;
     let pull = source::source_for_ref(repo.platform.as_deref(), &repo.host).fetch_pull_detail(&repo, &number.to_string()).map_err(|e| e.to_string())?;
-    let conn = storage::open(&storage_dir_of(&repo)).map_err(|e| e.to_string())?;
+    let conn = storage::open(&repo_root_of(&repo)).map_err(|e| e.to_string())?;
     storage::upsert_pull(&conn, &pull).map_err(|e| e.to_string())?;
     Ok(pull)
 }
@@ -235,13 +237,13 @@ fn refresh_pull_detail(repo_path: String, number: i64) -> Result<Pull, String> {
 /// Read PRs from the offline cache without touching the network.
 #[tauri::command]
 fn list_cached_pulls(repo_path: String, state: String) -> Result<Vec<Pull>, String> {
-    let conn = storage::open(&storage_dir_for_target(&repo_path)).map_err(|e| e.to_string())?;
+    let conn = storage::open(&repo_root_for_target(&repo_path)).map_err(|e| e.to_string())?;
     storage::list_pulls(&conn, &state).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 fn cached_pull_count(repo_path: String, state: String) -> Result<i64, String> {
-    let conn = storage::open(&storage_dir_for_target(&repo_path)).map_err(|e| e.to_string())?;
+    let conn = storage::open(&repo_root_for_target(&repo_path)).map_err(|e| e.to_string())?;
     storage::cached_pull_count(&conn, &state).map_err(|e| e.to_string())
 }
 
@@ -251,7 +253,7 @@ fn merge_pull(repo_path: String, number: i64, method: String) -> Result<Pull, St
     let method = MergeMethod::parse(&method).map_err(|e| e.to_string())?;
     let repo = resolve(&repo_path)?;
     let pull = source::source_for_ref(repo.platform.as_deref(), &repo.host).merge_pull(&repo, &number.to_string(), method).map_err(|e| e.to_string())?;
-    let conn = storage::open(&storage_dir_of(&repo)).map_err(|e| e.to_string())?;
+    let conn = storage::open(&repo_root_of(&repo)).map_err(|e| e.to_string())?;
     storage::upsert_pull(&conn, &pull).map_err(|e| e.to_string())?;
     Ok(pull)
 }
@@ -345,7 +347,7 @@ fn branch_delete(repo_path: String, name: String, force: bool) -> Result<(), Str
 /// All recorded sync timestamps for the status bar's "last updated" cell.
 #[tauri::command]
 fn list_synced_at(repo_path: String) -> Result<Vec<(String, String)>, String> {
-    let conn = storage::open(&storage_dir_for_target(&repo_path)).map_err(|e| e.to_string())?;
+    let conn = storage::open(&repo_root_for_target(&repo_path)).map_err(|e| e.to_string())?;
     storage::list_synced(&conn).map_err(|e| e.to_string())
 }
 
@@ -365,7 +367,7 @@ fn list_cached_comments(
     number: String,
 ) -> Result<Vec<Comment>, String> {
     let kind = Kind::parse(&kind).map_err(|e| e.to_string())?;
-    let conn = storage::open(&storage_dir_for_target(&repo_path)).map_err(|e| e.to_string())?;
+    let conn = storage::open(&repo_root_for_target(&repo_path)).map_err(|e| e.to_string())?;
     storage::list_comments(&conn, kind.as_str(), &number).map_err(|e| e.to_string())
 }
 
@@ -375,7 +377,7 @@ fn fetch_comments(repo_path: String, kind: String, number: String) -> Result<Vec
     let kind = Kind::parse(&kind).map_err(|e| e.to_string())?;
     let repo = resolve(&repo_path)?;
     let comments = source::source_for_ref(repo.platform.as_deref(), &repo.host).fetch_comments(&repo, kind, &number).map_err(|e| e.to_string())?;
-    let mut conn = storage::open(&storage_dir_of(&repo)).map_err(|e| e.to_string())?;
+    let mut conn = storage::open(&repo_root_of(&repo)).map_err(|e| e.to_string())?;
     storage::replace_comments(&mut conn, kind.as_str(), &number, &comments).map_err(|e| e.to_string())?;
     Ok(comments)
 }
@@ -391,7 +393,7 @@ fn add_comment(
     let kind = Kind::parse(&kind).map_err(|e| e.to_string())?;
     let repo = resolve(&repo_path)?;
     let comments = source::source_for_ref(repo.platform.as_deref(), &repo.host).add_comment(&repo, kind, &number, &body).map_err(|e| e.to_string())?;
-    let mut conn = storage::open(&storage_dir_of(&repo)).map_err(|e| e.to_string())?;
+    let mut conn = storage::open(&repo_root_of(&repo)).map_err(|e| e.to_string())?;
     storage::replace_comments(&mut conn, kind.as_str(), &number, &comments).map_err(|e| e.to_string())?;
     Ok(comments)
 }
@@ -417,7 +419,7 @@ fn create_issue(
                 .workdir
                 .clone()
                 .ok_or_else(|| "本地仓库缺少工作目录".to_string())?;
-            let mut conn = storage::open(&storage_dir_of(&repo)).map_err(|e| e.to_string())?;
+            let mut conn = storage::open(&repo_root_of(&repo)).map_err(|e| e.to_string())?;
             journal::sync(&workdir, &mut conn).map_err(|e| e.to_string())?;
             let author = journal::current_author(&workdir);
             journal::create_issue(&workdir, &mut conn, &title, body.as_deref(), &author, milestone.as_deref())
@@ -427,7 +429,7 @@ fn create_issue(
             let issue = source::source_for_ref(repo.platform.as_deref(), &repo.host)
                 .create_issue(&repo, &title, body.as_deref(), milestone.as_deref(), &labels, &assignees)
                 .map_err(|e| e.to_string())?;
-            let conn = storage::open(&storage_dir_of(&repo)).map_err(|e| e.to_string())?;
+            let conn = storage::open(&repo_root_of(&repo)).map_err(|e| e.to_string())?;
             storage::upsert_issue(&conn, &issue, &issue_state_source(&repo)).map_err(|e| e.to_string())?;
             issue
         }
@@ -470,7 +472,7 @@ fn create_pull(
     let pull = source::source_for_ref(repo.platform.as_deref(), &repo.host)
         .create_pull(&repo, &head, &base, &title, body.as_deref())
         .map_err(|e| e.to_string())?;
-    let conn = storage::open(&storage_dir_of(&repo)).map_err(|e| e.to_string())?;
+    let conn = storage::open(&repo_root_of(&repo)).map_err(|e| e.to_string())?;
     storage::upsert_pull(&conn, &pull).map_err(|e| e.to_string())?;
     Ok(pull)
 }
@@ -507,7 +509,7 @@ fn set_issue_state(
     let issue = source::source_for_ref(repo.platform.as_deref(), &repo.host)
         .set_issue_state(&repo, &number, closed, reason.as_deref())
         .map_err(|e| e.to_string())?;
-    let conn = storage::open(&storage_dir_of(&repo)).map_err(|e| e.to_string())?;
+    let conn = storage::open(&repo_root_of(&repo)).map_err(|e| e.to_string())?;
     storage::update_issue_state(&conn, &issue.number, &issue.state).map_err(|e| e.to_string())?;
     if closed {
         if let Ok(app) = appdb::open() {
@@ -607,7 +609,7 @@ fn update_issue(
     let issue = source::source_for_ref(repo.platform.as_deref(), &repo.host)
         .update_issue(&repo, &number, &title, body.as_deref())
         .map_err(|e| e.to_string())?;
-    let conn = storage::open(&storage_dir_of(&repo)).map_err(|e| e.to_string())?;
+    let conn = storage::open(&repo_root_of(&repo)).map_err(|e| e.to_string())?;
     conn.execute(
         "UPDATE issues SET title = ?1, body = ?2, synced_at = datetime('now') WHERE number = ?3",
         (issue.title.clone(), issue.body.clone(), issue.number.clone()),
@@ -627,7 +629,7 @@ fn issue_update_milestone(
     let issue = source::source_for_ref(repo.platform.as_deref(), &repo.host)
         .update_issue_milestone(&repo, &number, milestone.as_deref())
         .map_err(|e| e.to_string())?;
-    let conn = storage::open(&storage_dir_of(&repo)).map_err(|e| e.to_string())?;
+    let conn = storage::open(&repo_root_of(&repo)).map_err(|e| e.to_string())?;
     conn.execute(
         "UPDATE issues SET milestone = ?1, synced_at = datetime('now') WHERE number = ?2",
         (issue.milestone.clone(), issue.number.clone()),
@@ -643,7 +645,7 @@ fn issue_update_labels(repo_path: String, number: String, labels: Vec<String>) -
     let issue = source::source_for_ref(repo.platform.as_deref(), &repo.host)
         .update_issue_labels(&repo, &number, &labels)
         .map_err(|e| e.to_string())?;
-    let conn = storage::open(&storage_dir_of(&repo)).map_err(|e| e.to_string())?;
+    let conn = storage::open(&repo_root_of(&repo)).map_err(|e| e.to_string())?;
     conn.execute(
         "UPDATE issues SET labels = ?1, synced_at = datetime('now') WHERE number = ?2",
         (
@@ -666,7 +668,7 @@ fn issue_update_assignees(
     let issue = source::source_for_ref(repo.platform.as_deref(), &repo.host)
         .update_issue_assignees(&repo, &number, &assignees)
         .map_err(|e| e.to_string())?;
-    let conn = storage::open(&storage_dir_of(&repo)).map_err(|e| e.to_string())?;
+    let conn = storage::open(&repo_root_of(&repo)).map_err(|e| e.to_string())?;
     conn.execute(
         "UPDATE issues SET assignees = ?1, synced_at = datetime('now') WHERE number = ?2",
         (
@@ -1056,7 +1058,7 @@ fn convert_draft_to_issue(item_id: String, repo_path: String) -> Result<projects
     }
     let workdir = repo.workdir.clone().ok_or("本地仓库缺少工作目录")?;
     // 3. 仓库侧创建（journal + SQLite）
-    let mut conn = storage::open(&storage_dir_of(&repo)).map_err(|e| e.to_string())?;
+    let mut conn = storage::open(&repo_root_of(&repo)).map_err(|e| e.to_string())?;
     journal::sync(&workdir, &mut conn).map_err(|e| e.to_string())?;
     let author = journal::current_author(&workdir);
     let issue = journal::create_issue(&workdir, &mut conn, &title, body.as_deref(), &author, None)
@@ -1080,7 +1082,7 @@ fn convert_draft_to_issue(item_id: String, repo_path: String) -> Result<projects
 fn set_pull_state(repo_path: String, number: i64, closed: bool) -> Result<Pull, String> {
     let repo = resolve(&repo_path)?;
     let pull = source::source_for_ref(repo.platform.as_deref(), &repo.host).set_pull_state(&repo, &number.to_string(), closed).map_err(|e| e.to_string())?;
-    let conn = storage::open(&storage_dir_of(&repo)).map_err(|e| e.to_string())?;
+    let conn = storage::open(&repo_root_of(&repo)).map_err(|e| e.to_string())?;
     storage::upsert_pull(&conn, &pull).map_err(|e| e.to_string())?;
     Ok(pull)
 }

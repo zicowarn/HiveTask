@@ -131,7 +131,8 @@ async function renderGis(ctx: PreviewContext): Promise<PreviewInstance> {
     zoom: 2,
     worldCopyJump: true,
   });
-  L.control.scale({ imperial: false }).addTo(map);
+  // scale bar + attribution + 信息角标**全部归右上**：三处分散 → 一处（用户要求）
+  L.control.scale({ imperial: false, position: "topright" }).addTo(map);
   L.control.attribution({ position: "topright", prefix: false }).addTo(map);
 
   const layer = L.geoJSON(data, {

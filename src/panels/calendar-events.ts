@@ -34,6 +34,22 @@ export function localDateOf(iso: string | null | undefined): string | null {
   return `${y}-${m}-${day}`;
 }
 
+/** Date → 本地日期键 YYYY-MM-DD（热力角标用；不经 UTC 往返，避免日界漂移）。 */
+export function dateKey(d: Date): string {
+  const m = `${d.getMonth() + 1}`.padStart(2, "0");
+  const day = `${d.getDate()}`.padStart(2, "0");
+  return `${d.getFullYear()}-${m}-${day}`;
+}
+
+/** 提交热力强度档（GitHub 贡献图口径）：0 无 / 1 低 / 2 中 / 3 高 / 4 峰值。 */
+export function heatBucket(count: number): number {
+  if (count <= 0) return 0;
+  if (count <= 2) return 1;
+  if (count <= 5) return 2;
+  if (count <= 9) return 3;
+  return 4;
+}
+
 export interface CalendarEventInput {
   milestones: MilestoneInfo[];
   issues: Issue[];

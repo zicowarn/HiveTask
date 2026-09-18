@@ -442,16 +442,17 @@ fn item_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ProjectItem> {
 const ITEM_SELECT: &str = "SELECT i.*, r.display_name AS repo_label, r.id AS joined_repo_id
  FROM project_items i LEFT JOIN repos r ON r.id = i.repo_id";
 
-/// 注册仓库的缓存目录：本地克隆 → <repo>/.hivetask；仅远端登记 →
-/// app data 的 repos-cache/<owner>/<repo>（与 storage_dir_of 同口径）。
-fn cache_dir_for_repo(conn: &Connection, repo_id: &str) -> Option<std::path::PathBuf> {
+/// 注册仓库的仓库根：本地克隆 → 工作区本身；仅远端登记 →
+/// app data 的 repos-cache/<owner>/<repo>（与 lib.rs repo_root_of 同口径；
+/// 索引库实际在 storage::index_db_path 指向的 app data 里）。
+fn repo_root_for_repo(conn: &Connection, repo_id: &str) -> Option<std::path::PathBuf> {
     let (path, remote_url): (Option<String>, Option<String>) = conn
         .query_row("SELECT path, remote_url FROM repos WHERE id = ?1", (repo_id,), |row| {
             Ok((row.get(0)?, row.get(1)?))
         })
         .ok()?;
     if let Some(dir) = path.filter(|p| !p.is_empty()) {
-        return Some(std::path::PathBuf::from(dir).join(".hivetask"));
+        return Some(std::path::PathBuf::from(dir));
     }
     let url = remote_url.filter(|u| !u.is_empty())?;
     let repo = crate::source::resolve_target(&url).ok()?;
@@ -460,7 +461,7 @@ fn cache_dir_for_repo(conn: &Connection, repo_id: &str) -> Option<std::path::Pat
 
 /// 只读打开仓库缓存库；不存在（从未同步）即返回 None，不因缺缓存报错。
 fn open_cache_readonly(dir: &std::path::Path) -> Option<Connection> {
-    let db = crate::storage::db_path(dir);
+    let Ok(db) = crate::storage::index_db_path(dir) else { return None };
     if !db.exists() {
         return None;
     }
@@ -529,7 +530,7 @@ fn enrich_items(conn: &Connection, items: &mut [ProjectItem]) {
         }
     }
     for (repo_id, refs) in by_repo {
-        let Some(dir) = cache_dir_for_repo(conn, &repo_id) else { continue };
+        let Some(dir) = repo_root_for_repo(conn, &repo_id) else { continue };
         let Some(cache) = open_cache_readonly(&dir) else { continue };
         for kind in ["issue", "pull"] {
             let refs_of_kind: Vec<(String, usize)> = refs

@@ -1,10 +1,10 @@
 //! 本地 Issue 事件日志（`refs/hivetask/issues`）——持久真源。
 //!
 //! 设计定案（知识库《本地Issue与本地分支Review》）：每个 issue 操作 append
-//! 一个事件 commit 到隐藏引用，SQLite `.hivetask/hivetask.db` 是物化视图。
-//! 读走 SQLite；写 = journal + SQLite 双落点（`sync` 重放幂等：编号随事件
-//! 持久化，全量重放不产生漂移）。共享开关只管传输，不影响本模块——日志
-//! 无论是否共享都始终写。
+//! 一个事件 commit 到隐藏引用，SQLite 索引（app data 的 repo-index/，
+//! 见 storage.rs）是物化视图。读走 SQLite；写 = journal + SQLite 双落点
+//! （`sync` 重放幂等：编号随事件持久化，全量重放不产生漂移）。共享开关
+//! 只管传输，不影响本模块——日志无论是否共享都始终写。
 //!
 //! git2 写路径只动 tree/blob/ref，不碰 index 与工作区；签名取仓库
 //! `user.name/email`，缺省回落 "hivetask"。
@@ -451,7 +451,7 @@ pub(crate) mod tests {
     }
 
     fn open_material(workdir: &Path) -> Connection {
-        // storage::open 与生产同构：建 .hivetask/hivetask.db + 全迁移
+        // storage::open 与生产同构：索引库建在 app data（测试为 temp 隔离目录）+ 全迁移
         storage::open(workdir).unwrap()
     }
 
@@ -489,7 +489,7 @@ pub(crate) mod tests {
         assert!(repo.find_reference(REF).is_ok());
         assert_eq!(read_events(&repo).unwrap().len(), 4);
 
-        std::fs::remove_dir_all(&workdir).ok();
+        crate::storage::cleanup_repo_and_index(&workdir);
     }
 
     /// 标签 / 负责人 / 里程碑三个编辑事件：写入生效 + 清空 + 物化丢失后重放恢复。
@@ -536,7 +536,7 @@ pub(crate) mod tests {
         let repo = Repository::open(&workdir).unwrap();
         assert_eq!(read_events(&repo).unwrap().len(), 6);
 
-        std::fs::remove_dir_all(&workdir).ok();
+        crate::storage::cleanup_repo_and_index(&workdir);
     }
 
     #[test]
@@ -547,6 +547,6 @@ pub(crate) mod tests {
         create_issue(&workdir, &mut conn, "a", None, "t", None).unwrap();
         let second = create_issue(&workdir, &mut conn, "b", None, "t", None).unwrap();
         assert_eq!(second.number, "2");
-        std::fs::remove_dir_all(&workdir).ok();
+        crate::storage::cleanup_repo_and_index(&workdir);
     }
 }
