@@ -12,9 +12,8 @@ import { useTheme, type ThemeChoice } from "../../theme";
 import { useSettingsStore } from "../../stores/settings";
 import SourceConnectionsDialog from "../../components/SourceConnectionsDialog.vue";
 import GitHubAuthDialog from "../../components/GitHubAuthDialog.vue";
-import CalendarFeedsDialog from "../CalendarFeedsDialog.vue";
-import DropdownMenu from "../../components/DropdownMenu.vue";
-import { api, isTauri } from "../../api";
+import DropdownMenu, { type DropdownSection } from "../../components/DropdownMenu.vue";
+import { api, isTauri, type CalendarFeed, type ExtApps } from "../../api";
 import { useKnowledgeStore } from "../../stores/knowledge";
 import EditorIcon from "../../components/EditorIcon.vue";
 
@@ -23,7 +22,91 @@ const { theme, setTheme } = useTheme();
 const settings = useSettingsStore();
 
 const connectionsOpen = ref(false);
-const feedsOpen = ref(false);
+
+// ---- 日历订阅：内联子区块（「按扩展名指定」同款形态，无对话框）----
+const feeds = ref<CalendarFeed[]>([]);
+const feedDraft = ref<{ name: string; url: string } | null>(null);
+const feedWorking = ref(false);
+const feedError = ref<string | null>(null);
+const feedSyncingId = ref<string | null>(null);
+/** 两击确认删除。 */
+const feedArmedId = ref<string | null>(null);
+const DEFAULT_FEED_COLOR = "#5b8def";
+
+async function loadFeeds(): Promise<void> {
+  if (!isTauri()) return;
+  try {
+    feeds.value = await api.calendarFeedList();
+  } catch (e) {
+    feedError.value = String(e);
+  }
+}
+function addFeedDraft(): void {
+  feedDraft.value = { name: "", url: "" };
+}
+async function commitFeedDraft(): Promise<void> {
+  const d = feedDraft.value;
+  if (!d || feedWorking.value) return;
+  if (!d.name.trim() || !d.url.trim()) return; // 未填完不提交（byext 同款静默）
+  feedWorking.value = true;
+  feedError.value = null;
+  try {
+    await api.calendarFeedAdd(d.name, d.url);
+    feedDraft.value = null;
+    await loadFeeds();
+  } catch (e) {
+    feedError.value = String(e);
+  } finally {
+    feedWorking.value = false;
+  }
+}
+async function feedSync(feed: CalendarFeed): Promise<void> {
+  if (feedSyncingId.value) return;
+  feedSyncingId.value = feed.id;
+  feedError.value = null;
+  try {
+    await api.calendarFeedSync(feed.id);
+    await loadFeeds();
+  } catch (e) {
+    feedError.value = String(e);
+  } finally {
+    feedSyncingId.value = null;
+  }
+}
+async function feedToggle(feed: CalendarFeed): Promise<void> {
+  try {
+    await api.calendarFeedSetEnabled(feed.id, !feed.enabled);
+    await loadFeeds();
+  } catch (e) {
+    feedError.value = String(e);
+  }
+}
+async function feedRemove(feed: CalendarFeed): Promise<void> {
+  if (feedArmedId.value !== feed.id) {
+    feedArmedId.value = feed.id;
+    return;
+  }
+  feedArmedId.value = null;
+  try {
+    await api.calendarFeedRemove(feed.id);
+    await loadFeeds();
+  } catch (e) {
+    feedError.value = String(e);
+  }
+}
+async function feedSetColor(feed: CalendarFeed, value: string): Promise<void> {
+  try {
+    await api.calendarFeedSetColor(feed.id, value || null);
+    await loadFeeds();
+  } catch (e) {
+    feedError.value = String(e);
+  }
+}
+function feedState(feed: CalendarFeed): string {
+  if (feedSyncingId.value === feed.id) return t("common.syncing");
+  if (!feed.lastSyncedAt) return t("calendar.feedNever");
+  return `${t("calendar.feedLastSync", { time: feed.lastSyncedAt })} · ${t("calendar.feedEvents", { n: feed.cachedCount ?? 0 })}`;
+}
 
 // ---- 打开方式（知识库「默认应用打开」用哪个应用；存 app.db，由 Rust 读）----
 // 设计：**不再让用户手打应用名** —— 应用清单与"系统认为谁能开这个后缀"都来自系统
@@ -199,6 +282,7 @@ function onAuthSuccess(login: string) {
 }
 onMounted(() => {
   void refreshGhLogin();
+  void loadFeeds();
 });
 
 const themeChoices: { value: ThemeChoice; labelKey: "settings.themeDark" | "settings.themeLight" | "settings.themeSystem" }[] = [
@@ -237,6 +321,7 @@ function onThemeChange(value: string | string[]) {
 
 <template>
   <div class="settings-basic">
+   <div class="settings-content">
     <div class="setting-row">
       <div class="setting-text">
         <span class="setting-name">{{ t("settings.language") }}</span>
@@ -283,14 +368,78 @@ function onThemeChange(value: string | string[]) {
       </button>
     </div>
 
+    <!-- 日历订阅：内联子区块（「按扩展名指定」同款形态；用户定案 2026-09-18，替代对话框） -->
+    <div class="setting-byext">
+      <div class="byext-head">
+        <span class="setting-name">{{ t("settings.calendarFeeds") }}</span>
+        <button class="text-btn" :disabled="feedWorking" @click="addFeedDraft">
+          {{ t("calendar.feedAdd") }}
+        </button>
+      </div>
+      <p class="byext-desc">{{ t("calendar.feedHint") }}</p>
+      <p v-if="feeds.length === 0 && !feedDraft" class="byext-desc">{{ t("calendar.feedEmpty") }}</p>
+      <div v-for="feed in feeds" :key="feed.id" class="byext-row" :class="{ off: !feed.enabled }">
+        <label class="byext-show">
+          <input type="checkbox" :checked="feed.enabled" @change="feedToggle(feed)" />
+          <span>{{ t("calendar.feedEnabled") }}</span>
+        </label>
+        <span class="byext-feedname">
+          {{ feed.name }}
+          <input
+            type="color"
+            class="byext-color"
+            :value="feed.color ?? DEFAULT_FEED_COLOR"
+            :title="t('calendar.feedColor')"
+            @change="feedSetColor(feed, ($event.target as HTMLInputElement).value)"
+          />
+          <button
+            v-if="feed.color"
+            class="byext-color-reset"
+            :title="t('calendar.feedColorReset')"
+            @click="feedSetColor(feed, '')"
+          >{{ t("calendar.feedColorReset") }}</button>
+        </span>
+        <span class="byext-meta">{{ feedState(feed) }}</span>
+        <button class="text-btn" :disabled="feedSyncingId !== null" @click="feedSync(feed)">
+          {{ feedSyncingId === feed.id ? t("common.syncing") : t("calendar.feedSyncNow") }}
+        </button>
+        <button
+          class="text-btn danger"
+          :class="{ armed: feedArmedId === feed.id }"
+          @click="feedRemove(feed)"
+        >
+          {{ feedArmedId === feed.id ? t("calendar.feedDeleteArm") : t("calendar.feedDelete") }}
+        </button>
+      </div>
+      <div v-if="feedDraft" class="byext-row">
+        <input
+          v-model="feedDraft.name"
+          class="setting-input byext-feedname"
+          :placeholder="t('calendar.feedNamePh')"
+          spellcheck="false"
+          @keydown.enter="commitFeedDraft"
+          @blur="commitFeedDraft"
+        />
+        <span class="byext-arrow">→</span>
+        <input
+          v-model="feedDraft.url"
+          class="setting-input byext-app"
+          :placeholder="t('calendar.feedUrlPh')"
+          spellcheck="false"
+          @keydown.enter="commitFeedDraft"
+          @blur="commitFeedDraft"
+        />
+        <button class="byext-remove" :title="t('common.cancel')" @click="feedDraft = null">✕</button>
+      </div>
+      <p v-if="feedError" class="byext-error">{{ feedError }}</p>
+    </div>
+
     <div class="setting-row">
       <div class="setting-text">
-        <span class="setting-name">{{ t("settings.calendarFeeds") }}</span>
-        <span class="setting-desc">{{ t("settings.calendarFeedsDesc") }}</span>
+        <span class="setting-name">{{ t("settings.lunarLine") }}</span>
+        <span class="setting-desc">{{ t("settings.lunarLineDesc") }}</span>
       </div>
-      <button class="setting-btn" @click="feedsOpen = true">
-        {{ t("settings.calendarFeedsManage") }}
-      </button>
+      <input v-model="settings.lunarLine" class="setting-check" type="checkbox" />
     </div>
 
     <div class="setting-row">
@@ -357,7 +506,6 @@ function onThemeChange(value: string | string[]) {
       />
     </div>
 
-    <CalendarFeedsDialog v-if="feedsOpen" @close="feedsOpen = false" />
     <SourceConnectionsDialog
       :open="connectionsOpen"
       @close="connectionsOpen = false"
@@ -365,16 +513,20 @@ function onThemeChange(value: string | string[]) {
 
     <GitHubAuthDialog :open="ghAuthOpen" @close="((ghAuthOpen = false), refreshGhLogin())" @success="onAuthSuccess" />
   </div>
+</div>
 </template>
 
 <style scoped>
+/* 滚动容器：全宽 —— 滚动条必须贴窗口右缘（用户指出：限宽加在滚动容器自身上，
+   滚动条会悬在屏幕中间，看起来像断了）。限宽与居中由内层 .settings-content 负责。 */
 .settings-basic {
   flex: 1;
   overflow-y: auto;
-  padding: 10px 20px;
-  /* 用户口径：内容居中、满屏时最宽 60%（min 保证窄窗口不至于挤到不可用） */
+}
+.settings-content {
   max-width: max(480px, 60%);
   margin: 0 auto;
+  padding: 10px 20px 20px;
 }
 .setting-row {
   display: flex;
@@ -475,6 +627,87 @@ function onThemeChange(value: string | string[]) {
 .byext-remove:hover {
   background: var(--bg-hover);
   color: var(--danger, #e5534b);
+}
+/* 日历订阅行小件 */
+.byext-row.off .byext-feedname,
+.byext-row.off .byext-meta {
+  opacity: 0.55;
+}
+.byext-show {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+  font-size: var(--font-xs);
+  color: var(--text-dim);
+}
+.byext-feedname {
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+  min-width: 0;
+  max-width: 40%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--font-md);
+  color: var(--text);
+  font-weight: 600;
+}
+.byext-meta {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--font-xs);
+  color: var(--text-dim);
+}
+.byext-color {
+  width: 14px;
+  height: 14px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: none;
+  cursor: pointer;
+  vertical-align: -2px;
+  margin-left: 4px;
+}
+.byext-color-reset {
+  border: none;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: var(--font-xs);
+  cursor: pointer;
+  margin-left: 4px;
+  padding: 0;
+}
+.byext-color-reset:hover {
+  color: var(--accent);
+}
+.byext-feedname {
+  cursor: default;
+}
+.byext-feedname-input {
+  width: 150px;
+}
+.text-btn.danger {
+  color: var(--danger);
+}
+.text-btn.danger.armed {
+  background: var(--danger);
+  border-color: var(--danger);
+  color: #fff;
+}
+.text-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.byext-error {
+  margin: 6px 0 0;
+  font-size: var(--font-sm);
+  color: var(--danger);
 }
 .byext-empty {
   margin: 0;
