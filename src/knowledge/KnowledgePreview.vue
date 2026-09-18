@@ -19,6 +19,7 @@ import MarkdownToolbar from "../components/MarkdownToolbar.vue";
 import SplitPane from "../workbench/SplitPane.vue";
 import KnowledgeOutline from "./KnowledgeOutline.vue";
 import KnowledgeFindBar from "./KnowledgeFindBar.vue";
+import KnowledgeConvertDialog from "./KnowledgeConvertDialog.vue";
 import { activeOutlineIndex, type OutlineItem } from "./editor/outline";
 import { EDITOR_COMMAND_GROUPS } from "../components/markdown-tools";
 import { CONTEXT_MENU_GROUPS } from "./editor/commands";
@@ -70,6 +71,18 @@ const resolvedPluginId = ref<string | null>(null);
 const imageUrl = ref<string | null>(null);
 /** 没有内置渲染器时，用系统生成的预览图兜底（Quick Look；拿不到就不显示）。 */
 const systemPosterUrl = ref<string | null>(null);
+
+/**
+ * 当前编码（头部按钮与菜单打勾都用它）。
+ *
+ * 取 `store.activeText` 而不是 `text.value`：注册表渲染的格式（csv/代码…）在面板里
+ * `text.value` 只是"元信息空壳"（encoding 为空），真实编码由插件读文本时回灌到 store ——
+ * 用 text.value 会让头部按钮**根本不出现**（与状态栏那格同源的一次踩坑）。
+ */
+const currentEncoding = computed(() => store.activeText?.encoding ?? "");
+
+/** 候选编码：与状态栏同一份清单（ICU 规范名，与 Rust 返回的一致）。 */
+const ENCODING_CHOICES = ["UTF-8", "GBK", "GB18030", "BIG5", "Shift_JIS", "EUC-KR", "UTF-16LE", "UTF-16BE"];
 /**
  * 用户在状态栏手动指定的编码（`null` = 自动探测）。
  *
@@ -610,6 +623,76 @@ watch(
   },
 );
 
+// ---- 编码菜单（头部）：改解读方式 / 转换另存为 ----
+const encodingMenu = ref<{ x: number; y: number } | null>(null);
+const convertOpen = ref(false);
+
+const encodingMenuItems = computed<ActionItem[]>(() => {
+  type Key = Parameters<typeof t>[0];
+  const current = currentEncoding.value;
+  const items: ActionItem[] = [];
+  // ① 以此编码重新打开（与状态栏那格同源；当前编码带勾）
+  items.push({ value: "default", label: t("kb.encodingAuto" as Key), icon: "o.refresh", group: t("kb.encodingReopenGroup" as Key) });
+  for (const name of ENCODING_CHOICES) {
+    items.push({
+      value: `enc:${name}`,
+      label: name,
+      badge: name === current ? "✓" : undefined,
+    });
+  }
+  // ② 转换（写出新文件）
+  items.push({ value: "convert", label: t("kb.convertAs" as Key), icon: "o.download", group: t("kb.convertTitle" as Key) });
+  return items;
+});
+
+function openEncodingMenu(event: MouseEvent): void {
+  encodingMenu.value = { x: event.clientX, y: event.clientY };
+}
+
+async function onEncodingMenuPick(value: string): Promise<void> {
+  encodingMenu.value = null;
+  if (value === "convert") {
+    convertOpen.value = true;
+    return;
+  }
+  if (value === "default") {
+    // 回到自动探测：清掉手动编码后重读
+    forcedEncoding = null;
+    await load();
+    return;
+  }
+  if (value.startsWith("enc:")) {
+    store.requestEncoding(value.slice(4));
+  }
+}
+
+/** 转换对话框要的文本：Markdown 用编辑器当前内容（含未保存改动），其余按当前解读编码重读。 */
+async function convertPayload(): Promise<{ text: string; encoding: string; eol: string; bom: boolean } | null> {
+  const base = store.root;
+  const target = rel.value;
+  if (!base || !target) return null;
+  if (kind.value === "markdown" && text.value) {
+    return { text: mdDraft.value, encoding: text.value.encoding, eol: text.value.eol, bom: text.value.bom };
+  }
+  const loaded = await api.kbReadText(base, target, forcedEncoding?.rel === target ? forcedEncoding.encoding : undefined);
+  return { text: loaded.text, encoding: loaded.encoding, eol: loaded.eol, bom: loaded.bom };
+}
+
+const convertData = ref<{ text: string; encoding: string; eol: string; bom: boolean } | null>(null);
+watch(convertOpen, async (open) => {
+  if (!open) {
+    convertData.value = null;
+    return;
+  }
+  convertData.value = await convertPayload();
+});
+
+/** 另存完成：打开新文件（让用户立刻看到结果），并刷新树（在对话框里已刷新该目录）。 */
+function onConverted(nextRel: string): void {
+  store.openFile(nextRel);
+  pushToast({ kind: "success", message: t("kb.convertDone" as Parameters<typeof t>[0], { name: nextRel.split("/").pop() ?? nextRel }) }, 3000);
+}
+
 /** 状态栏点了页码 → 跳到那一页。 */
 watch(
   () => store.pageJump,
@@ -873,6 +956,17 @@ function onImageLoaded(): void {
             </template>
           </DropdownMenu>
         </div>
+        <!-- 编码：显示当前编码，菜单里给两类操作（"改解读方式"与"转换另存为"）。
+             头部放**命令**、状态栏留**状态**——两处入口各自符合使用习惯（VS Code 的状态栏
+             编码格也是可点的）。命令型菜单按规范用 ActionMenu。 -->
+        <button
+          v-if="currentEncoding"
+          class="text-btn enc-btn"
+          :title="t('kb.encodingMenuTip')"
+          @click="openEncodingMenu($event)"
+        >
+          {{ currentEncoding }}
+        </button>
         <!-- 主操作保持可见（不折叠）：折叠后它在 ⋯ 里只剩一项，反而更差 -->
         <button class="text-btn" @click="openDefault">{{ t("kb.openWithDefault") }}</button>
       </div>
@@ -973,6 +1067,14 @@ function onImageLoaded(): void {
         />
       </div>
       <ActionMenu
+        v-if="encodingMenu"
+        :items="encodingMenuItems"
+        :anchor="encodingMenu"
+        size="ui"
+        @pick="onEncodingMenuPick"
+        @close="encodingMenu = null"
+      />
+      <ActionMenu
         v-if="contextMenu"
         :items="contextItems"
         :anchor="contextMenu"
@@ -982,6 +1084,16 @@ function onImageLoaded(): void {
       />
       <!-- 卡片条件必须是 `unsupported` 本身：挂在 kind === 'other' 上会让"插件渲染成功"的
            文件也顶着一张"暂不支持"的卡片（曾经就是这样），语义完全反了 -->
+      <KnowledgeConvertDialog
+        v-if="convertOpen && convertData"
+        :rel="rel ?? ''"
+        :text="convertData.text"
+        :source-encoding="convertData.encoding"
+        :eol="convertData.eol"
+        :bom="convertData.bom"
+        @close="convertOpen = false"
+        @done="onConverted"
+      />
       <div v-if="kind === 'other' && unsupported" class="unsupported">
         <img v-if="systemPosterUrl" class="unsupported-poster" :src="systemPosterUrl" :alt="name" />
         <EditorIcon name="o.file" />
@@ -1003,6 +1115,11 @@ function onImageLoaded(): void {
   background: var(--bg-panel);
 }
 /* 缩放控件：三个图标按钮 + 中间一个可点的百分比（点了回 100%） */
+/* 头部编码按钮：显示当前编码，点击出命令菜单 */
+.enc-btn {
+  flex: none;
+  font-variant-numeric: tabular-nums;
+}
 .zoom-group {
   display: flex;
   align-items: center;

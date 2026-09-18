@@ -303,3 +303,122 @@ describe("编码切换（状态栏 → 面板）", () => {
     vi.doUnmock("../src/api");
   });
 });
+
+describe("头部编码菜单与「转换并另存为」", () => {
+  const mountPreview = async (rel: string) => {
+    vi.resetModules();
+    const { createApp } = await import("vue");
+    const { useI18n } = await import("../src/i18n");
+    useI18n().setLocale("zh-CN");
+    const writes: { rel: string; encoding: string; text: string }[] = [];
+    const existing = new Set<string>();
+    vi.doMock("../src/api", () => ({
+      isTauri: () => true,
+      api: {
+        kbStat: async (_root: string, path: string) => ({ exists: existing.has(path), kind: "file", size: 8, mtimeMs: 1 }),
+        kbReadText: async (_root: string, _rel: string, encoding?: string) => ({
+          text: "名称,数量\n中文,1\n",
+          encoding: encoding ?? "GBK",
+          bom: false,
+          eol: "\n",
+          size: 8,
+          mtimeMs: 1,
+        }),
+        kbWriteText: async (args: { rel: string; encoding: string; text: string }) => {
+          writes.push({ rel: args.rel, encoding: args.encoding, text: args.text });
+          return 1;
+        },
+        kbReadBytes: async () => new ArrayBuffer(8),
+        kbListDir: async () => [],
+        kbWalk: async () => [],
+      },
+    }));
+    const { default: KnowledgePreview } = await import("../src/knowledge/KnowledgePreview.vue");
+    const { useKnowledgeStore } = await import("../src/stores/knowledge");
+    const pinia = createPinia();
+    setActivePinia(pinia);
+    const store = useKnowledgeStore();
+    store.root = "/tmp/kb";
+    store.selected = rel;
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const app = createApp(KnowledgePreview);
+    app.use(pinia);
+    app.mount(host);
+    await waitForDom(() => {
+      expect(host.querySelector(".enc-btn"), "头部应出现编码按钮").not.toBeNull();
+    });
+    return { host, store, writes, app, existing };
+  };
+
+  it("头部编码按钮显示当前编码，点开是命令菜单（重新打开 / 转换另存为）", async () => {
+    const { host, app } = await mountPreview("表格-GBK.csv");
+    const button = host.querySelector<HTMLElement>(".enc-btn")!;
+    expect(button.textContent?.trim(), "显示当前（自动探测的）编码").toBe("GBK");
+    button.click();
+    await waitForDom(() => {
+      expect(document.querySelector(".am-menu"), "应弹出命令菜单").not.toBeNull();
+    });
+    const text = document.querySelector(".am-menu")!.textContent ?? "";
+    expect(text).toContain("以此编码重新打开");
+    expect(text).toContain("自动探测");
+    expect(text).toContain("转换并另存为");
+    document.querySelectorAll(".am-menu").forEach((el) => el.remove());
+    app.unmount();
+    host.remove();
+    vi.doUnmock("../src/api");
+  });
+
+  it("转换另存为：按目标编码写新文件（原件不动），默认名带编码后缀", async () => {
+    const { host, writes, app } = await mountPreview("表格-GBK.csv");
+    host.querySelector<HTMLElement>(".enc-btn")!.click();
+    await waitForDom(() => expect(document.querySelector(".am-menu")).not.toBeNull());
+    const convert = [...document.querySelectorAll<HTMLElement>(".am-menu [role=menuitem]")].find((el) =>
+      el.textContent?.includes("转换并另存为"),
+    )!;
+    convert.click();
+    const dialog = await waitForDom(() => {
+      expect(document.querySelector(".kb-panel"), "应弹出转换对话框").not.toBeNull();
+    });
+    void dialog;
+    const nameInput = document.querySelector<HTMLInputElement>(".kb-panel .kb-input")!;
+    expect(nameInput.value, "默认名带目标编码后缀，保留原后缀").toBe("表格-GBK-utf8.csv");
+    // 目标编码默认 UTF-8（源是 GBK）
+    const save = [...document.querySelectorAll<HTMLElement>(".kb-panel .text-btn")].find((el) =>
+      el.textContent?.includes("另存为"),
+    )!;
+    save.click();
+    await waitForDom(() => {
+      expect(writes.length, "应写出一个新文件").toBe(1);
+    });
+    expect(writes[0].rel).toBe("表格-GBK-utf8.csv");
+    expect(writes[0].encoding, "按目标编码写").toBe("UTF-8");
+    expect(writes[0].text).toContain("中文");
+    document.querySelectorAll(".kb-overlay").forEach((el) => el.remove());
+    app.unmount();
+    host.remove();
+    vi.doUnmock("../src/api");
+  });
+
+  it("目标文件已存在 → 拒绝覆盖并提示改名", async () => {
+    const { host, writes, app, existing } = await mountPreview("表格-GBK.csv");
+    existing.add("表格-GBK-utf8.csv");
+    host.querySelector<HTMLElement>(".enc-btn")!.click();
+    await waitForDom(() => expect(document.querySelector(".am-menu")).not.toBeNull());
+    [...document.querySelectorAll<HTMLElement>(".am-menu [role=menuitem]")]
+      .find((el) => el.textContent?.includes("转换并另存为"))!
+      .click();
+    await waitForDom(() => expect(document.querySelector(".kb-panel")).not.toBeNull());
+    [...document.querySelectorAll<HTMLElement>(".kb-panel .text-btn")]
+      .find((el) => el.textContent?.includes("另存为"))!
+      .click();
+    await waitForDom(() => {
+      expect(document.querySelector(".kb-panel .kb-error")?.textContent).toContain("已存在");
+    });
+    expect(writes.length, "不该覆盖已有文件").toBe(0);
+    document.querySelectorAll(".kb-overlay").forEach((el) => el.remove());
+    app.unmount();
+    host.remove();
+    vi.doUnmock("../src/api");
+  });
+});
