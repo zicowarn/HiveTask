@@ -55,7 +55,12 @@ async function toGeoJson(
     return { data: gpx(doc) as GeoJSON.FeatureCollection };
   }
   // shp：主文件 + 同目录 .dbf（属性）/ .prj（坐标系）/ .cpg（属性表代码页，中文必备）
-  const shpjs = (await import("shpjs")).default;
+  //
+  // ⚠️ `parseShp` / `parseDbf` / `combine` 是**命名导出**，不在默认导出上：
+  // 默认导出只有 getShapefile。`@types/shpjs` 把它们声明在命名空间对象上，所以
+  // TypeScript 会放行 `shpjs.parseShp(...)`，**运行时才炸**（实测 `.shp` 带 .dbf 时
+  // `parseShp is not a function` —— 全样本审计抓到的）。这里按命名导入。
+  const { default: shpjs, parseShp, parseDbf, combine } = await import("shpjs");
   const base = ctx.rel.replace(/\.shp$/i, "");
   const readSibling = ctx.readSibling;
   const sibling = async (suffix: string): Promise<Uint8Array | null> => {
@@ -75,11 +80,11 @@ async function toGeoJson(
     value.buffer.slice(value.byteOffset, value.byteOffset + value.byteLength) as ArrayBuffer;
   const shpBuffer = toBuffer(bytes);
   if (dbfBytes) {
-    const geometry = shpjs.parseShp(shpBuffer, prjText);
+    const geometry = parseShp(shpBuffer, prjText);
     // 类型声明把 cpg 写成 buffer，实现里走 toString() 收字符串（代码页名如 "936"/"GBK"）
-    const properties = shpjs.parseDbf(toBuffer(dbfBytes), cpgText as unknown as Buffer);
+    const properties = parseDbf(toBuffer(dbfBytes), cpgText as unknown as Buffer);
     const pair: [GeoJSON.Geometry[], GeoJSON.GeoJsonProperties[]] = [geometry, properties];
-    const combined = shpjs.combine(pair);
+    const combined = combine(pair);
     const notes = [!prjText ? "缺少 .prj，按 WGS84 处理" : "", cpgText ? `属性表按 ${cpgText} 解码` : ""].filter(Boolean);
     return { data: asCollection(combined), note: notes.join(" · ") || undefined };
   }

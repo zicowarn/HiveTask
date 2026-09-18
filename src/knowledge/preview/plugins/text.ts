@@ -89,6 +89,19 @@ const LANGUAGE_BY_EXT: Record<string, string> = {
   log: "log",
   txt: "none",
   md: "markdown",
+  // Shapefile 的**文本**配套（点开 .shp 时同目录还有这些；用户也可能直接点到它们）：
+  // .prj = 坐标系 WKT、.cpg = 属性表代码页名（如 "936"）
+  prj: "none",
+  cpg: "none",
+  qpj: "none",
+  // 其它常见的纯文本后缀（全样本审计里"无插件认领"的还有这些）
+  csvt: "none",
+  vrt: "none",
+  wkt: "none",
+  ndjson: "json",
+  jsonl: "json",
+  gitattributes: "ignore",
+  gitmodules: "ignore",
 };
 
 /** 无扩展名但能按文件名认出来的（Dockerfile / Makefile / .gitignore 这类）。 */

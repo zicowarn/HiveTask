@@ -25,7 +25,8 @@ export const WORD_EXTENSIONS = ["docx", "docm", "dotx", "dotm"];
 /** 其实是纯文本的表格格式：走文本通道（编码可探测、可手动切换）。 */
 const TEXT_SHEET_EXTENSIONS = ["csv", "tsv"];
 
-export const SHEET_EXTENSIONS = ["xlsx", "xlsm", "xlsb", "xls", "csv", "tsv", "ods", "fods"];
+// dbf = dBASE（Shapefile 的属性表就是它）：SheetJS 能直接读，实测真样本出 81 行表
+export const SHEET_EXTENSIONS = ["xlsx", "xlsm", "xlsb", "xls", "csv", "tsv", "ods", "fods", "dbf"];
 export const SLIDES_EXTENSIONS = ["pptx", "pptm", "ppsx", "potx"];
 
 const OOXML_MAGIC = [0x50, 0x4b, 0x03, 0x04]; // docx/xlsx/pptx 都是 zip
