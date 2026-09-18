@@ -741,6 +741,7 @@ const filtering = computed(() => !!store.filter);
   height: 100%;
   min-width: 0;
   background: var(--bg-panel);
+  outline: none !important;
 }
 .tree-header {
   display: flex;
@@ -843,10 +844,14 @@ const filtering = computed(() => !!store.filter);
   min-height: 0;
   overflow: auto;
   user-select: none;
-  /* tabindex="0"（键盘导航用）会让浏览器在容器获得焦点时画一圈默认 outline，
-     表现为"整个树外面一圈高亮"（用户实测截图）。去掉它不影响可访问性 ——
-     键盘焦点已经由 `.row.focused` 的行内焦点环标示（见 KnowledgeTreeNode）。 */
-  outline: none;
+  /* tabindex="0"（键盘导航用）会让容器获得焦点，浏览器画默认焦点环 ——
+     表现为"整棵树外面一圈高亮"（用户实测截图，两次修不好是因为 WKWebView
+     不止用 outline 一条路画焦点：还可能走 box-shadow / border / -webkit-focus-ring）。
+     一套全部压掉；键盘焦点的视觉指示已由 .row.focused 的行内焦点环承担。 */
+  outline: none !important;
+  -webkit-appearance: none;
+  box-shadow: none !important;
+  border-color: transparent !important;
   /* 列表与表头之间留 4px 呼吸（用户口径），底部保留 8px 便于滚过末行 */
   padding: 4px 0 8px;
 }
