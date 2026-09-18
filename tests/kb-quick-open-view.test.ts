@@ -158,9 +158,9 @@ describe("菜单/快捷键 → 面板（全局入口）", () => {
 });
 
 describe("编码切换（状态栏 → 面板）", () => {
-  it("请求编码 → 面板按新编码重读并更新缓冲（保存将按新编码写回）", async () => {
+  const mount = async (rel: string) => {
     vi.resetModules();
-    const { createApp, nextTick } = await import("vue");
+    const { createApp } = await import("vue");
     const { useI18n } = await import("../src/i18n");
     useI18n().setLocale("zh-CN");
     const reads: (string | undefined)[] = [];
@@ -168,12 +168,20 @@ describe("编码切换（状态栏 → 面板）", () => {
       isTauri: () => true,
       api: {
         kbStat: async () => ({ exists: true, kind: "file", size: 8, mtimeMs: 1 }),
-        kbReadText: async (_root: string, rel: string, encoding?: string) => {
+        kbReadText: async (_root: string, _rel: string, encoding?: string) => {
           reads.push(encoding);
-          return { text: `按 ${encoding ?? "auto"} 解码`, encoding: encoding ?? "UTF-8", bom: false, eol: "\n", size: 8, mtimeMs: 1 };
+          return {
+            text: `按 ${encoding ?? "自动"} 解码`,
+            encoding: encoding ?? "GBK",
+            bom: false,
+            eol: "\n",
+            size: 8,
+            mtimeMs: 1,
+          };
         },
         kbReadBytes: async () => new ArrayBuffer(8),
         kbListDir: async () => [],
+        kbWalk: async () => [],
       },
     }));
     const { default: KnowledgePreview } = await import("../src/knowledge/KnowledgePreview.vue");
@@ -182,23 +190,58 @@ describe("编码切换（状态栏 → 面板）", () => {
     setActivePinia(pinia);
     const store = useKnowledgeStore();
     store.root = "/tmp/kb";
-    store.selected = "a.md";
+    store.selected = rel;
 
     const host = document.createElement("div");
     document.body.appendChild(host);
     const app = createApp(KnowledgePreview);
     app.use(pinia);
     app.mount(host);
-    for (let i = 0; i < 6; i += 1) await nextTick();
-
-    store.requestEncoding("GBK");
+    // 等初次加载真正完成（否则初次读取会与切换竞争，测不准）
     await waitForDom(() => {
-      expect(reads, "应带 GBK 参数重读").toContain("GBK");
+      expect(reads.length, "初次加载应读一次").toBe(1);
+    });
+    return { host, store, reads, app };
+  };
+
+  it("Markdown：切换后正文与缓冲都按新编码（保存将按新编码写回）", async () => {
+    const { host, store, reads, app } = await mount("a.md");
+    expect(store.activeText?.encoding, "自动探测结果显示在状态栏").toBe("GBK");
+
+    store.requestEncoding("UTF-8");
+    await waitForDom(() => {
+      expect(reads, "应带 UTF-8 参数重读").toContain("UTF-8");
     });
     expect(store.encodingRequest, "消费后清零").toBeNull();
-    expect(store.activeText?.encoding).toBe("GBK");
-    expect(store.buffers["a.md"]?.text).toContain("按 GBK 解码");
+    expect(store.activeText?.encoding).toBe("UTF-8");
+    expect(store.buffers["a.md"]?.text).toContain("按 UTF-8 解码");
+    app.unmount();
+    host.remove();
+    vi.doUnmock("../src/api");
+  });
 
+  it("文本/代码（注册表渲染）：切换后**画面真的重渲染**，状态栏编码也跟着更新", async () => {
+    // 这条是先前漏掉的路径：`.txt` 由注册表的 text 插件画成 <pre class="kb-code">，
+    // 只更新 text.value 不会重画——用户实测"没有实现"就是这里。
+    const { host, store, reads, app } = await mount("遗留GBK.txt");
+    await waitForDom(() => {
+      expect(host.querySelector(".kb-code"), "txt 应由 text 插件渲染").not.toBeNull();
+    });
+    // 状态栏的编码格依赖 activeText：空壳会让它整格消失，用户就没有入口可点
+    expect(store.activeText?.encoding, "注册表路径也要回灌真实编码").toBe("GBK");
+
+    store.requestEncoding("UTF-8");
+    await waitForDom(() => {
+      expect(host.querySelector(".kb-code")?.textContent, "画面应按新编码重画").toContain("按 UTF-8 解码");
+    });
+    expect(store.activeText?.encoding).toBe("UTF-8");
+    expect(reads.filter((item) => item === "UTF-8").length, "切换只触发一次重读").toBe(1);
+
+    // 手动编码只作用于它被指定的文件：切到别的文件必须回到自动探测
+    store.selected = "另一个.txt";
+    await waitForDom(() => {
+      expect(reads.at(-1), "换文件后应回到自动探测").toBeUndefined();
+    });
     app.unmount();
     host.remove();
     vi.doUnmock("../src/api");

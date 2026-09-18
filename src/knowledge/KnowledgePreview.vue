@@ -70,6 +70,13 @@ const resolvedPluginId = ref<string | null>(null);
 const imageUrl = ref<string | null>(null);
 /** 没有内置渲染器时，用系统生成的预览图兜底（Quick Look；拿不到就不显示）。 */
 const systemPosterUrl = ref<string | null>(null);
+/**
+ * 用户在状态栏手动指定的编码（`null` = 自动探测）。
+ *
+ * 必须**绑定到具体文件**：否则切到下一个文件时会把上一个文件的手动编码带过去
+ * （用户切了 GBK，下一个 UTF-8 文件就被按 GBK 解码成乱码）。
+ */
+let forcedEncoding: { rel: string; encoding: string } | null = null;
 const imageEl = ref<HTMLImageElement | null>(null);
 /**
  * 缩放：面板只做两件事 —— 记状态、把动作转给"当前持有画面的那一方"。
@@ -380,7 +387,7 @@ function onContextPick(value: string): void {
 }
 
 /** 用注册表渲染非 Markdown 文件；没有插件认领时保留"暂不支持"卡片（previewFailed）。 */
-async function renderViaRegistry(base: string, target: string, size: number): Promise<void> {
+async function renderViaRegistry(base: string, target: string, size: number, forced?: string): Promise<void> {
   const name = target.split("/").pop() ?? target;
   const ext = name.includes(".") ? name.split(".").pop()!.toLowerCase() : "";
   const readBytes = async (): Promise<Uint8Array> =>
@@ -419,7 +426,15 @@ async function renderViaRegistry(base: string, target: string, size: number): Pr
     ext,
     container,
     readBytes,
-    readText: async () => (await api.kbReadText(base, target)).text,
+    // 带上手动编码：文本类插件（text/代码…）就是靠这条路径读内容的。
+    // 顺带把**真实元信息回灌给状态栏**：否则 kind === "other" 下 activeText 只是空壳
+    // （encoding 为空），编码格 `v-if="knowledge.activeText"` 直接不渲染 ——
+    // 用户就没有可点的编码切换入口（实测"没有实现"）。
+    readText: async () => {
+      const loaded = await api.kbReadText(base, target, forced);
+      store.setActiveText(loaded);
+      return loaded.text;
+    },
     // 同根内其它文件（HLS 分片、3D 的 .bin、shp 的配套 .dbf）：同样受 Rust 侧根沙箱约束
     readSibling: async (sibling: string) => new Uint8Array(await api.kbReadBytes(base, sibling)),
     // 系统预览图（Quick Look）：媒体解不了、或格式没有内置渲染器时用它兜底
@@ -578,25 +593,20 @@ watch(
       }
     }
     store.clearEncodingRequest();
-    try {
-      loading.value = true;
-      const loaded = await api.kbReadText(base, target, encoding);
-      if (rel.value !== target) return; // 期间用户切走了
-      store.dropBuffer(target);
-      text.value = loaded;
-      mdDraft.value = loaded.text;
-      mdDirty.value = false;
-      store.setBuffer(target, { text: loaded.text, meta: loaded, dirty: false });
-      store.setActiveText(loaded);
-      pushToast(
-        { kind: "success", message: t("kb.encodingSwitched", { encoding: loaded.encoding }) },
-        2500,
-      );
-    } catch (e) {
-      error.value = String(e);
-    } finally {
-      loading.value = false;
-    }
+    // 记下手动编码并**走完整的 load()**：`.txt`/代码这类由注册表插件渲染的内容
+    // 只在 load() → renderViaRegistry 这条链上重画；只更新 text.value 会让
+    // 状态栏编码变了、画面却纹丝不动（用户实测"没有实现"）。
+    forcedEncoding = { rel: target, encoding };
+    store.dropBuffer(target);
+    mdDirty.value = false;
+    await load();
+    pushToast(
+      {
+        kind: "success",
+        message: t("kb.encodingSwitched", { encoding: store.activeText?.encoding ?? encoding }),
+      },
+      2500,
+    );
   },
 );
 
@@ -640,6 +650,9 @@ async function load(): Promise<void> {
   const base = store.root;
   const target = rel.value;
   if (!base || !target || !isTauri()) return;
+  // 手动编码只对"它被指定的那个文件"生效；换了文件就丢掉
+  if (forcedEncoding && forcedEncoding.rel !== target) forcedEncoding = null;
+  const forced = forcedEncoding?.rel === target ? forcedEncoding.encoding : undefined;
   loading.value = true;
   try {
     if (kind.value === "image") {
@@ -653,7 +666,7 @@ async function load(): Promise<void> {
       // 元信息（头部显示大小/时间）走 stat；渲染交给注册表
       const stat = await api.kbStat(base, target);
       text.value = { text: "", encoding: "", bom: false, eol: "\n", size: stat.size, mtimeMs: stat.mtimeMs };
-      await renderViaRegistry(base, target, stat.size);
+      await renderViaRegistry(base, target, stat.size, forced);
     } else {
       const buffered = store.buffers[target];
       if (buffered) {
@@ -662,7 +675,7 @@ async function load(): Promise<void> {
         mdDraft.value = buffered.text;
         mdDirty.value = buffered.dirty;
       } else {
-        text.value = await api.kbReadText(base, target);
+        text.value = await api.kbReadText(base, target, forced);
         mdDraft.value = text.value.text;
         mdDirty.value = false;
       }

@@ -556,6 +556,8 @@ pub fn kb_read_text(root: String, rel: String, encoding: Option<String>) -> Resu
     read_text_in_forced(&root, &rel, encoding.as_deref()).map_err(|e| e.to_string())
 }
 
+/// 自动探测编码的读取（命令走 `read_text_in_forced`，本函数供测试与内部调用）。
+#[cfg_attr(not(test), allow(dead_code))]
 pub fn read_text_in(root: &str, rel: &str) -> Result<TextFile> {
     read_text_in_forced(root, rel, None)
 }
