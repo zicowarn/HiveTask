@@ -45,6 +45,8 @@ function dxfPairs(lines: string[]): { code: number; value: string }[] {
 
 beforeEach(() => {
   vi.resetModules();
+  // spyOn 叠 spyOn 会自指（original = 上一个 spy = 自己）→ 无限递归，先恢复
+  vi.restoreAllMocks();
 });
 
 describe("批次 4 路由", () => {
@@ -362,6 +364,34 @@ describe("GIS：底图默认关闭", () => {
     expect(corner!.textContent, "角标应显示要素数").toContain("个要素");
     // 默认状态下没有任何 <img>（瓦片就是 img）——离线约束的可执行检查
     expect(ctx.container.querySelectorAll("img").length).toBe(0);
+  });
+});
+
+describe("媒体 blob 必须带 MIME（WKWebView 无类型 blob 一律拒播）", () => {
+  it("音频/视频的 blob 带各自容器的 MIME（mp4 无 MIME 报 SRC_NOT_SUPPORTED，实机踩过）", async () => {
+    const { audioPlugin, videoPlugin } = await import("../src/knowledge/preview/plugins/media");
+    const blobs: string[] = [];
+    const original = URL.createObjectURL.bind(URL);
+    vi.spyOn(URL, "createObjectURL").mockImplementation((blob: Blob | MediaSource) => {
+      if (blob instanceof Blob) blobs.push(blob.type);
+      return original(blob);
+    });
+    const bytes = new Uint8Array([1, 2, 3]);
+    await audioPlugin.render(makeCtx({ ext: "m4a", readBytes: async () => bytes }));
+    await videoPlugin.render(makeCtx({ ext: "mp4", readBytes: async () => bytes }));
+    expect(blobs).toEqual(["audio/mp4", "video/mp4"]);
+  });
+
+  it("解不了的容器给 octet-stream（让 error 照常触发，走系统预览图兜底链）", async () => {
+    const { videoPlugin } = await import("../src/knowledge/preview/plugins/media");
+    const blobs: string[] = [];
+    const original = URL.createObjectURL.bind(URL);
+    vi.spyOn(URL, "createObjectURL").mockImplementation((blob: Blob | MediaSource) => {
+      if (blob instanceof Blob) blobs.push(blob.type);
+      return original(blob);
+    });
+    await videoPlugin.render(makeCtx({ ext: "mkv", readBytes: async () => new Uint8Array([1]) }));
+    expect(blobs).toEqual(["application/octet-stream"]);
   });
 });
 

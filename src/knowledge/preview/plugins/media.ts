@@ -56,6 +56,54 @@ export const LRC_EXTENSIONS = ["lrc"];
 
 const MB = 1024 * 1024;
 
+/**
+ * 扩展名 → 播放用 MIME。
+ *
+ * **blob 必须带 MIME**：WKWebView 对无类型的 blob 一律按 `SRC_NOT_SUPPORTED` 拒播
+ * （实机探针验证：同一个 mp4，无 MIME 报 code=4，带 `video/mp4` 正常解码）——
+ * 与图片插件当年"SVG 空白"是同一个根因。表按"WebView 真能解的容器"建：
+ * 解不了的编码（wmv/flv/rm…）给不对的 MIME 也没意义，走 octet-stream 让
+ * error 事件照常触发 → 退化到系统预览图那条链。
+ */
+const MEDIA_MIME: Record<string, string> = {
+  // 音频
+  mp3: "audio/mpeg",
+  wav: "audio/wav",
+  aif: "audio/aiff",
+  aiff: "audio/aiff",
+  aifc: "audio/aiff",
+  m4a: "audio/mp4",
+  aac: "audio/aac", // 裸 AAC 流很多引擎不认，解不了会走 error 链，属如实降级
+  caf: "audio/x-caf",
+  au: "audio/basic",
+  snd: "audio/basic",
+  flac: "audio/flac",
+  ogg: "audio/ogg",
+  oga: "audio/ogg",
+  opus: "audio/ogg", // WebKit 里 opus 常封在 ogg/-webm；裸流解不了走 error 链
+  weba: "audio/webm",
+  mid: "audio/midi",
+  midi: "audio/midi",
+  amr: "audio/amr",
+  // 视频
+  mp4: "video/mp4",
+  m4v: "video/mp4",
+  mov: "video/quicktime",
+  webm: "video/webm",
+  ogv: "video/ogg",
+  "3gp": "video/3gpp",
+  "3g2": "video/3gpp2",
+  mpg: "video/mpeg",
+  mpeg: "video/mpeg",
+  mpe: "video/mpeg",
+  mpv: "video/mp4", // 无音频的 MPEG 流，容器按 mp4 给
+  m2ts: "video/mp2t",
+};
+
+function mediaMimeFor(ext: string): string {
+  return MEDIA_MIME[ext] ?? "application/octet-stream";
+}
+
 /** 人类可读体积（与状态栏口径一致）。 */
 function humanSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -218,7 +266,7 @@ async function renderAudio(ctx: PreviewContext): Promise<PreviewInstance> {
   const el = document.createElement("audio");
   el.controls = true;
   el.preload = "metadata";
-  const url = URL.createObjectURL(new Blob([bytes]));
+  const url = URL.createObjectURL(new Blob([bytes], { type: mediaMimeFor(ctx.ext) }));
   el.src = url;
   parts.wrap.querySelector(".kb-media-stage")!.appendChild(el);
   describeMedia(el, "audio", parts, ctx);
@@ -248,7 +296,7 @@ async function renderVideo(ctx: PreviewContext): Promise<PreviewInstance> {
       parts.meta.textContent = message;
     });
   } else {
-    url = URL.createObjectURL(new Blob([bytes]));
+    url = URL.createObjectURL(new Blob([bytes], { type: mediaMimeFor(ctx.ext) }));
     el.src = url;
     el.load();
   }
