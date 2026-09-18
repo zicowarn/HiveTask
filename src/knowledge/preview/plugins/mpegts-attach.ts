@@ -30,11 +30,33 @@ export async function attachMpegts(
   const player = mpegts.createPlayer({ type: container, url, isLive: false });
   player.attachMediaElement(video);
   player.load();
-  player.on(mpegts.Events.ERROR, (_type: string, data: { fatal?: boolean; details?: string }) => {
-    if (data.fatal) onFatal(`播放失败（${data.details ?? "demux/解码错误"}）——编码可能不被支持，请用默认应用打开`);
-  });
-  return () => {
+  // ⚠️ mpegts.js 的 error 数据**没有** `fatal` 字段（整个 dist 0 处命中，那是 hls.js 的形状）——
+  // 照搬 hls.js 的 `if (data.fatal)` 会永不触发：FLV 里是不支持的编码（如录屏的 Screen Video +
+  // ADPCM，用户实测样本）时 demux 一直报 CodecUnsupported，界面干等无反馈。mpegts.js 的约定是
+  // **走到 ERROR 事件即不可恢复**（可恢复的在内部自动重试、不 emit），所以收到就降级。
+  let failed = false;
+  player.on(mpegts.Events.ERROR, (type: string, data: { detail?: string; info?: string }) => {
+    if (failed) return;
+    failed = true;
+    const detail = data.detail ?? data.info ?? type;
+    onFatal(`播放失败（${detail}）——编码可能不被支持，请用默认应用打开`);
     player.unload();
     player.destroy();
+  });
+  // 还有一种干等：demux 不报错、但也出不来初始化段（readyState 一直 0）。超时视为失败，
+  // 给明确反馈而不是无限转圈（play() 由用户点，loadedmetadata 前不消费任何字节）。
+  const watchdog = window.setTimeout(() => {
+    if (failed || video.readyState >= 1) return;
+    failed = true;
+    onFatal("播放初始化超时——编码可能不被支持，请用默认应用打开");
+    player.unload();
+    player.destroy();
+  }, 10_000);
+  return () => {
+    window.clearTimeout(watchdog);
+    if (!failed) {
+      player.unload();
+      player.destroy();
+    }
   };
 }

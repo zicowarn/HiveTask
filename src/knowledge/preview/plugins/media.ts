@@ -136,6 +136,8 @@ interface MediaParts {
   posterUrl?: string;
   /** 元信息行前缀（文件名 · 体积），事件回调里复用它拼时长/分辨率。 */
   base: string;
+  /** mpegts.js 已给出具体失败原因 —— `<video>` 的 error 监听不再覆盖。 */
+  mpegtsFailed?: boolean;
 }
 
 /** 建立播放器骨架（音频/视频共用）。 */
@@ -194,6 +196,9 @@ function describeMedia(el: HTMLMediaElement, kind: "audio" | "video", parts: Med
     parts.meta.textContent = `${parts.base} · ${bits.join(" · ")}`;
   });
   el.addEventListener("error", () => {
+    // mpegts.js 的失败已经给出具体原因（如 CodecUnsupported），别用通用文案盖掉；
+    // 且系统预览图那条链由 onFatal 的调用方处理（FLV/TS 失败也会走 attachSystemPoster）
+    if (parts.mpegtsFailed) return;
     void attachSystemPoster(ctx, parts, `${parts.base} —— 这个编码 WebView 解不了，请用默认应用打开`);
     parts.meta.textContent = `${parts.base} —— 这个编码 WebView 解不了，请用默认应用打开`;
   });
@@ -313,7 +318,9 @@ async function renderVideo(ctx: PreviewContext): Promise<PreviewInstance> {
     const { attachMpegts } = await import("./mpegts-attach");
     url = URL.createObjectURL(new Blob([bytes], { type: mediaMimeFor(ctx.ext) }));
     cleanup = await attachMpegts(el, url, ctx.ext === "flv" ? "flv" : "mpegts", (message) => {
+      parts.mpegtsFailed = true;
       parts.meta.textContent = message;
+      void attachSystemPoster(ctx, parts, message);
     });
   } else {
     url = URL.createObjectURL(new Blob([bytes], { type: mediaMimeFor(ctx.ext) }));

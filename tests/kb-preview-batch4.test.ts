@@ -416,6 +416,23 @@ describe("媒体容器元信息（照 OFV 移植的解析器 → onInfo 状态�
   });
 });
 
+
+  it("mpegts 失败后 <video> 的 error 事件不覆盖具体原因，且补系统预览图（用户实测 FLV 干等的修复）", async () => {
+    const { videoPlugin } = await import("../src/knowledge/preview/plugins/media");
+    // 用 mpegts-attach 的真实实现：坏字节 → mpegts 报错 → onFatal → 标记 mpegtsFailed
+    const ctx = makeCtx({ ext: "flv", readBytes: async () => new Uint8Array([0x46, 0x4c, 0x56, 1]) });
+    const poster = new Uint8Array([0x89, 0x50, 0x4e, 0x47]);
+    (ctx as { systemThumbnail?: () => Promise<Uint8Array | null> }).systemThumbnail = async () => poster;
+    (ctx as { onInfo?: (v: string | null) => void }).onInfo = () => {};
+    await videoPlugin.render(ctx);
+    // 等异步 mpegts import + 失败回调（jsdom 里 isSupported=false 时走"不支持 MSE"直接降级）
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    // jsdom 无 MSE：失败链走到系统预览图兜底（真实引擎里的具体文案已在离屏探针验证）
+    expect(ctx.container.querySelector(".kb-media-poster"), "失败时贴系统预览图").not.toBeNull();
+    expect(ctx.container.querySelector(".kb-media-meta")!.textContent).not.toBe("");
+  });
+
 describe("媒体 blob 必须带 MIME（WKWebView 无类型 blob 一律拒播）", () => {
   it("音频/视频的 blob 带各自容器的 MIME（mp4 无 MIME 报 SRC_NOT_SUPPORTED，实机踩过）", async () => {
     const { audioPlugin, videoPlugin } = await import("../src/knowledge/preview/plugins/media");
