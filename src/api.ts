@@ -27,6 +27,38 @@ export interface CommitDayCount {
   count: number;
 }
 
+/** 日历订阅行（镜像 calendar.rs::FeedRow）。url 属准凭据：只回显，不进日志。 */
+export interface CalendarFeed {
+  id: string;
+  name: string;
+  url: string;
+  enabled: boolean;
+  lastSyncedAt: string | null;
+  /** 缓存事件数；null = 从未同步。 */
+  cachedCount: number | null;
+}
+
+/** 订阅缓存事件（启用的订阅聚合）。 */
+export interface CalendarFeedEvent {
+  feedId: string;
+  feedName: string;
+  date: string;
+  title: string;
+}
+
+/** 法定假日（内置 holiday-cn 数据）。 */
+export interface HolidayDay {
+  date: string;
+  name: string;
+  isOffDay: boolean;
+}
+
+/** 农历日格标签。 */
+export interface LunarLabel {
+  date: string;
+  text: string;
+}
+
 /** 里程碑元数据（镜像 models.rs::MilestoneInfo，camelCase）。 */
 export interface MilestoneInfo {
   number: number;
@@ -349,6 +381,18 @@ export const api = {
   /** 日历「提交热力」图层：HEAD + 本地分支的每日提交计数（窗口天，默认 365）。 */
   gitCommitActivity: (repoPath: string, days?: number) =>
     invoke<CommitDayCount[]>("git_commit_activity", { repoPath, days: days ?? null }),
+  // ---- 日历 S3-b：ICS 订阅 / 内置假日 / 农历 ----
+  calendarFeedList: () => invoke<CalendarFeed[]>("calendar_feed_list"),
+  calendarFeedAdd: (name: string, url: string) =>
+    invoke<CalendarFeed>("calendar_feed_add", { name, url }),
+  calendarFeedRemove: (id: string) => invoke<void>("calendar_feed_remove", { id }),
+  calendarFeedSetEnabled: (id: string, enabled: boolean) =>
+    invoke<CalendarFeed>("calendar_feed_set_enabled", { id, enabled }),
+  calendarFeedSync: (id: string) => invoke<number>("calendar_feed_sync", { id }),
+  calendarFeedEvents: () => invoke<CalendarFeedEvent[]>("calendar_feed_events"),
+  calendarHolidays: () => invoke<HolidayDay[]>("calendar_holidays"),
+  calendarLunarRange: (start: string, end: string) =>
+    invoke<LunarLabel[]>("calendar_lunar_range", { start, end }),
   ptySpawn: (args: {
     id: string;
     cwd?: string;

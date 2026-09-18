@@ -12,6 +12,7 @@ import { useTheme, type ThemeChoice } from "../../theme";
 import { useSettingsStore } from "../../stores/settings";
 import SourceConnectionsDialog from "../../components/SourceConnectionsDialog.vue";
 import GitHubAuthDialog from "../../components/GitHubAuthDialog.vue";
+import CalendarFeedsDialog from "../CalendarFeedsDialog.vue";
 import DropdownMenu from "../../components/DropdownMenu.vue";
 import { api, isTauri } from "../../api";
 import { useKnowledgeStore } from "../../stores/knowledge";
@@ -22,6 +23,7 @@ const { theme, setTheme } = useTheme();
 const settings = useSettingsStore();
 
 const connectionsOpen = ref(false);
+const feedsOpen = ref(false);
 
 // ---- 打开方式（知识库「默认应用打开」用哪个应用；存 app.db，由 Rust 读）----
 const knowledge = useKnowledgeStore();
@@ -48,6 +50,47 @@ async function commitOpenApp(): Promise<void> {
     openAppSaving.value = false;
   }
 }
+/** 按扩展名覆盖：`{ ".md": "Typora", ".dwg": "AutoCAD" }` 的 UI 行。 */
+interface ByExtRow {
+  ext: string;
+  app: string;
+}
+const byExtRows = ref<ByExtRow[]>([]);
+watch(
+  () => knowledge.openWith.byExt,
+  (byExt) => {
+    byExtRows.value = Object.entries(byExt ?? {}).map(([ext, app]) => ({ ext, app }));
+  },
+  { immediate: true, deep: true },
+);
+
+async function saveByExt(rows: ByExtRow[]): Promise<void> {
+  const byExt: Record<string, string> = {};
+  for (const row of rows) {
+    const ext = row.ext.trim().toLowerCase();
+    const app = row.app.trim();
+    if (ext && app) byExt[ext.startsWith(".") ? ext : `.${ext}`] = app;
+  }
+  await knowledge.saveOpenWith({ ...knowledge.openWith, byExt });
+}
+
+function addByExtRow(): void {
+  byExtRows.value = [...byExtRows.value, { ext: "", app: "" }];
+}
+
+async function removeByExtRow(index: number): Promise<void> {
+  byExtRows.value = byExtRows.value.filter((_, i) => i !== index);
+  await saveByExt(byExtRows.value);
+}
+
+async function commitByExtRow(index: number): Promise<void> {
+  const row = byExtRows.value[index];
+  if (!row) return;
+  // 两栏都有内容才写入；空行跳过
+  if (!row.ext.trim() || !row.app.trim()) return;
+  await saveByExt(byExtRows.value);
+}
+
 /** 原生选择器挑应用（macOS 选 .app / Windows 选 .exe / Linux 选可执行文件）。 */
 async function pickOpenApp(): Promise<void> {
   if (!isTauri()) return;
@@ -167,6 +210,16 @@ function onThemeChange(value: string | string[]) {
 
     <div class="setting-row">
       <div class="setting-text">
+        <span class="setting-name">{{ t("settings.calendarFeeds") }}</span>
+        <span class="setting-desc">{{ t("settings.calendarFeedsDesc") }}</span>
+      </div>
+      <button class="setting-btn" @click="feedsOpen = true">
+        {{ t("settings.calendarFeedsManage") }}
+      </button>
+    </div>
+
+    <div class="setting-row">
+      <div class="setting-text">
         <span class="setting-name">{{ t("settings.terminalShell") }}</span>
         <span class="setting-desc">{{ t("settings.terminalShellDesc") }}</span>
       </div>
@@ -194,6 +247,38 @@ function onThemeChange(value: string | string[]) {
       </div>
     </div>
 
+    <!-- 按扩展名覆盖：不在默认应用行里塞（会挤），单独一个子区块 -->
+    <div class="setting-byext">
+      <div class="byext-head">
+        <span class="setting-name">{{ t("settings.byExtTitle") }}</span>
+        <button class="text-btn" @click="addByExtRow">{{ t("settings.byExtAdd") }}</button>
+      </div>
+      <p class="byext-desc">{{ t("settings.byExtDesc") }}</p>
+      <div v-for="(row, index) in byExtRows" :key="index" class="byext-row">
+        <input
+          v-model="row.ext"
+          class="setting-input byext-ext"
+          :placeholder="t('settings.byExtExtPlaceholder')"
+          spellcheck="false"
+          @keydown.enter="commitByExtRow(index)"
+          @blur="commitByExtRow(index)"
+        />
+        <span class="byext-arrow">→</span>
+        <input
+          v-model="row.app"
+          class="setting-input byext-app"
+          :placeholder="t('settings.byExtAppPlaceholder')"
+          spellcheck="false"
+          @keydown.enter="commitByExtRow(index)"
+          @blur="commitByExtRow(index)"
+        />
+        <button class="byext-remove" :title="t('settings.byExtRemove')" @click="removeByExtRow(index)">
+          <EditorIcon name="o.x" />
+        </button>
+      </div>
+      <p v-if="!byExtRows.length" class="byext-empty">{{ t("settings.byExtEmpty") }}</p>
+    </div>
+
     <div class="setting-row">
       <div class="setting-text">
         <span class="setting-name">{{ t("settings.statusbar") }}</span>
@@ -206,6 +291,7 @@ function onThemeChange(value: string | string[]) {
       />
     </div>
 
+    <CalendarFeedsDialog v-if="feedsOpen" @close="feedsOpen = false" />
     <SourceConnectionsDialog
       :open="connectionsOpen"
       @close="connectionsOpen = false"
@@ -220,7 +306,9 @@ function onThemeChange(value: string | string[]) {
   flex: 1;
   overflow-y: auto;
   padding: 10px 20px;
-  max-width: 640px;
+  /* 用户口径：内容居中、满屏时最宽 60%（min 保证窄窗口不至于挤到不可用） */
+  max-width: max(480px, 60%);
+  margin: 0 auto;
 }
 .setting-row {
   display: flex;
@@ -268,6 +356,64 @@ function onThemeChange(value: string | string[]) {
 .setting-btn:disabled {
   opacity: 0.55;
   cursor: default;
+}
+/* 按扩展名覆盖：子区块，比普通 setting-row 多一层缩进 */
+.setting-byext {
+  padding: 10px 0 14px 16px;
+  border-bottom: 1px solid var(--border);
+}
+.byext-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 4px;
+}
+.byext-desc {
+  margin: 0 0 8px;
+  font-size: var(--font-sm);
+  color: var(--text-dim);
+  line-height: 1.5;
+}
+.byext-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 0;
+}
+.byext-arrow {
+  flex: none;
+  color: var(--text-dim);
+  font-size: var(--font-sm);
+}
+.byext-ext {
+  width: 90px;
+  flex: none;
+}
+.byext-app {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.byext-remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 20px;
+  height: 20px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+}
+.byext-remove:hover {
+  background: var(--bg-hover);
+  color: var(--danger, #e5534b);
+}
+.byext-empty {
+  margin: 0;
+  font-size: var(--font-sm);
+  color: var(--text-dim);
 }
 /* 「打开方式」：应用名输入 + 原生选择器并排（宽度上限，免得太长挤掉说明文字） */
 .setting-open-with {

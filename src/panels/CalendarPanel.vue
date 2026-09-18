@@ -2,24 +2,23 @@
 /**
  * 日历面板（工具类目）——FullCalendar v6（锁 6.1.21）月/列表视图。
  *
- * 语义定案（设计讨论 2026-09-17）：日历 = **投影图层**，自身不存任何数据、
- * 不做第二个日期真源。四个图层全部来自已有缓存：
- *   里程碑截止（issues store 每仓库缓存）/ Issue·PR 创建（仓库缓存 SQLite）/
- *   项目日期字段（app.db，projects store 当前已加载项目）。
- * 「提交热力」与 ICS 订阅（Google/Outlook/节假日）与农历是后续图层，见 TASK.md 台账。
+ * 图层模型（设计定案：日历 = 投影，不存数据、不做第二个日期真源）：
+ *  - 投影：里程碑截止 / Issue·PR 创建 / 项目日期字段（读既有缓存，零存储）；
+ *  - 提交热力：git_commit_activity 日格角标（装饰常显，不进图层菜单）；
+ *  - 法定假日：内置 holiday-cn JSON（休=红 / 班=灰，随版本兜底，零网络）；
+ *  - ICS 订阅：calendar_feeds（app_008），断网读缓存，URL 不进日志；管理入口在设置面板（来源连接同款模式）
+ *  - 农历副行：chinese-lunisolar-calendar（Rust 侧算法），初一显月名。
  *
- * WKWebView 结论：@fullcalendar/* 6.1.21 + preact 全部 dist 经 AGENTS.md 规定
- * 的 Iterator/withResolvers 等六项扫描零命中；样式由包内 JS 注入，无 CSS 入口。
- * 点击事件 = 在浏览器打开（与「在 GitHub 打开」同源）；本地无 url 的事件不跳。
+ * WKWebView 结论：@fullcalendar/* 6.1.21 + preact 六项扫描零命中（THIRD-PARTY.md）。
  */
-import { computed, ref, watch } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 import { storeToRefs } from "pinia";
 import FullCalendar from "@fullcalendar/vue3";
 import dayGridPlugin from "@fullcalendar/daygrid";
 import listPlugin from "@fullcalendar/list";
 import interactionPlugin from "@fullcalendar/interaction";
 import zhCnLocale from "@fullcalendar/core/locales/zh-cn";
-import type { CalendarOptions, DayCellMountArg, EventClickArg } from "@fullcalendar/core";
+import type { CalendarOptions, DatesSetArg, DayCellMountArg, EventClickArg } from "@fullcalendar/core";
 import PanelShell from "../workbench/PanelShell.vue";
 import DropdownMenu from "../components/DropdownMenu.vue";
 import EditorIcon from "../components/EditorIcon.vue";
@@ -29,6 +28,7 @@ import { usePullsStore } from "../stores/pulls";
 import { useProjectsStore } from "../stores/projects";
 import { useI18n } from "../i18n";
 import { api, isTauri } from "../api";
+import type { CalendarFeed, CalendarFeedEvent, HolidayDay } from "../api";
 import { openExternalUrl } from "../open-url";
 import { buildCalendarEvents, dateKey, heatBucket, type CalendarEventKind } from "./calendar-events";
 
@@ -41,35 +41,135 @@ const pulls = usePullsStore();
 const projects = useProjectsStore();
 const { t, locale } = useI18n();
 
-/** 图层开关（DropdownMenu multiple：保持展开连续勾选）。 */
-const LAYERS: CalendarEventKind[] = ["milestone", "issue", "pull", "project"];
-const visibleLayers = ref<string[]>([...LAYERS]);
+// ---- 图层开关（DropdownMenu multiple：保持展开连续勾选） ----
 
-/**
- * 提交热力（日格角标）——刻意**不进图层菜单**：它是单元格装饰（背景信息），
- * 不是事件层；「菜单项 = 事件图层」的语义不为其破例（桌面适配标注，见 TASK.md）。
- */
-const commitCounts = ref<Map<string, number>>(new Map());
-/** 数据到达/仓库切换时 bump：强制 FullCalendar 重挂载，重跑 dayCellDidMount。 */
-const calKey = ref(0);
+const PROJECTION_LAYERS: CalendarEventKind[] = ["milestone", "issue", "pull", "project"];
+const visibleLayers = ref<string[]>([...PROJECTION_LAYERS, "holiday"]);
 
 const layerOptions = computed(() => [
   { value: "milestone", label: t("calendar.layer.milestones") },
   { value: "issue", label: t("calendar.layer.issues") },
   { value: "pull", label: t("calendar.layer.pulls") },
   { value: "project", label: t("calendar.layer.projects") },
+  { value: "holiday", label: t("calendar.layer.holidays") },
+  ...feeds.value.map((f) => ({ value: `feed:${f.id}`, label: f.name })),
 ]);
 
-/** 四图层聚合 → FullCalendar 事件（kind 挂 classNames 上色）。 */
-const calendarEvents = computed(() => {
-  const all = buildCalendarEvents({
+// ---- 订阅 / 假日（应用级，不随仓库切换） ----
+
+const feeds = ref<CalendarFeed[]>([]);
+const feedEvents = ref<CalendarFeedEvent[]>([]);
+const holidayDays = ref<HolidayDay[]>([]);
+let appLoaded = false;
+let autoSyncStarted = false;
+/** 订阅过期阈值：超 6 小时在面板打开时后台重拉（离线诚实跳过）。 */
+const STALE_MS = 6 * 3600 * 1000;
+
+function reconcileLayers(): void {
+  const feedIds = feeds.value.map((f) => `feed:${f.id}`);
+  const kept = visibleLayers.value.filter((v) => !v.startsWith("feed:"));
+  visibleLayers.value = [...kept, ...feedIds];
+}
+
+async function refreshFeeds(): Promise<void> {
+  if (!isTauri()) return;
+  try {
+    [feeds.value, feedEvents.value] = await Promise.all([
+      api.calendarFeedList(),
+      api.calendarFeedEvents(),
+    ]);
+    reconcileLayers();
+  } catch {
+    // 命令不可达（浏览器预览）：诚实无订阅图层
+  }
+}
+
+function lastSyncMs(s: string): number {
+  const v = Date.parse(s.includes("T") ? s : `${s.replace(" ", "T")}Z`);
+  return Number.isNaN(v) ? 0 : v;
+}
+
+async function autoSyncStale(): Promise<void> {
+  if (autoSyncStarted) return;
+  autoSyncStarted = true;
+  let touched = false;
+  for (const feed of feeds.value) {
+    if (!feed.enabled) continue;
+    const stale = !feed.lastSyncedAt || Date.now() - lastSyncMs(feed.lastSyncedAt) > STALE_MS;
+    if (!stale) continue;
+    try {
+      await api.calendarFeedSync(feed.id);
+      touched = true;
+    } catch {
+      // 断网/失败：读缓存（错误信息不含 URL，后端红线）
+    }
+  }
+  if (touched) await refreshFeeds();
+}
+
+async function ensureAppData(): Promise<void> {
+  if (appLoaded || !isTauri()) return;
+  appLoaded = true;
+  await refreshFeeds();
+  try {
+    holidayDays.value = await api.calendarHolidays();
+  } catch {
+    holidayDays.value = [];
+  }
+  void autoSyncStale();
+}
+
+// ---- 农历副行（应用级；预取今天 ±370 天，超出再补拉） ----
+
+const lunarMap = ref<Map<string, string>>(new Map());
+let lunarCoverFrom: string | null = null;
+let lunarCoverTo: string | null = null;
+
+async function ensureLunar(from: Date, to: Date): Promise<void> {
+  if (!isTauri()) return;
+  const fromK = dateKey(from);
+  const toK = dateKey(to);
+  if (lunarCoverFrom && lunarCoverTo && fromK >= lunarCoverFrom && toK <= lunarCoverTo) return;
+  const fetchFrom = dateKey(new Date(from.getTime() - 30 * 86400e3));
+  const fetchTo = dateKey(new Date(to.getTime() + 30 * 86400e3));
+  try {
+    const rows = await api.calendarLunarRange(fetchFrom, fetchTo);
+    const next = new Map(lunarMap.value);
+    for (const row of rows) next.set(row.date, row.text);
+    lunarMap.value = next;
+    lunarCoverFrom = fetchFrom;
+    lunarCoverTo = fetchTo;
+    calKey.value += 1; // 重挂载让已挂载的日格补上副行
+  } catch {
+    // 超出支持范围（1901–2101）等：诚实无副行
+  }
+}
+
+// ---- 提交热力（仓库级） ----
+
+/** 提交热力（日格角标）——刻意不进图层菜单：装饰语义，非事件层。 */
+const commitCounts = ref<Map<string, number>>(new Map());
+/** 数据到达/切换时 bump：强制 FullCalendar 重挂载，重跑 dayCellDidMount。 */
+const calKey = ref(0);
+
+// ---- 事件装配 ----
+
+interface FcEvent {
+  id: string;
+  title: string;
+  start: string;
+  extendedProps: { url: string | null };
+  classNames: string[];
+}
+
+const calendarEvents = computed<FcEvent[]>(() => {
+  const projections: FcEvent[] = buildCalendarEvents({
     milestones: issues.milestones,
     issues: issues.issues,
     pulls: pulls.pulls,
     projectFields: projects.fields,
     projectItems: projects.items,
-  });
-  return all
+  })
     .filter((e) => visibleLayers.value.includes(e.kind))
     .map((e) => ({
       id: e.id,
@@ -78,12 +178,37 @@ const calendarEvents = computed(() => {
       extendedProps: { url: e.url },
       classNames: [`ev-${e.kind}`],
     }));
+
+  const extras: FcEvent[] = [];
+  if (visibleLayers.value.includes("holiday")) {
+    for (const h of holidayDays.value) {
+      extras.push({
+        id: `holiday:${h.date}:${h.name}`,
+        title: h.isOffDay ? h.name : `${h.name} ${t("calendar.workdaySuffix")}`,
+        start: h.date,
+        extendedProps: { url: null },
+        classNames: [h.isOffDay ? "ev-holiday" : "ev-workday"],
+      });
+    }
+  }
+  for (const f of feedEvents.value) {
+    if (visibleLayers.value.includes(`feed:${f.feedId}`)) {
+      extras.push({
+        id: `feed:${f.feedId}:${f.date}:${f.title}`,
+        title: f.title,
+        start: f.date,
+        extendedProps: { url: null },
+        classNames: ["ev-feed"],
+      });
+    }
+  }
+  return [...projections, ...extras];
 });
 
 function onEventClick(info: EventClickArg): void {
   const url = info.event.extendedProps?.url as string | undefined;
   if (url) openExternalUrl(url);
-  // 本地 Issue / 项目日期无线上页：不跳（诚实无操作，不弹误导性反馈）
+  // 本地 Issue / 项目日期 / 假日 / 订阅无线上页：诚实不跳
 }
 
 const options = computed<CalendarOptions>(() => ({
@@ -96,17 +221,29 @@ const options = computed<CalendarOptions>(() => ({
   dayMaxEvents: true,
   events: calendarEvents.value,
   eventClick: onEventClick,
-  // 提交热力角标：data-heat(-level) 落在日格元素上，::after 渲染（不动 fc 默认日号）
+  datesSet: (arg: DatesSetArg) => {
+    void ensureLunar(arg.start, arg.end);
+  },
+  // 日格挂载：提交热力 data-heat(-level)（::after 渲染）+ 农历副行（追加 span）
   dayCellDidMount: (arg: DayCellMountArg) => {
     const n = commitCounts.value.get(dateKey(arg.date));
-    if (!n) return;
-    arg.el.setAttribute("data-heat", String(n));
-    arg.el.setAttribute("data-heat-level", String(heatBucket(n)));
-    arg.el.setAttribute("title", t("calendar.heatTooltip", { n }));
+    if (n) {
+      arg.el.setAttribute("data-heat", String(n));
+      arg.el.setAttribute("data-heat-level", String(heatBucket(n)));
+      arg.el.setAttribute("title", t("calendar.heatTooltip", { n }));
+    }
+    const lunarText = lunarMap.value.get(dateKey(arg.date));
+    if (lunarText) {
+      const el = document.createElement("span");
+      el.className = "cal-lunar";
+      el.textContent = lunarText;
+      arg.el.appendChild(el);
+    }
   },
 }));
 
-/** 仓库切换 → 重灌三个图层的缓存（里程碑沿用每仓库缓存，远端仅首访拉取）。 */
+// ---- 仓库切换 → 重灌投影图层缓存（里程碑沿用每仓库缓存） ----
+
 watch(
   current,
   (path) => {
@@ -114,11 +251,9 @@ watch(
     void issues.loadCache().catch(() => {});
     void pulls.loadCache().catch(() => {});
     void issues.loadMilestones(path).catch(() => {});
-    // 项目图层吃 projects store 当前已加载的项目；未打开过项目工作区则补一次
     if (projects.items.length === 0 && projects.fields.length === 0) {
       void projects.loadAll().catch(() => {});
     }
-    // 提交热力：HEAD + 本地分支按日计数（git_commit_activity，Rust 侧已备）
     api
       .gitCommitActivity(path, 366)
       .then((rows) => {
@@ -129,6 +264,12 @@ watch(
   },
   { immediate: true },
 );
+
+onMounted(() => {
+  void ensureAppData();
+  const now = new Date();
+  void ensureLunar(new Date(now.getTime() - 370 * 86400e3), new Date(now.getTime() + 370 * 86400e3));
+});
 </script>
 
 <template>
@@ -185,7 +326,7 @@ watch(
   padding: 12px 2px;
 }
 
-/* FullCalendar → 项目 token 映射（fc 变量 + 关键件覆写；包内自带样式为 JS 注入）。 */
+/* FullCalendar → 项目 token 映射（包内样式为 JS 注入）。 */
 .calendar-wrap :deep(.fc) {
   --fc-page-bg-color: transparent;
   --fc-border-color: var(--border);
@@ -266,16 +407,32 @@ watch(
 .calendar-wrap :deep(.fc-event.ev-project .fc-event-title) {
   color: var(--text);
 }
+/* 法定假日：休=红 / 班=灰（ holiday-cn isOffDay 语义） */
+.calendar-wrap :deep(.fc-event.ev-holiday) {
+  background: var(--danger);
+}
+.calendar-wrap :deep(.fc-event.ev-workday) {
+  background: var(--bg-selected);
+  border: 1px solid var(--border);
+  color: var(--text);
+}
+.calendar-wrap :deep(.fc-event.ev-workday .fc-event-title) {
+  color: var(--text);
+}
+/* ICS 订阅：accent + 虚线描边（与里程碑实线蓝区分） */
+.calendar-wrap :deep(.fc-event.ev-feed) {
+  background: var(--accent);
+  border: 1px dashed var(--bg-panel);
+}
 
-/* 提交热力角标：强度档 = calendar-events.ts heatBucket（GitHub 贡献图口径，
-   全绿阶不引新色；字号走 --font-xs token）。 */
+/* 提交热力角标：右下（避开右上日号），全绿阶 = heatBucket 档位。 */
 .calendar-wrap :deep(.fc-daygrid-day) {
   position: relative;
 }
 .calendar-wrap :deep(.fc-daygrid-day[data-heat])::after {
   content: attr(data-heat);
   position: absolute;
-  top: 3px;
+  bottom: 3px;
   right: 3px;
   min-width: 14px;
   padding: 0 3px;
@@ -303,5 +460,16 @@ watch(
   background: var(--success);
   color: #fff;
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.35);
+}
+
+/* 农历副行：右上日号下方（初一显示月名，其余日名）。 */
+.calendar-wrap :deep(.cal-lunar) {
+  position: absolute;
+  top: 17px;
+  right: 3px;
+  font-size: var(--font-xs);
+  color: var(--text-dim);
+  line-height: 1;
+  pointer-events: none;
 }
 </style>

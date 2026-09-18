@@ -3,6 +3,7 @@
 //! headless MCP server from Phase 4.
 
 mod appdb;
+mod calendar;
 mod credentials;
 mod gh;
 mod gitea;
@@ -302,6 +303,48 @@ fn git_fetch(repo_path: String) -> Result<(), String> {
 fn git_commit_activity(repo_path: String, days: Option<u32>) -> Result<Vec<models::CommitDayCount>, String> {
     let dir = local_dir_of(&repo_path)?;
     git::commit_activity(&dir.to_string_lossy(), days.unwrap_or(365)).map_err(|e| e.to_string())
+}
+
+// ---- 日历 S3-b：ICS 订阅 / 内置法定假日 / 农历副行（calendar.rs）----
+
+#[tauri::command]
+fn calendar_feed_list() -> Result<Vec<calendar::FeedRow>, String> {
+    calendar::feed_list().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn calendar_feed_add(name: String, url: String) -> Result<calendar::FeedRow, String> {
+    calendar::feed_add(&name, &url).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn calendar_feed_remove(id: String) -> Result<(), String> {
+    calendar::feed_remove(&id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn calendar_feed_set_enabled(id: String, enabled: bool) -> Result<calendar::FeedRow, String> {
+    calendar::feed_set_enabled(&id, enabled).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn calendar_feed_sync(id: String) -> Result<u32, String> {
+    calendar::feed_sync(&id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn calendar_feed_events() -> Result<Vec<calendar::FeedEvent>, String> {
+    calendar::feed_events().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn calendar_holidays() -> Result<Vec<calendar::HolidayDay>, String> {
+    calendar::holidays().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn calendar_lunar_range(start: String, end: String) -> Result<Vec<calendar::LunarLabel>, String> {
+    calendar::lunar_range(&start, &end).map_err(|e| e.to_string())
 }
 
 // ---- 本地分支 review（PR 工作区本地形态，纯 git 能力不扩 Source trait）----
@@ -1193,6 +1236,14 @@ pub fn run() {
             git_branches,
             git_fetch,
             git_commit_activity,
+            calendar_feed_list,
+            calendar_feed_add,
+            calendar_feed_remove,
+            calendar_feed_set_enabled,
+            calendar_feed_sync,
+            calendar_feed_events,
+            calendar_holidays,
+            calendar_lunar_range,
             branch_review_list,
             branch_review_diff,
             pr_commits_between,

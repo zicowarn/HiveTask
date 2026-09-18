@@ -6,8 +6,8 @@
  * - 贴图 / .bin 附件从**知识库内同目录**读（`ctx.readSibling`），预先转成 data URL，
  *   再交给 `LoadingManager.setURLModifier` 映射（three 的 FileLoader 只走 XHR，不能回调异步）；
  * - 灯光用固定两灯 + 环境光，不引 HDR 资源（那要从网上下）；
- * - FBX、DAE、3DS、USDZ、3MF 需要各自的 loader 与额外解码，本期**不给假承诺**：
- *   打开时落到「用默认应用打开」的诚实卡片（见 MODEL_NOT_RENDERABLE）。
+ * - FBX/DAE/3DS/USDZ/3MF/VRML/AMF 用 **three.js 自带的 Loader** 按需加载
+ *   （OFV 同款做法——这些 Loader 就在 three/examples/jsm/loaders/ 里）。
  */
 import type { PreviewContext, PreviewInstance, PreviewTool } from "../registry";
 
@@ -30,30 +30,31 @@ export const MODEL_EXTENSIONS = [
   "amf",
 ];
 
-/** 认得出、但不做渲染的重格式：明确告知而不是空白画布。 */
-export const MODEL_NOT_RENDERABLE = new Set(["fbx", "dae", "3ds", "usd", "usda", "usdc", "usdz", "3mf", "amf"]);
+// ⚠️ 之前把 FBX/DAE/3DS/USDZ/3MF/VRML/AMF 标为"需要专用解码器，本期不做"——这是错的：
+// OFV 用的是 **three.js 自带的 Loader**（FBXLoader/ColladaLoader/TDSLoader/USDLoader/
+// ThreeMFLoader/VRMLLoader/AMFLoader），而 three 已经是我们的依赖，这些 Loader 就在
+// node_modules/three/examples/jsm/loaders/ 里。我们"没有解码器"的说法不成立。
 
 const GLB_MAGIC = "glTF";
 
-function note(text: string, className = "kb-note"): HTMLElement {
-  const p = document.createElement("p");
-  p.className = className;
-  p.textContent = text;
-  return p;
-}
+/** 认得出、但不做渲染的重格式：明确告知而不是空白画布。 */
+export const MODEL_NOT_RENDERABLE = new Set(["fbx", "dae", "3ds", "usd", "usda", "usdc", "usdz", "3mf", "amf"]);
 
 async function renderModel(ctx: PreviewContext): Promise<PreviewInstance> {
   const wrap = document.createElement("div");
   wrap.className = "kb-model3d";
   ctx.container.replaceChildren(wrap);
 
+  // ① 不支持的模式先拦（放 WebGL 创建之前：不需要 WebGL 的格式不付上下文创建的代价；
+  //    且 jsdom 里 WebGL 必然失败，先后顺序反了的话诚实卡片永远出不来——测试抓到过）
   if (MODEL_NOT_RENDERABLE.has(ctx.ext)) {
     wrap.appendChild(
-      note(
-        `${ctx.ext.toUpperCase()} 需要专用解码器（本期不做，避免半成品渲染误导），请用「默认应用打开」。`,
-        "kb-note kb-model3d-note",
-      ),
+      Object.assign(document.createElement("p"), {
+        className: "kb-note kb-model3d-note",
+        textContent: `${ctx.ext.toUpperCase()} 需要专用解码器（本期不做，避免半成品渲染误导），请用「默认应用打开」。`,
+      }),
     );
+    ctx.onInfo?.(`不支持直接渲染（${ctx.ext.toUpperCase()} 需要专用解码器）`);
     return {};
   }
 
@@ -65,10 +66,9 @@ async function renderModel(ctx: PreviewContext): Promise<PreviewInstance> {
   stage.className = "kb-model3d-stage";
   wrap.appendChild(stage);
 
+  // ② WebGL 降级（照 OFV 的口径：创建失败给诚实提示，不抛出去白屏）
   let renderer: import("three").WebGLRenderer;
   try {
-    // ⚠️ 照 OFV 的口径：WebGL 创建失败不是抛出去，而是降级成"当前浏览器/设备不支持 WebGL"
-    // —— 否则在 jsdom 或禁用 WebGL 的 WebView 里会直接白屏，用户不知道是什么状态。
     renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
   } catch {
     wrap.appendChild(Object.assign(document.createElement("p"), { className: "kb-note", textContent: "当前浏览器或设备不支持 WebGL，无法直接渲染 3D 模型。" }));
@@ -135,36 +135,80 @@ async function renderModel(ctx: PreviewContext): Promise<PreviewInstance> {
   let mesh: import("three").Object3D | null = null;
   let triangleCount = 0;
 
-  if (ctx.ext === "gltf" || ctx.ext === "glb") {
-    const { GLTFLoader } = await import("three/examples/jsm/loaders/GLTFLoader.js");
-    const isBinary = bytes.byteLength > 4 && String.fromCharCode(...bytes.subarray(0, 4)) === GLB_MAGIC;
-    if (!isBinary) {
-      // 文本 glTF：先按 JSON 读出附件清单，再解析（保证贴图离线可用）
-      try {
-        await preloadGltf(JSON.parse(new TextDecoder().decode(bytes)));
-      } catch {
-        /* JSON 坏了交给 loader 报错 */
+  // 统一加载策略：全格式走 three.js 自带 Loader（OFV 同款），按需 import()
+  // 坐标系统一由下面的 autoFrame 处理，loader 之间无差异。
+  const material = () => new THREE.MeshStandardMaterial({ color: 0x9aa4b2, metalness: 0.1, roughness: 0.7 });
+  switch (ctx.ext) {
+    case "gltf":
+    case "glb": {
+      const { GLTFLoader } = await import("three/examples/jsm/loaders/GLTFLoader.js");
+      const isBinary = bytes.byteLength > 4 && String.fromCharCode(...bytes.subarray(0, 4)) === GLB_MAGIC;
+      if (!isBinary) {
+        try { await preloadGltf(JSON.parse(new TextDecoder().decode(bytes))); } catch { /* 坏 JSON 交给 loader */ }
       }
+      const loader = new GLTFLoader(manager);
+      const gltf = await loader.parseAsync(buffer, "");
+      mesh = gltf.scene;
+      break;
     }
-    const loader = new GLTFLoader(manager);
-    const gltf = await loader.parseAsync(buffer, "");
-    mesh = gltf.scene;
-  } else if (ctx.ext === "obj") {
-    const { OBJLoader } = await import("three/examples/jsm/loaders/OBJLoader.js");
-    mesh = new OBJLoader(manager).parse(new TextDecoder().decode(bytes));
-  } else if (ctx.ext === "stl") {
-    const { STLLoader } = await import("three/examples/jsm/loaders/STLLoader.js");
-    const geometry = new STLLoader().parse(buffer);
-    geometry.computeVertexNormals();
-    mesh = new THREE.Mesh(geometry, new THREE.MeshStandardMaterial({ color: 0x9aa4b2, metalness: 0.1, roughness: 0.7 }));
-  } else if (ctx.ext === "ply") {
-    const { PLYLoader } = await import("three/examples/jsm/loaders/PLYLoader.js");
-    const geometry = new PLYLoader().parse(buffer);
-    geometry.computeVertexNormals();
-    mesh = new THREE.Mesh(geometry, new THREE.MeshStandardMaterial({ color: 0x9aa4b2, metalness: 0.1, roughness: 0.7 }));
-  } else {
-    const { VRMLLoader } = await import("three/examples/jsm/loaders/VRMLLoader.js");
-    mesh = new VRMLLoader(manager).parse(new TextDecoder().decode(bytes), "");
+    case "obj": {
+      const { OBJLoader } = await import("three/examples/jsm/loaders/OBJLoader.js");
+      mesh = new OBJLoader(manager).parse(new TextDecoder().decode(bytes));
+      break;
+    }
+    case "stl": {
+      const { STLLoader } = await import("three/examples/jsm/loaders/STLLoader.js");
+      const geometry = new STLLoader().parse(buffer);
+      geometry.computeVertexNormals();
+      mesh = new THREE.Mesh(geometry, material());
+      break;
+    }
+    case "ply": {
+      const { PLYLoader } = await import("three/examples/jsm/loaders/PLYLoader.js");
+      const geometry = new PLYLoader().parse(buffer);
+      geometry.computeVertexNormals();
+      mesh = new THREE.Mesh(geometry, material());
+      break;
+    }
+    case "fbx": {
+      const { FBXLoader } = await import("three/examples/jsm/loaders/FBXLoader.js");
+      mesh = new FBXLoader(manager).parse(buffer, "");
+      break;
+    }
+    case "dae": {
+      const { ColladaLoader } = await import("three/examples/jsm/loaders/ColladaLoader.js");
+      const collada = new ColladaLoader(manager).parse(new TextDecoder().decode(bytes), "");
+      mesh = collada?.scene ?? new THREE.Group();
+      break;
+    }
+    case "3ds": {
+      const { TDSLoader } = await import("three/examples/jsm/loaders/TDSLoader.js");
+      mesh = new TDSLoader(manager).parse(buffer, "");
+      break;
+    }
+    case "3mf": {
+      const { ThreeMFLoader } = await import("three/examples/jsm/loaders/3MFLoader.js");
+      mesh = new ThreeMFLoader(manager).parse(buffer);
+      break;
+    }
+    case "amf": {
+      const { AMFLoader } = await import("three/examples/jsm/loaders/AMFLoader.js");
+      mesh = new AMFLoader(manager).parse(buffer);
+      break;
+    }
+    case "usd":
+    case "usda":
+    case "usdc":
+    case "usdz": {
+      const { USDLoader } = await import("three/examples/jsm/loaders/USDLoader.js");
+      mesh = new USDLoader(manager).parse(buffer, "");
+      break;
+    }
+    default: {
+      // vrml / wrl
+      const { VRMLLoader } = await import("three/examples/jsm/loaders/VRMLLoader.js");
+      mesh = new VRMLLoader(manager).parse(new TextDecoder().decode(bytes), "");
+    }
   }
 
   scene.add(mesh);
