@@ -220,6 +220,62 @@ describe("编码切换（状态栏 → 面板）", () => {
     vi.doUnmock("../src/api");
   });
 
+  it("csv（表格插件读文本）：状态栏能拿到真实编码，切换后表格按新编码重画", async () => {
+    vi.resetModules();
+    const { createApp } = await import("vue");
+    const { useI18n } = await import("../src/i18n");
+    useI18n().setLocale("zh-CN");
+    const reads: (string | undefined)[] = [];
+    vi.doMock("../src/api", () => ({
+      isTauri: () => true,
+      api: {
+        kbStat: async () => ({ exists: true, kind: "file", size: 8, mtimeMs: 1 }),
+        kbReadText: async (_root: string, _rel: string, encoding?: string) => {
+          reads.push(encoding);
+          return {
+            text: "名称,数量\n" + (encoding ? "按选择编码" : "自动探测") + ",1\n",
+            encoding: encoding ?? "GBK",
+            bom: false,
+            eol: "\n",
+            size: 8,
+            mtimeMs: 1,
+          };
+        },
+        kbReadBytes: async () => new ArrayBuffer(8),
+        kbListDir: async () => [],
+        kbWalk: async () => [],
+      },
+    }));
+    const { default: KnowledgePreview } = await import("../src/knowledge/KnowledgePreview.vue");
+    const { useKnowledgeStore } = await import("../src/stores/knowledge");
+    const pinia = createPinia();
+    setActivePinia(pinia);
+    const store = useKnowledgeStore();
+    store.root = "/tmp/kb";
+    store.selected = "表格-GBK.csv";
+
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const app = createApp(KnowledgePreview);
+    app.use(pinia);
+    app.mount(host);
+    await waitForDom(() => {
+      expect(host.querySelector(".kb-sheet"), "csv 应出表格视图").not.toBeNull();
+    });
+    // 状态栏的编码格依赖 activeText：表格插件走文本通道后应拿到真实编码
+    expect(store.activeText?.encoding, "csv 也要回灌编码给状态栏").toBe("GBK");
+
+    store.requestEncoding("GB18030");
+    await waitForDom(() => {
+      const text = host.querySelector(".kb-sheet")!.textContent ?? "";
+      expect(text, "表格应按新编码重画").toContain("按选择编码");
+    });
+    expect(store.activeText?.encoding).toBe("GB18030");
+    app.unmount();
+    host.remove();
+    vi.doUnmock("../src/api");
+  });
+
   it("文本/代码（注册表渲染）：切换后**画面真的重渲染**，状态栏编码也跟着更新", async () => {
     // 这条是先前漏掉的路径：`.txt` 由注册表的 text 插件画成 <pre class="kb-code">，
     // 只更新 text.value 不会重画——用户实测"没有实现"就是这里。

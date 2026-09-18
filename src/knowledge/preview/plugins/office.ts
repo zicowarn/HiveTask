@@ -22,6 +22,9 @@ import { ZoomController, type FitMode } from "../zoom";
  * - 演示：本插件是自己解 zip 取 ppt/slides XML，OOXML 家族都成立；ODP 是 ODF，不收。
  */
 export const WORD_EXTENSIONS = ["docx", "docm", "dotx", "dotm"];
+/** 其实是纯文本的表格格式：走文本通道（编码可探测、可手动切换）。 */
+const TEXT_SHEET_EXTENSIONS = ["csv", "tsv"];
+
 export const SHEET_EXTENSIONS = ["xlsx", "xlsm", "xlsb", "xls", "csv", "tsv", "ods", "fods"];
 export const SLIDES_EXTENSIONS = ["pptx", "pptm", "ppsx", "potx"];
 
@@ -316,8 +319,13 @@ async function renderWord(ctx: PreviewContext): Promise<PreviewInstance> {
 /** 表格：多工作表页签 + 表格体。 */
 async function renderSheet(ctx: PreviewContext): Promise<PreviewInstance> {
   const XLSX = await import("xlsx");
-  const bytes = await ctx.readBytes();
-  const workbook = XLSX.read(bytes, { type: "array" });
+  // csv/tsv 是**文本**格式，必须走文本通道：
+  // ① 它可能是 GBK/BIG5（中文表格的常态），而 SheetJS 只按 UTF-8 解字节 —— 直接喂字节
+  //    会整片乱码；② 走 ctx.readText 才能吃到 Rust 的编码探测与用户的**手动编码切换**
+  //    （面板的 readText 还会把真实编码回灌给状态栏）。
+  const workbook = TEXT_SHEET_EXTENSIONS.includes(ctx.ext)
+    ? XLSX.read(await ctx.readText(), { type: "string" })
+    : XLSX.read(await ctx.readBytes(), { type: "array" });
   const wrap = document.createElement("div");
   wrap.className = "kb-sheet";
   const tabs = document.createElement("div");
