@@ -47,10 +47,10 @@ fn index_base() -> Result<PathBuf> {
     #[cfg(test)]
     {
         let guard = TEST_INDEX_BASE.lock().unwrap();
-        return Ok(match guard.as_ref() {
+        Ok(match guard.as_ref() {
             Some(dir) => dir.clone(),
             None => std::env::temp_dir().join(format!("hivetask-test-index-{}", std::process::id())),
-        });
+        })
     }
     #[cfg(not(test))]
     {

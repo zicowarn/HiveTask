@@ -279,6 +279,7 @@ async function remove(entry: RepoEntry) {
         v-for="entry in visibleRepos"
         :key="entry.id"
         class="repo-item"
+        role="button"
         :class="{ current: entry.path === repoStore.current }"
         @click="pick(entry)"
       >

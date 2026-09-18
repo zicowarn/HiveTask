@@ -4,7 +4,7 @@
  * 字段逐 (条目×字段) 成事件、标题组装四条规则。
  */
 import { describe, expect, it } from "vitest";
-import { buildCalendarEvents, localDateOf } from "../src/panels/calendar-events";
+import { buildCalendarEvents, dateKey, heatBucket, localDateOf } from "../src/panels/calendar-events";
 import type { ProjectField, ProjectItem } from "../src/api";
 import type { Issue, Pull } from "../src/types";
 
@@ -78,6 +78,28 @@ describe("localDateOf", () => {
     expect(localDateOf(null)).toBeNull();
     expect(localDateOf("")).toBeNull();
     expect(localDateOf("not-a-date")).toBeNull();
+  });
+});
+
+describe("dateKey", () => {
+  it("本地日期键不经 UTC 往返（日界边缘不漂移）", () => {
+    expect(dateKey(new Date(2026, 2, 5))).toBe("2026-03-05");
+    expect(dateKey(new Date(2026, 11, 31, 23, 59))).toBe("2026-12-31");
+    expect(dateKey(new Date(2026, 0, 1))).toBe("2026-01-01");
+  });
+});
+
+describe("heatBucket", () => {
+  it("GitHub 贡献图口径四档：0 无 / ≤2 低 / ≤5 中 / ≤9 高 / ≥10 峰值", () => {
+    expect(heatBucket(0)).toBe(0);
+    expect(heatBucket(1)).toBe(1);
+    expect(heatBucket(2)).toBe(1);
+    expect(heatBucket(3)).toBe(2);
+    expect(heatBucket(5)).toBe(2);
+    expect(heatBucket(6)).toBe(3);
+    expect(heatBucket(9)).toBe(3);
+    expect(heatBucket(10)).toBe(4);
+    expect(heatBucket(99)).toBe(4);
   });
 });
 

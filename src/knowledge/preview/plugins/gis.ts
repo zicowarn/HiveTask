@@ -122,7 +122,10 @@ async function renderGis(ctx: PreviewContext): Promise<PreviewInstance> {
   const L = await import("leaflet");
 
   const map = L.map(mapEl, {
-    attributionControl: true,
+    // ⚠️ attributionControl 不能开：默认会创建一个**右下角**的 attribution，
+    // 加上我们手动放的 topright 那个，"Leaflet" 就会出现在右下+右上两处（用户实测截图）。
+    // 关掉默认的，只用下面显式创建的 topright 那一个。
+    attributionControl: false,
     // Leaflet 自带的浮动 +/- 与"头部统一缩放"重复且风格不一致（用户实测指出）→ 关掉，
     // 改由面板头部的缩放控件驱动（见下面的 zoom()）。
     zoomControl: false,

@@ -163,6 +163,23 @@ Safari 有的新全局，WKWebView 可能没有。
 3. 有 legacy 构建的库优先用 legacy；
 4. 交付说明里写清"该依赖在 WKWebView 上的兼容性结论"。
 
+## 数据落盘布局（强制认知，持久化相关任务必读）
+
+> 完整设计见 `docs/design-storage-layout.md`。改动任何持久化行为前先读。
+
+| 数据 | 位置 |
+|---|---|
+| 登记层（connections / repos 指针 / projects / prefs） | `<app data>/app.db`（全局唯一，appdb.rs） |
+| 每仓库索引缓存（issues/pulls/comments 物化视图） | `<app data>/repo-index/<目录名>-<路径指纹>/hivetask.db`（storage.rs） |
+| 本地 Issue 事件日志（**真源**） | 仓库 `.git` 内隐藏引用 `refs/hivetask/issues`（journal.rs，事件 commit 链） |
+| 仅远端登记的合成仓库目录 | `<app data>/repos-cache/<owner>/<repo>/`（appdb.rs） |
+
+**红线：应用不向用户仓库工作区写入任何文件，不碰 `.git/info/exclude`。**
+历史教训：索引曾写进 `<repo>/.hivetask/hivetask.db` 并靠 exclude 打补丁
+（2026-09 已迁出，首次 open 自动迁移并清理）。新功能要持久化时：索引/缓存
+进 `<app data>`；跟仓库走的数据进 git 对象/引用（只动 tree/blob/ref）；
+SQLite 索引是可重建的物化视图，永远不需要同步。
+
 ## 质量门禁（提交前必跑）
 
 ```bash

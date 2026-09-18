@@ -112,6 +112,7 @@ export const enUS: Record<MessageKey, string> = {
   "calendar.layer.pulls": "Pull requests",
   "calendar.layer.projects": "Project dates",
   "calendar.noRepo": "Open a repository to see its issue and milestone dates.",
+  "calendar.heatTooltip": "{n} commits",
 
   // Git history panel
   "gitHistory.fetch": "Fetch",

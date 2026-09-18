@@ -113,6 +113,7 @@ export const zhCN = {
   "calendar.layer.pulls": "PR",
   "calendar.layer.projects": "项目日期",
   "calendar.noRepo": "打开仓库后，这里会显示它的 Issue 与里程碑日期。",
+  "calendar.heatTooltip": "{n} 次提交",
 
   // Git history panel
   "gitHistory.fetch": "抓取远端",

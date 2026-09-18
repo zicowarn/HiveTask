@@ -19,7 +19,7 @@ import dayGridPlugin from "@fullcalendar/daygrid";
 import listPlugin from "@fullcalendar/list";
 import interactionPlugin from "@fullcalendar/interaction";
 import zhCnLocale from "@fullcalendar/core/locales/zh-cn";
-import type { CalendarOptions, EventClickArg } from "@fullcalendar/core";
+import type { CalendarOptions, DayCellMountArg, EventClickArg } from "@fullcalendar/core";
 import PanelShell from "../workbench/PanelShell.vue";
 import DropdownMenu from "../components/DropdownMenu.vue";
 import EditorIcon from "../components/EditorIcon.vue";
@@ -28,9 +28,9 @@ import { useIssuesStore } from "../stores/issues";
 import { usePullsStore } from "../stores/pulls";
 import { useProjectsStore } from "../stores/projects";
 import { useI18n } from "../i18n";
-import { isTauri } from "../api";
+import { api, isTauri } from "../api";
 import { openExternalUrl } from "../open-url";
-import { buildCalendarEvents, type CalendarEventKind } from "./calendar-events";
+import { buildCalendarEvents, dateKey, heatBucket, type CalendarEventKind } from "./calendar-events";
 
 defineProps<{ leafId?: string; panelType?: string }>();
 
@@ -44,6 +44,14 @@ const { t, locale } = useI18n();
 /** 图层开关（DropdownMenu multiple：保持展开连续勾选）。 */
 const LAYERS: CalendarEventKind[] = ["milestone", "issue", "pull", "project"];
 const visibleLayers = ref<string[]>([...LAYERS]);
+
+/**
+ * 提交热力（日格角标）——刻意**不进图层菜单**：它是单元格装饰（背景信息），
+ * 不是事件层；「菜单项 = 事件图层」的语义不为其破例（桌面适配标注，见 TASK.md）。
+ */
+const commitCounts = ref<Map<string, number>>(new Map());
+/** 数据到达/仓库切换时 bump：强制 FullCalendar 重挂载，重跑 dayCellDidMount。 */
+const calKey = ref(0);
 
 const layerOptions = computed(() => [
   { value: "milestone", label: t("calendar.layer.milestones") },
@@ -88,6 +96,14 @@ const options = computed<CalendarOptions>(() => ({
   dayMaxEvents: true,
   events: calendarEvents.value,
   eventClick: onEventClick,
+  // 提交热力角标：data-heat(-level) 落在日格元素上，::after 渲染（不动 fc 默认日号）
+  dayCellDidMount: (arg: DayCellMountArg) => {
+    const n = commitCounts.value.get(dateKey(arg.date));
+    if (!n) return;
+    arg.el.setAttribute("data-heat", String(n));
+    arg.el.setAttribute("data-heat-level", String(heatBucket(n)));
+    arg.el.setAttribute("title", t("calendar.heatTooltip", { n }));
+  },
 }));
 
 /** 仓库切换 → 重灌三个图层的缓存（里程碑沿用每仓库缓存，远端仅首访拉取）。 */
@@ -102,6 +118,14 @@ watch(
     if (projects.items.length === 0 && projects.fields.length === 0) {
       void projects.loadAll().catch(() => {});
     }
+    // 提交热力：HEAD + 本地分支按日计数（git_commit_activity，Rust 侧已备）
+    api
+      .gitCommitActivity(path, 366)
+      .then((rows) => {
+        commitCounts.value = new Map(rows.map((r) => [r.date, r.count]));
+        calKey.value += 1;
+      })
+      .catch(() => {});
   },
   { immediate: true },
 );
@@ -121,7 +145,7 @@ watch(
     </template>
     <div class="calendar-wrap">
       <p v-if="!current" class="cal-hint">{{ t("calendar.noRepo") }}</p>
-      <FullCalendar v-else :options="options" />
+      <FullCalendar v-else :key="calKey" :options="options" />
     </div>
   </PanelShell>
 </template>
@@ -241,5 +265,43 @@ watch(
 }
 .calendar-wrap :deep(.fc-event.ev-project .fc-event-title) {
   color: var(--text);
+}
+
+/* 提交热力角标：强度档 = calendar-events.ts heatBucket（GitHub 贡献图口径，
+   全绿阶不引新色；字号走 --font-xs token）。 */
+.calendar-wrap :deep(.fc-daygrid-day) {
+  position: relative;
+}
+.calendar-wrap :deep(.fc-daygrid-day[data-heat])::after {
+  content: attr(data-heat);
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  min-width: 14px;
+  padding: 0 3px;
+  border-radius: 7px;
+  font-size: var(--font-xs);
+  line-height: 14px;
+  text-align: center;
+  background: var(--bg-hover);
+  color: var(--text-dim);
+}
+.calendar-wrap :deep(.fc-daygrid-day[data-heat-level="1"])::after {
+  background: var(--success-soft);
+  color: var(--text);
+}
+.calendar-wrap :deep(.fc-daygrid-day[data-heat-level="2"])::after {
+  background: var(--success-soft);
+  color: var(--text);
+  box-shadow: inset 0 0 0 1px var(--success);
+}
+.calendar-wrap :deep(.fc-daygrid-day[data-heat-level="3"])::after {
+  background: var(--success);
+  color: #fff;
+}
+.calendar-wrap :deep(.fc-daygrid-day[data-heat-level="4"])::after {
+  background: var(--success);
+  color: #fff;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.35);
 }
 </style>
