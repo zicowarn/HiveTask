@@ -367,6 +367,55 @@ describe("GIS：底图默认关闭", () => {
   });
 });
 
+describe("媒体容器元信息（照 OFV 移植的解析器 → onInfo 状态栏）", () => {
+  it("视频解析容器头并上报（解不了播放也能说清是什么）", async () => {
+    const { videoPlugin } = await import("../src/knowledge/preview/plugins/media");
+    const atom = (t: string, body: Uint8Array): Uint8Array => {
+      const out = new Uint8Array(8 + body.length);
+      new DataView(out.buffer).setUint32(0, 8 + body.length);
+      for (let i = 0; i < 4; i++) out[4 + i] = t.charCodeAt(i);
+      out.set(body, 8);
+      return out;
+    };
+    const u32be = (v: number) => new Uint8Array([(v >>> 24) & 0xff, (v >>> 16) & 0xff, (v >>> 8) & 0xff, v & 0xff]);
+    const zeros = (n: number) => new Uint8Array(n);
+    // mvhd v0：ver/flags(4) ctime(4) mtime(4) timescale(4) duration(4) + 其余
+    const mvhd = atom("mvhd", new Uint8Array([0, 0, 0, 0, ...u32be(0), ...u32be(0), ...u32be(600), ...u32be(1800), ...zeros(80 - 20)]));
+    // tkhd v0：ver/flags(4) ctime(4) mtime(4) trackID(4) rsv(4) dur(4) rsv(8) layer(2) alt(2) vol(2) rsv(2) matrix(36) width(4) height(4)
+    const tkhdBody = new Uint8Array([
+      0, 0, 0, 0, ...u32be(0), ...u32be(0), ...u32be(1), ...u32be(0), ...u32be(1800),
+      ...zeros(8), 0, 0, 0, 0x01, 0, 0, 0, 0,
+      ...u32be(0x10000), ...u32be(0), ...u32be(0), ...u32be(0), ...u32be(0x10000), ...u32be(0), ...u32be(0), ...u32be(0), ...u32be(0x40000000),
+      ...u32be(320 << 16), ...u32be(240 << 16),
+    ]);
+    expect(tkhdBody.length).toBe(84);
+    const moov = atom("moov", new Uint8Array([...mvhd, ...atom("trak", atom("tkhd", tkhdBody))]));
+    const ftyp = atom("ftyp", new Uint8Array([...new TextEncoder().encode("isom"), ...u32be(512), ...new TextEncoder().encode("isomiso2")]));
+    const ctx = makeCtx({ ext: "mp4", readBytes: async () => new Uint8Array([...ftyp, ...moov]) });
+    const infos: (string | null)[] = [];
+    (ctx as { onInfo?: (v: string | null) => void }).onInfo = (v) => infos.push(v);
+    await videoPlugin.render(ctx);
+    expect(infos[0]).toContain("MP4");
+    expect(infos[0]).toContain("320×240");
+    expect(infos[0]).toContain("0:03");
+  });
+
+  it("FLV/TS 走 mpegts.js 分支（blob 照样带 MIME，MSE 不支持时给诚实文案）", async () => {
+    const { videoPlugin } = await import("../src/knowledge/preview/plugins/media");
+    const blobs: string[] = [];
+    const original = URL.createObjectURL.bind(URL);
+    vi.spyOn(URL, "createObjectURL").mockImplementation((blob: Blob | MediaSource) => {
+      if (blob instanceof Blob) blobs.push(blob.type);
+      return original(blob);
+    });
+    const ctx = makeCtx({ ext: "flv", readBytes: async () => new Uint8Array([0x46, 0x4c, 0x56, 1]) });
+    (ctx as { onInfo?: (v: string | null) => void }).onInfo = () => {};
+    await videoPlugin.render(ctx);
+    expect(blobs).toEqual(["video/x-flv"]);
+    // 容器解析也认得 FLV 头（暂未识别详情就给格式名，不编造）
+  });
+});
+
 describe("媒体 blob 必须带 MIME（WKWebView 无类型 blob 一律拒播）", () => {
   it("音频/视频的 blob 带各自容器的 MIME（mp4 无 MIME 报 SRC_NOT_SUPPORTED，实机踩过）", async () => {
     const { audioPlugin, videoPlugin } = await import("../src/knowledge/preview/plugins/media");

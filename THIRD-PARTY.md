@@ -59,6 +59,7 @@ HiveTask 自身以 **AGPL-3.0-only** 发布（见 `LICENSE`）。下列许可均
 | `@mapbox/togeojson` | BSD-2-Clause | KML / GPX → GeoJSON |
 | `topojson-client` | ISC | TopoJSON → GeoJSON |
 | `hls.js` | Apache-2.0 | `.m3u8` 播放（自定义 loader 走知识库本地文件） |
+| `mpegts.js` | Apache-2.0 | `.flv` / `.m2ts`/`.ts`/`.mpg` 播放（MSE demux，字节来自本地 blob） |
 | `@mlightcad/libredwg-web`（含 wasm） | MIT | DWG 解析（wasm 只在打开 .dwg 时加载） |
 
 ## 四、运行时依赖（Rust / crates.io）

@@ -7,8 +7,14 @@
  *   读字节 —— 不用它的默认 XHR（那会去请求网络，离线必炸）；
  * - **LRC**：解析 `[mm:ss.xx]` 时间标签与元信息标签，正文按 OFV 的两种视图（纯净 / 带时间）切换。
  *
- * 范围说明（如实标注）：DRM、加密流、`wmv/flv/rm` 这类浏览器不认的编码无法解码 ——
- * 这些一律落到「用默认应用打开」，不假装能放。
+ * - **FLV / MPEG-TS**：hls.js 只管 HLS；FLV 与裸 TS 走 **mpegts.js**（B 站开源、Apache-2.0，
+ *   与 hls.js 同一套 MSE 思路，自定义 loader 同样接 kb:// 读通道）—— 容器能解但编码
+ *   （如 hevc/flv1）解不了时仍走系统预览图链；
+ * - 容器元信息（格式/编码/分辨率/时长/码率…）由 `media-info.ts` 逐字节解析（照 OFV 移植），
+ *   经 `onInfo` 进**状态栏** —— 播放解不了也要说清"它是什么"。
+ *
+ * 范围说明（如实标注）：DRM、加密流、`wmv/rm` 这类没有纯 JS 解码器的编码无法播放 ——
+ * 这些一律落到系统预览图 + 「用默认应用打开」，不假装能放。
  */
 import type { PreviewContext, PreviewInstance } from "../registry";
 import { mediaInfoLine, parseAudioInfo, parseVideoInfo } from "./media-info";
@@ -51,6 +57,7 @@ export const VIDEO_EXTENSIONS = [
   "3gp",
   "3g2",
   "m2ts",
+  "ts",
   "m3u8",
 ];
 export const LRC_EXTENSIONS = ["lrc"];
@@ -94,11 +101,13 @@ const MEDIA_MIME: Record<string, string> = {
   ogv: "video/ogg",
   "3gp": "video/3gpp",
   "3g2": "video/3gpp2",
+  flv: "video/x-flv",
+  m2ts: "video/mp2t",
+  ts: "video/mp2t",
   mpg: "video/mpeg",
   mpeg: "video/mpeg",
   mpe: "video/mpeg",
   mpv: "video/mp4", // 无音频的 MPEG 流，容器按 mp4 给
-  m2ts: "video/mp2t",
 };
 
 function mediaMimeFor(ext: string): string {
@@ -296,6 +305,14 @@ async function renderVideo(ctx: PreviewContext): Promise<PreviewInstance> {
   if (ctx.ext === "m3u8") {
     // 播放列表本身是文本，播放交给 hls.js
     cleanup = await attachHls(el, ctx, (message) => {
+      parts.meta.textContent = message;
+    });
+  } else if (ctx.ext === "flv" || ctx.ext === "m2ts" || ctx.ext === "mpg" || ctx.ext === "mpeg" || ctx.ext === "ts") {
+    // FLV / MPEG-TS：MSE 封装走 mpegts.js（分片/整文件都由它 demux）。
+    // 字节从知识库本地读成 blob URL —— 它自己只认 URL，不碰网络。
+    const { attachMpegts } = await import("./mpegts-attach");
+    url = URL.createObjectURL(new Blob([bytes], { type: mediaMimeFor(ctx.ext) }));
+    cleanup = await attachMpegts(el, url, ctx.ext === "flv" ? "flv" : "mpegts", (message) => {
       parts.meta.textContent = message;
     });
   } else {

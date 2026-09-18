@@ -408,7 +408,9 @@ function parseMp4Info(bytes: Uint8Array): MediaInfo | null {
   for (const track of tracks) {
     const tkhd = collectMp4Atoms(bytes, track.start + track.headerSize, track.end).find((atom) => atom.type === "tkhd");
     if (!tkhd) continue;
-    const sizeOffset = tkhd.start + tkhd.headerSize + (bytes[tkhd.start + tkhd.headerSize] === 1 ? 84 : 72);
+    // tkhd body 内 width/height 的偏移按 ISO 14496-12：v0 = 76、v1 = 88。
+    // （OFV 写的 72/84 差 4 字节 —— 会读到 matrix 里；规范值用手写样本+真实文件双重验证过。）
+    const sizeOffset = tkhd.start + tkhd.headerSize + (bytes[tkhd.start + tkhd.headerSize] === 1 ? 88 : 76);
     if (sizeOffset + 8 > bytes.length) continue;
     const width = readUint32Be(bytes, sizeOffset) / 65536;
     const height = readUint32Be(bytes, sizeOffset + 4) / 65536;
@@ -426,7 +428,10 @@ function parseAviInfo(bytes: Uint8Array): MediaInfo | null {
   const avihOffset = findAscii(bytes, "avih", 12);
   if (avihOffset < 0 || avihOffset + 56 > bytes.length) return { format: "AVI", note: "未找到 avih header" };
   const microSecPerFrame = readUint32Le(bytes, avihOffset + 8);
-  const maxBytesPerSec = readUint32Le(bytes, avihOffset + 16);
+  // ⚠️ AVIH 规范字段是连续 4 字节：micro(0) maxBytes(4) padding(8) flags(12) totalFrames(16)
+  // initial(20) streams(24) bufferSize(28) width(32) height(36)。OFV 把 maxBytesPerSec 读在
+  // +16（= padding 位，真实文件恒 0 → 他们的"码率"实际永远显示不出来）。我们按规范读 +12。
+  const maxBytesPerSec = readUint32Le(bytes, avihOffset + 12);
   const totalFrames = readUint32Le(bytes, avihOffset + 24);
   const streams = readUint32Le(bytes, avihOffset + 32);
   return {
