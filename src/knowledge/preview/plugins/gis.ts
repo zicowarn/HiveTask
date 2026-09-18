@@ -113,7 +113,14 @@ async function renderGis(ctx: PreviewContext): Promise<PreviewInstance> {
   // 浮动信息角标：右上角，显示要素数与底图状态（与 attribution 同区域）
   const infoCorner = document.createElement("div");
   infoCorner.className = "kb-gis-info-corner";
-  infoCorner.textContent = `${featureCount} 个要素 · 底图${note ? ` · ${note}` : ""}`;
+  const infoText = document.createElement("span");
+  infoText.textContent = `${featureCount} 个要素${note ? ` · ${note}` : ""} · 底图默认关闭`;
+  const scaleText = document.createElement("span");
+  scaleText.className = "kb-gis-scale";
+  scaleText.textContent = "";
+  const attributionText = document.createElement("span");
+  attributionText.textContent = "Leaflet";
+  infoCorner.append(infoText, scaleText, attributionText);
   mapEl.appendChild(infoCorner);
   wrap.appendChild(mapEl);
   ctx.container.replaceChildren(wrap);
@@ -134,9 +141,11 @@ async function renderGis(ctx: PreviewContext): Promise<PreviewInstance> {
     zoom: 2,
     worldCopyJump: true,
   });
-  // scale bar + attribution + 信息角标**全部归右上**：三处分散 → 一处（用户要求）
-  L.control.scale({ imperial: false, position: "topright" }).addTo(map);
-  L.control.attribution({ position: "topright", prefix: false }).addTo(map);
+  // 不用 Leaflet 自带的 scale / attribution 控件：
+  // 它们各有默认样式（scale 有 border、attribution 会在右下多出一个），
+  // 拉到一起拼"看起来是一组"代价高且脆弱。改为**自建一个合并浮层**：
+  // 要素数 + 比例尺 + 署名，三样在同一个 div 里，样式完全可控。
+  // 比例尺数值由 map 的 zoomend 事件动态更新（Leaflet 内部算比例的公式）。
 
   const layer = L.geoJSON(data, {
     // 点要素用圆点画：绕开 leaflet 默认图标 PNG 的资源路径
@@ -160,6 +169,26 @@ async function renderGis(ctx: PreviewContext): Promise<PreviewInstance> {
   if (bounds.isValid()) {
     map.fitBounds(bounds, { padding: [16, 16], maxZoom: 18 });
   }
+
+  // 比例尺：Leaflet 内部算法 —— 赤道周长 / (256 × 2^zoom) = 每像素米数；
+  // 取一个"好看的整数距离"（Leaflet scale control 的 round 逻辑），
+  // 再算它在当前纬度对应的像素宽度，显示成 "100 m" / "5 km" 这种。
+  const updateScale = (): void => {
+    const centerLat = map.getCenter().lat;
+    const metersPerPixel = (Math.PI * 6378137 * Math.cos((centerLat * Math.PI) / 180)) / (256 * 2 ** map.getZoom());
+    // 找一个好看的整数（1/2/5 前导数字），让它对应的像素宽在 60–120px 之间
+    const meters = metersPerPixel * 80;
+    const pow = 10 ** Math.floor(Math.log10(meters));
+    const leading = meters / pow;
+    const nice = leading >= 5 ? 5 : leading >= 2 ? 2 : 1;
+    const distance = nice * pow;
+    const width = Math.round(distance / metersPerPixel);
+    scaleText.textContent = distance >= 1000 ? `${distance / 1000} km` : `${distance} m`;
+    scaleText.style.minWidth = `${width}px`;
+  };
+  map.on("zoomend", updateScale);
+  // 初始一次（fitBounds 触发的 moveend 也会走到）
+  map.whenReady(updateScale);
 
   // 在线底图：由头部按钮驱动（默认关闭；联网必须是用户的显式动作）
   let tiles: import("leaflet").TileLayer | null = null;

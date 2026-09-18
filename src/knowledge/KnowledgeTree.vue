@@ -843,6 +843,10 @@ const filtering = computed(() => !!store.filter);
   min-height: 0;
   overflow: auto;
   user-select: none;
+  /* tabindex="0"（键盘导航用）会让浏览器在容器获得焦点时画一圈默认 outline，
+     表现为"整个树外面一圈高亮"（用户实测截图）。去掉它不影响可访问性 ——
+     键盘焦点已经由 `.row.focused` 的行内焦点环标示（见 KnowledgeTreeNode）。 */
+  outline: none;
   /* 列表与表头之间留 4px 呼吸（用户口径），底部保留 8px 便于滚过末行 */
   padding: 4px 0 8px;
 }
