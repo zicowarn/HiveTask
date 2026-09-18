@@ -134,6 +134,18 @@ describe("预览注册表判定", () => {
     expect(none).toBeNull();
   });
 
+  it("扩展名冲突：.ts（MPEG-TS vs TypeScript）路由给 video，text 永远垫底", async () => {
+    const registry = await import("../src/knowledge/preview/registry");
+    await import("../src/knowledge/preview");
+    // TS 包同步字节 0x47 开头（MPEG-TS 包头）；text 插件会因 Rust is_binary 拒读而报错，
+    // 所以路由必须先给 video
+    const hit = await registry.resolvePreview(
+      { root: "/r", rel: "stream.ts", name: "stream.ts", ext: "ts" },
+      async () => bytes([0x47, 0x40, 0x11, 0x10]),
+    );
+    expect(hit?.id).toBe("video");
+  });
+
   it("registerPreview 可追加（新格式只改一处）", async () => {
     const registry = await import("../src/knowledge/preview/registry");
     registry.registerPreview({

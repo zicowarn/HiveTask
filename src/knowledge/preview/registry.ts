@@ -176,8 +176,19 @@ export async function readHead(readBytes: () => Promise<Uint8Array>): Promise<Ui
 }
 
 /** 扩展名 → 候选条目（可能多个，比如 zip 既可能是压缩包也可能是 docx）。 */
+/**
+ * 候选排序：**text 永远垫底**。
+ *
+ * 背景（用户实测 `.ts`）：MPEG-TS 视频流与 TypeScript 源码共用扩展名，text 与 video
+ * 都声明了 `ts`。text 注册在前被先选中，一读内容 Rust 的 `is_binary`（见 NUL 即拒）
+ * 直接报"二进制文件，无法作为文本打开"——video 插件根本没机会接手。
+ * text 是唯一"要求内容必须是文本"的插件，又是扩展名覆盖最宽的兜底，所以它排最后：
+ * 其他插件按注册顺序先挑，都不要才落回文本。
+ */
 function candidatesFor(ext: string): RegistryEntry[] {
-  return entries.filter((entry) => entry.describe.extensions?.includes(ext));
+  const hits = entries.filter((entry) => entry.describe.extensions?.includes(ext));
+  const textLast = (entry: RegistryEntry): number => (entry.describe.id === "text" ? 1 : 0);
+  return [...hits].sort((a, b) => textLast(a) - textLast(b));
 }
 
 export interface ResolvedPreview {
