@@ -80,6 +80,12 @@ const systemPosterUrl = ref<string | null>(null);
  * 用 text.value 会让头部按钮**根本不出现**（与状态栏那格同源的一次踩坑）。
  */
 const currentEncoding = computed(() => store.activeText?.encoding ?? "");
+/** 标签把 BOM 折进来（VS Code 的 "UTF-8 with BOM" 同义），省掉一个重复 chip。 */
+const encodingLabel = computed(() => {
+  const encoding = currentEncoding.value;
+  if (!encoding) return "";
+  return store.activeText?.bom ? `${encoding}·BOM` : encoding;
+});
 
 /** 候选编码：与状态栏同一份清单（ICU 规范名，与 Rust 返回的一致）。 */
 const ENCODING_CHOICES = ["UTF-8", "GBK", "GB18030", "BIG5", "Shift_JIS", "EUC-KR", "UTF-16LE", "UTF-16BE"];
@@ -869,16 +875,23 @@ function onImageLoaded(): void {
 </script>
 
 <template>
-  <section class="preview">
+  <section class="preview" :data-plugin="resolvedPluginId ?? ''" :data-kind="kind">
     <header v-if="rel" class="preview-header">
       <div class="head-left">
         <EditorIcon :name="kind === 'markdown' ? 'o.markdown' : kind === 'image' ? 'o.file-media' : 'o.file'" />
         <span class="file-name">{{ name }}</span>
         <span v-if="text" class="meta">{{ humanSize(text.size) }}</span>
-        <span v-if="text?.encoding && kind !== 'other'" class="meta chip">{{ text.encoding }}</span>
-        <span v-if="text?.bom" class="meta chip">BOM</span>
+        <!-- 编码：**就在原来那个 chip 的位置**，但从"只读标识"变成可点控件
+             （点开 = 改解读方式 / 转换另存为）。BOM 折进标签，不再单独占一格。 -->
+        <button
+          v-if="currentEncoding"
+          class="meta chip enc-chip"
+          :title="t('kb.encodingMenuTip')"
+          @click="openEncodingMenu($event)"
+        >
+          {{ encodingLabel }}
+        </button>
         <span v-if="text?.eol === '\r\n'" class="meta chip">CRLF</span>
-        <span v-if="resolvedPluginId" class="meta chip">{{ resolvedPluginId }}</span>
         <span v-if="kind === 'markdown' && mdDirty" class="meta dirty" :title="t('kb.unsavedTip')">●</span>
       </div>
       <MarkdownToolbar
@@ -959,14 +972,6 @@ function onImageLoaded(): void {
         <!-- 编码：显示当前编码，菜单里给两类操作（"改解读方式"与"转换另存为"）。
              头部放**命令**、状态栏留**状态**——两处入口各自符合使用习惯（VS Code 的状态栏
              编码格也是可点的）。命令型菜单按规范用 ActionMenu。 -->
-        <button
-          v-if="currentEncoding"
-          class="text-btn enc-btn"
-          :title="t('kb.encodingMenuTip')"
-          @click="openEncodingMenu($event)"
-        >
-          {{ currentEncoding }}
-        </button>
         <!-- 主操作保持可见（不折叠）：折叠后它在 ⋯ 里只剩一项，反而更差 -->
         <button class="text-btn" @click="openDefault">{{ t("kb.openWithDefault") }}</button>
       </div>
@@ -1115,10 +1120,15 @@ function onImageLoaded(): void {
   background: var(--bg-panel);
 }
 /* 缩放控件：三个图标按钮 + 中间一个可点的百分比（点了回 100%） */
-/* 头部编码按钮：显示当前编码，点击出命令菜单 */
-.enc-btn {
-  flex: none;
+/* 头部编码 chip：与其它 meta chip 同款，但可点（点开 = 改解读 / 转换另存为） */
+.enc-chip {
+  border: none;
   font-variant-numeric: tabular-nums;
+  cursor: pointer;
+}
+.enc-chip:hover {
+  background: var(--bg-hover);
+  color: var(--text);
 }
 .zoom-group {
   display: flex;

@@ -213,13 +213,13 @@ describe("面板 → 注册表接线", () => {
   });
 
   it("PDF 交给 pdf 插件（注册表被架空时这里会显示成文本）", async () => {
-    // jsdom 没有 canvas，pdfjs 渲染不出页面 —— 这里断言"面板确实把文件交给了 pdf 插件"
-    // （头部会打出插件 id 标签），而不是被当纯文本打开。真正的页面渲染属于实机验证。
+    // jsdom 没有 canvas，pdfjs 渲染不出页面 —— 这里断言"面板确实把文件交给了 pdf 插件"。
+    // 探针用面板根节点上的 data-plugin（不可见），不再依赖头部的类型 chip ——
+    // 那个 chip 显示的是未本地化的内部 id，已移除（状态栏显示本地化的格式名）。
     files.set("样张.pdf", enc("%PDF-1.4\n1 0 obj\n<<>>\nendobj\ntrailer\n<<>>\n%%EOF\n"));
     const host = await preview("样张.pdf");
     await waitForDom(() => {
-      const chips = [...host.querySelectorAll(".head-left .meta.chip")].map((el) => el.textContent?.trim());
-      expect(chips, `头部应标出插件 id，实际：${chips.join(",")}`).toContain("pdf");
+      expect(host.querySelector('[data-plugin="pdf"]'), "应交给 pdf 插件").not.toBeNull();
     });
     expect(host.querySelector("pre.code"), "不该落到纯文本").toBeNull();
   });
@@ -374,8 +374,7 @@ describe("查找 / 大纲（插件声明式）", () => {
     files.set("样张2.pdf", enc("%PDF-1.4\n1 0 obj\n<<>>\nendobj\ntrailer\n<<>>\n%%EOF\n"));
     const host = await preview("样张2.pdf");
     await waitForDom(() => {
-      const chips = [...host.querySelectorAll(".head-left .meta.chip")].map((el) => el.textContent?.trim());
-      expect(chips).toContain("pdf");
+      expect(host.querySelector('[data-plugin="pdf"]')).not.toBeNull();
     });
     expect(host.querySelector('[title*="查找"]'), "PDF 应有查找按钮").not.toBeNull();
     // 这份样本没有书签 → 不给"大纲"入口（点开只会是空面板）
@@ -428,8 +427,7 @@ describe("PDF 的「适应」口径", () => {
     files.set("样张4.pdf", enc("%PDF-1.4\n1 0 obj\n<<>>\nendobj\ntrailer\n<<>>\n%%EOF\n"));
     const host = await preview("样张4.pdf");
     await waitForDom(() => {
-      const chips = [...host.querySelectorAll(".head-left .meta.chip")].map((el) => el.textContent?.trim());
-      expect(chips).toContain("pdf");
+      expect(host.querySelector('[data-plugin="pdf"]')).not.toBeNull();
     });
     // 下拉而不是单按钮：点它应弹出两个口径（菜单 Teleport 到 body）
     (host.querySelector('[title*="适应方式"]') as HTMLElement).click();
@@ -644,5 +642,36 @@ describe("大纲跳转（PDF 点了没反应的回归）", () => {
     await waitForDom(() => {
       expect(useKnowledgeStore().paging?.page).toBe(2);
     });
+  });
+});
+
+describe("头部信息格：只留交互控件与罕见信号（用户口径）", () => {
+  it("不再有重复的「类型」chip（内部插件 id）；插件归属改用不可见的 data-plugin", async () => {
+    const { default: JSZip } = await import("jszip");
+    const zip = new JSZip();
+    zip.file("content.json", JSON.stringify([{ title: "画布", rootTopic: { title: "中心" } }]));
+    files.set("脑图.xmind", await zip.generateAsync({ type: "uint8array" }));
+    const host = await preview("脑图.xmind");
+    await waitForDom(() => {
+      expect(host.querySelector('[data-plugin="xmind"]'), "插件归属在 data-plugin 上").not.toBeNull();
+    });
+    // UI 上不该再出现 "xmind" / "sheet" 这类未本地化的内部 id
+    // （只看 chip —— 文件名本身可能就含 "xmind"，不能拿整块文本断言）
+    const chips = [...host.querySelectorAll(".head-left .meta.chip")].map((el) => el.textContent?.trim());
+    expect(chips, `头部 chip 里有内部 id：${chips.join(",")}`).not.toContain("xmind");
+    expect(chips, `头部 chip 里有内部 id：${chips.join(",")}`).not.toContain("sheet");
+  });
+
+  it("Markdown：编码 chip 变成可点控件，且位置在文件名之后", async () => {
+    files.set("说明2.md", enc("# 标题\n"));
+    const host = await preview("说明2.md");
+    const chip = await waitFor(host, ".head-left .enc-chip");
+    expect(chip!.textContent?.trim()).toBe("UTF-8");
+    // 位置：在同一行里排在文件名的后面（用户要求"移到该位置"）
+    // 注意：第一子是 SVG 图标，`className` 在 SVG 上是对象不是字符串 → 用 getAttribute
+    const order = [...host.querySelector(".head-left")!.children].map((el) => el.getAttribute("class") ?? "");
+    expect(order.findIndex((c) => c.includes("enc-chip"))).toBeGreaterThan(
+      order.findIndex((c) => c.includes("file-name")),
+    );
   });
 });

@@ -346,14 +346,14 @@ describe("头部编码菜单与「转换并另存为」", () => {
     app.use(pinia);
     app.mount(host);
     await waitForDom(() => {
-      expect(host.querySelector(".enc-btn"), "头部应出现编码按钮").not.toBeNull();
+      expect(host.querySelector(".head-left .enc-chip"), "文件名后应出现可点的编码 chip").not.toBeNull();
     });
     return { host, store, writes, app, existing };
   };
 
-  it("头部编码按钮显示当前编码，点开是命令菜单（重新打开 / 转换另存为）", async () => {
+  it("头部编码 chip 显示当前编码，点开是命令菜单（重新打开 / 转换另存为）", async () => {
     const { host, app } = await mountPreview("表格-GBK.csv");
-    const button = host.querySelector<HTMLElement>(".enc-btn")!;
+    const button = host.querySelector<HTMLElement>(".head-left .enc-chip")!;
     expect(button.textContent?.trim(), "显示当前（自动探测的）编码").toBe("GBK");
     button.click();
     await waitForDom(() => {
@@ -371,7 +371,7 @@ describe("头部编码菜单与「转换并另存为」", () => {
 
   it("转换另存为：按目标编码写新文件（原件不动），默认名带编码后缀", async () => {
     const { host, writes, app } = await mountPreview("表格-GBK.csv");
-    host.querySelector<HTMLElement>(".enc-btn")!.click();
+    host.querySelector<HTMLElement>(".head-left .enc-chip")!.click();
     await waitForDom(() => expect(document.querySelector(".am-menu")).not.toBeNull());
     const convert = [...document.querySelectorAll<HTMLElement>(".am-menu [role=menuitem]")].find((el) =>
       el.textContent?.includes("转换并另存为"),
@@ -403,7 +403,7 @@ describe("头部编码菜单与「转换并另存为」", () => {
   it("目标文件已存在 → 拒绝覆盖并提示改名", async () => {
     const { host, writes, app, existing } = await mountPreview("表格-GBK.csv");
     existing.add("表格-GBK-utf8.csv");
-    host.querySelector<HTMLElement>(".enc-btn")!.click();
+    host.querySelector<HTMLElement>(".head-left .enc-chip")!.click();
     await waitForDom(() => expect(document.querySelector(".am-menu")).not.toBeNull());
     [...document.querySelectorAll<HTMLElement>(".am-menu [role=menuitem]")]
       .find((el) => el.textContent?.includes("转换并另存为"))!
