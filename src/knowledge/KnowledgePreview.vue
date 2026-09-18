@@ -1885,6 +1885,21 @@ function onImageLoaded(): void {
   flex: 1 1 auto;
   min-height: 0;
   background: var(--bg-app);
+  position: relative; /* 角标以此为定位基准 */
+}
+/* 地图右上信息角标：与 Leaflet attribution 同区域，显示要素数与底图状态 */
+.preview-host :deep(.kb-gis-info-corner) {
+  position: absolute;
+  top: 4px;
+  right: 70px; /* 给 attribution 留位 */
+  z-index: 450;
+  padding: 2px 8px;
+  background: rgba(255, 255, 255, 0.85);
+  color: var(--text);
+  font-size: var(--font-sm);
+  border-radius: 4px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
+  pointer-events: none;
 }
 /* leaflet 自带控件要跟我们的 token 走（它默认白底黑字，深色主题下刺眼） */
 .preview-host :deep(.leaflet-container) {

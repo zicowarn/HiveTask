@@ -103,22 +103,20 @@ async function renderGis(ctx: PreviewContext): Promise<PreviewInstance> {
   const bytes = await ctx.readBytes();
   // 不再画自己的信息条：那会和面板头部凑成"两行头部"（用户实测指出）。
   // 要素数等格式信息 → 状态栏（`ctx.onInfo`）；在线底图开关 → 头部工具（tools: ["basemap"]）。
+  const { data, note } = await toGeoJson(ctx, bytes, ctx.readText);
+  const featureCount = data.features.length;
+
   const wrap = document.createElement("div");
   wrap.className = "kb-gis";
   const mapEl = document.createElement("div");
   mapEl.className = "kb-gis-map";
+  // 浮动信息角标：右上角，显示要素数与底图状态（与 attribution 同区域）
+  const infoCorner = document.createElement("div");
+  infoCorner.className = "kb-gis-info-corner";
+  infoCorner.textContent = `${featureCount} 个要素 · 底图${note ? ` · ${note}` : ""}`;
+  mapEl.appendChild(infoCorner);
   wrap.appendChild(mapEl);
   ctx.container.replaceChildren(wrap);
-
-  const { data, note } = await toGeoJson(ctx, bytes, ctx.readText);
-  const featureCount = data.features.length;
-
-  // 格式信息**在 Leaflet 加载前就报**：import 失败也会短路整个函数，后面的 onInfo 永远不执行。
-  // 这样即使 Leaflet 在 jsdom 里加载失败（或真机里 Leaflet CDN 不可达），状态栏仍能告诉用户
-  // "这份文件里有几个要素"，而不是留空让用户以为是渲染坏了。
-  ctx.onInfo?.(
-    `${featureCount} 个要素${note ? ` · ${note}` : ""} · 底图默认关闭`,
-  );
 
   await import("leaflet/dist/leaflet.css");
   const L = await import("leaflet");
@@ -134,6 +132,7 @@ async function renderGis(ctx: PreviewContext): Promise<PreviewInstance> {
     worldCopyJump: true,
   });
   L.control.scale({ imperial: false }).addTo(map);
+  L.control.attribution({ position: "topright", prefix: false }).addTo(map);
 
   const layer = L.geoJSON(data, {
     // 点要素用圆点画：绕开 leaflet 默认图标 PNG 的资源路径

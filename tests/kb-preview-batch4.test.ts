@@ -338,14 +338,13 @@ describe("GIS：底图默认关闭", () => {
     const infoTexts: string[] = [];
     const ctx = makeCtx({ ext: "geojson", text, onInfo: (t) => infoTexts.push(t ?? "") });
     // jsdom 里 Leaflet 创建地图可能抛（缺 DOM API）—— 那是环境限制，不是功能失败。
-    // 所以这里 catch 住，只要"信息已发出"或"插件声明了 basemap 工具"就算通过。
     try { await gisPlugin.render(ctx); } catch { /* 环境限制 */ }
-    expect(infoTexts.join("|")).toContain("底图默认关闭");
+    // GIS 信息现在浮在地图容器内（右上角），不再走 onInfo（那是状态栏通道，会重复显示）
+    const corner = ctx.container.querySelector(".kb-gis-info-corner");
+    expect(corner, "右上角应有要素数角标").not.toBeNull();
+    expect(corner!.textContent, "角标应显示要素数").toContain("个要素");
     // 默认状态下没有任何 <img>（瓦片就是 img）——离线约束的可执行检查
     expect(ctx.container.querySelectorAll("img").length).toBe(0);
-    // 底图开关走面板头部按钮（tools: ["basemap"] 声明已在插件上）。
-    // jsdom 里 Leaflet 加载/渲染失败时实例的 toggleBasemap 可能不存在 —— 这是环境限制
-    // 的可接受降级，不在这里强断言。
   });
 });
 
