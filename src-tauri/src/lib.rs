@@ -349,6 +349,82 @@ fn calendar_lunar_range(start: String, end: String) -> Result<Vec<calendar::Luna
     calendar::lunar_range(&start, &end).map_err(|e| e.to_string())
 }
 
+#[tauri::command]
+fn calendar_lunar_ymd(date: String) -> Result<calendar::LunarYmd, String> {
+    calendar::lunar_ymd(&date).map_err(|e| e.to_string())
+}
+
+// ---- 日历 S4：日程（calendar_events）----
+
+#[tauri::command]
+fn calendar_event_list() -> Result<Vec<calendar::EventRow>, String> {
+    calendar::event_list().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn calendar_event_create(
+    title: String,
+    start_date: String,
+    end_date: Option<String>,
+    all_day: bool,
+    start_time: Option<String>,
+    end_time: Option<String>,
+    notes: Option<String>,
+    remind_at: Option<String>,
+    recur: String,
+) -> Result<calendar::EventRow, String> {
+    calendar::event_create(
+        &title,
+        &start_date,
+        end_date,
+        all_day,
+        start_time,
+        end_time,
+        notes,
+        remind_at,
+        recur,
+    )
+    .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn calendar_event_update(
+    id: String,
+    title: String,
+    start_date: String,
+    end_date: Option<String>,
+    all_day: bool,
+    start_time: Option<String>,
+    end_time: Option<String>,
+    notes: Option<String>,
+    remind_at: Option<String>,
+    recur: String,
+) -> Result<calendar::EventRow, String> {
+    calendar::event_update(
+        &id,
+        &title,
+        &start_date,
+        end_date,
+        all_day,
+        start_time,
+        end_time,
+        notes,
+        remind_at,
+        recur,
+    )
+    .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn calendar_event_remove(id: String) -> Result<(), String> {
+    calendar::event_remove(&id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn calendar_event_set_reminded(id: String, reminded_at: Option<String>) -> Result<calendar::EventRow, String> {
+    calendar::event_set_reminded(&id, reminded_at).map_err(|e| e.to_string())
+}
+
 // ---- 本地分支 review（PR 工作区本地形态，纯 git 能力不扩 Source trait）----
 
 #[tauri::command]
@@ -1148,6 +1224,7 @@ pub fn run() {
         )
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_store::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
             health_check,
@@ -1250,6 +1327,12 @@ pub fn run() {
             calendar_feed_sync,
             calendar_feed_events,
             calendar_lunar_range,
+            calendar_lunar_ymd,
+            calendar_event_list,
+            calendar_event_create,
+            calendar_event_update,
+            calendar_event_remove,
+            calendar_event_set_reminded,
             branch_review_list,
             branch_review_diff,
             pr_commits_between,

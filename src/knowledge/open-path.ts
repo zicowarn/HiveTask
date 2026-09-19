@@ -15,6 +15,20 @@ export async function openPathWithConfiguredApp(root: string, rel: string): Prom
   await api.kbOpenExternal(root, rel);
 }
 
+/**
+ * 写剪贴板 —— **走 Rust 插件，不走 `navigator.clipboard`**。
+ * 实测（离屏 WKWebView 探针）：后者被 `NotAllowedError` 拒（用户未手势授权/平台策略），
+ * 而树右键「复制路径」是纯程序调用、没有手势 → 必挂。插件在主进程写，无此限制。
+ */
+export async function writeClipboard(text: string): Promise<void> {
+  if (!isTauri()) {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+  const { writeText } = await import("@tauri-apps/plugin-clipboard-manager");
+  await writeText(text);
+}
+
 /** 「在文件管理器中显示」——失败**必须冒泡**（调用方弹 toast），静默吞掉会让用户以为点了没用。 */
 export async function revealPath(path: string): Promise<void> {
   if (!isTauri()) return;

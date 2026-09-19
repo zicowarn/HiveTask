@@ -11,6 +11,8 @@
     "opener:default",
     "opener:allow-open-path",
     "store:default",
-    "log:default"
+    "log:default",
+    "opener:allow-reveal-item-in-dir",
+    "clipboard-manager:allow-write-text"
   ]
 }

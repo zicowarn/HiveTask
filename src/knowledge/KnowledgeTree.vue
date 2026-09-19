@@ -10,7 +10,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref } from "vue";
 import ActionMenu, { type ActionItem } from "../components/ActionMenu.vue";
 import { api } from "../api";
 import { confirmAction } from "../confirm";
-import { openPathWithConfiguredApp, revealPath } from "./open-path";
+import { openPathWithConfiguredApp, revealPath, writeClipboard } from "./open-path";
 import KnowledgeRenameDialog from "./KnowledgeRenameDialog.vue";
 import { pushToast } from "../toast";
 import EditorIcon from "../components/EditorIcon.vue";
@@ -578,13 +578,14 @@ onBeforeUnmount(() => {
   removeGhost();
 });
 
-/** 复制到剪贴板：Tauri 用 Clipboard API（webview 支持），失败时静默（不打断操作流）。 */
+/** 复制到剪贴板：走 Rust 插件（navigator.clipboard 在 WKWebView 里被 NotAllowedError 拒，实测）。 */
 async function copyText(text: string): Promise<void> {
   try {
-    await navigator.clipboard.writeText(text);
+    await writeClipboard(text);
     pushToast({ kind: "success", message: t("kb.pathCopied") }, 2000);
-  } catch {
-    // 剪贴板不可用（权限/非安全上下文）—— 静默失败比弹错更不打扰
+  } catch (error) {
+    // 失败可见：静默吞掉 = 用户以为"点了没反应"（上一轮反馈的原话）
+    pushToast({ kind: "error", message: t("kb.actionFailed", { reason: String(error) }) });
   }
 }
 

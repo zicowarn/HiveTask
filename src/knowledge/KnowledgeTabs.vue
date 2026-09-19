@@ -14,7 +14,7 @@ import EditorIcon from "../components/EditorIcon.vue";
 import { useI18n } from "../i18n";
 import { useKnowledgeStore } from "../stores/knowledge";
 import { pushToast } from "../toast";
-import { openPathWithConfiguredApp, revealPath } from "./open-path";
+import { openPathWithConfiguredApp, revealPath, writeClipboard } from "./open-path";
 
 const store = useKnowledgeStore();
 const { t } = useI18n();
@@ -169,7 +169,7 @@ async function onTabMenuPick(value: string): Promise<void> {
 
 async function copyText(text: string): Promise<void> {
   try {
-    await navigator.clipboard.writeText(text);
+    await writeClipboard(text);
     pushToast({ kind: "success", message: t("kb.pathCopied") }, 2000);
   } catch {
     // 剪贴板不可用 → 静默（与树菜单一致）

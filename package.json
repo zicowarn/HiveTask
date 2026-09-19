@@ -41,6 +41,7 @@
     "@mapbox/togeojson": "^0.16.2",
     "@mlightcad/libredwg-web": "^0.7.10",
     "@tauri-apps/api": "^2.9.0",
+    "@tauri-apps/plugin-clipboard-manager": "^2.3.3",
     "@tauri-apps/plugin-dialog": "^2.2.0",
     "@tauri-apps/plugin-opener": "^2.2.0",
     "@tauri-apps/plugin-store": "^2.2.0",
