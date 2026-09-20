@@ -22,10 +22,16 @@ export interface ActionItem {
   icon?: string;
   /** 快捷键角标（平台：Archive 的 E、Remove from project 的 Del）。 */
   badge?: string;
+  /** 隐藏右侧子菜单箭头（平台 Move item 行：只有左 grabber，无右箭头）。 */
+  noChevron?: boolean;
   /** 二级面板条目（如「移动到列」）；点击本行进入二级面板。 */
   submenu?: ActionItem[];
   /** 本行之前画一条分组分隔线（平台菜单形态）。 */
   dividerBefore?: boolean;
+  /** 禁用项（平台形态：灰字、不可点，如最左列的 Move left）。 */
+  disabled?: boolean;
+  /** 提示副行（平台禁用项的第二行，如「This is the left-most column」）。 */
+  hint?: string;
 }
 
 const props = withDefaults(
@@ -48,8 +54,17 @@ const props = withDefaults(
      * 宿主用 `@close` 清空它——Esc / 外点 / 选中某项都会触发。
      */
     anchor?: { x: number; y: number } | null;
+    /** 悬停触发器即展开（平台 Roadmap 行 ▾ 菜单形态），移出 120ms 后收起。 */
+    openOnHover?: boolean;
+    /** 菜单最小宽度（像素；如平台行菜单的 ~320）。 */
+    menuWidth?: number;
+    /** 菜单条目行高（像素；缺省 32 = platform 档）。 */
+    menuRowHeight?: number;
+    /** 菜单与触发器的对齐：right（缺省，菜单右缘对齐触发器右缘）或
+     * left（菜单左缘对齐触发器左缘、向右展开——平台行 ▾ 菜单形态）。 */
+    align?: "right" | "left";
   }>(),
-  { triggerIcon: "", title: "", size: "platform", anchor: null },
+  { triggerIcon: "", title: "", size: "platform", anchor: null, openOnHover: false, menuWidth: undefined, menuRowHeight: undefined, align: "right" },
 );
 
 const emit = defineEmits<{ pick: [value: string]; close: [] }>();
@@ -101,6 +116,36 @@ const submenu = ref<ActionItem | null>(null);
 function toggle() {
   open.value = !open.value;
   submenu.value = null;
+  if (open.value) placeMenu();
+}
+/** 悬停展开（openOnHover）：进入触发器即开，离开 .am 范围 120ms 后收
+ * （留出指针从 ▾ 走进菜单的间隙；菜单是 .am 后代，悬停菜单不触发离开）。 */
+let hoverTimer: ReturnType<typeof setTimeout> | undefined;
+function onHoverEnter() {
+  if (!props.openOnHover) return;
+  window.clearTimeout(hoverTimer);
+  open.value = true;
+  submenu.value = null;
+  if (open.value) placeMenu();
+}
+function onHoverLeave() {
+  if (!props.openOnHover) return;
+  window.clearTimeout(hoverTimer);
+  hoverTimer = setTimeout(() => closeMenu(), 120);
+}
+/** 非锚定菜单的自适应高度上限：视口底边 − 触发器下沿 − 余量。
+ * 平台形态：面板随内容自适应（无固定上限），真超出视口才内部滚动；
+ * 固定 380 上限会让装得下的内容出现无意义的滚动条（且滚轮滚不动多少）。 */
+const menuStyle = ref<{ maxHeight: string } | null>(null);
+function placeMenu() {
+  if (anchored.value) {
+    menuStyle.value = null; // 锚定模式已有 calc(100vh − 16px) 兜底
+    return;
+  }
+  const rect = root.value?.getBoundingClientRect();
+  if (!rect) return;
+  const available = Math.max(120, Math.floor(window.innerHeight - rect.bottom - 8));
+  menuStyle.value = { maxHeight: `${available}px` };
 }
 function closeMenu() {
   open.value = false;
@@ -108,6 +153,7 @@ function closeMenu() {
   if (anchored.value) emit("close");
 }
 function pick(item: ActionItem) {
+  if (item.disabled) return; // 平台的禁用项（如最左列的 Move left）只展示不可点
   if (item.submenu) {
     submenu.value = item;
     return;
@@ -130,11 +176,12 @@ onMounted(() => {
 onBeforeUnmount(() => {
   document.removeEventListener("pointerdown", onDocPointerDown);
   document.removeEventListener("keydown", onKeydown);
+  window.clearTimeout(hoverTimer);
 });
 </script>
 
 <template>
-  <div ref="root" class="am">
+  <div ref="root" class="am" @mouseenter="onHoverEnter" @mouseleave="onHoverLeave">
     <slot v-if="!anchored" name="trigger" :open="open" :toggle="toggle">
       <button
         class="am-trigger"
@@ -152,9 +199,15 @@ onBeforeUnmount(() => {
       <div
         v-if="menuVisible"
         class="am-menu"
-        :class="{ 'am-menu--ui': size === 'ui', 'am-menu--anchored': anchored }"
+        :class="{ 'am-menu--ui': size === 'ui', 'am-menu--anchored': anchored, 'am-menu--left': align === 'left' }"
         :ref="(el) => (menuEl = el as HTMLElement | null)"
-        :style="anchored && anchorCoords ? { left: `${anchorCoords.left}px`, top: `${anchorCoords.top}px` } : undefined"
+        :style="[
+          anchored
+            ? (anchorCoords ? { left: `${anchorCoords.left}px`, top: `${anchorCoords.top}px` } : undefined)
+            : (menuStyle ?? undefined),
+          menuWidth ? { minWidth: `${menuWidth}px` } : null,
+          menuRowHeight ? { '--am-row-h': `${menuRowHeight}px` } : null,
+        ]"
         role="menu"
       >
       <!-- 二级面板：平台为右侧飞出；桌面按应用既有「‹ 返回」二级面板收口（③适配） -->
@@ -190,13 +243,16 @@ onBeforeUnmount(() => {
             class="am-item"
             type="button"
             role="menuitem"
-            :class="{ danger: item.danger, first: i === 0 || item.group !== items[i - 1]?.group }"
+            :class="{ danger: item.danger, disabled: item.disabled, first: i === 0 || item.group !== items[i - 1]?.group }"
             @click.stop="pick(item)"
           >
             <EditorIcon v-if="item.icon" :name="item.icon" />
-            <span class="am-label">{{ item.label }}</span>
+            <span class="am-item-main">
+              <span class="am-label">{{ item.label }}</span>
+              <span v-if="item.hint" class="am-hint">{{ item.hint }}</span>
+            </span>
             <span v-if="item.badge" class="am-badge">{{ item.badge }}</span>
-            <EditorIcon v-if="item.submenu" class="am-chev" name="o.chevron-right" />
+            <EditorIcon v-if="item.submenu && !item.noChevron" class="am-chev" name="o.chevron-right" />
           </button>
         </template>
         </template>
@@ -249,13 +305,19 @@ onBeforeUnmount(() => {
   right: 0;
   z-index: 60;
   min-width: 200px;
-  max-height: 380px;
+  /* 自适应高度：上限由 placeMenu() 按「视口底边 − 触发器下沿」动态给出
+     （旧固定 380px 会让装得下的内容出现无意义的滚动条），真超出才内部滚动 */
   overflow-y: auto;
   padding: 4px 0;
   background: var(--bg-panel);
   border: 1px solid var(--border);
   border-radius: 8px;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+}
+/* 左对齐展开（平台行 ▾ 菜单）：菜单左缘对齐触发器左缘、向右盖过时间轴 */
+.am-menu--left {
+  left: 0;
+  right: auto;
 }
 .am-sep {
   height: 1px;
@@ -271,7 +333,8 @@ onBeforeUnmount(() => {
 .am-group:first-child {
   margin-top: 2px;
 }
-/* 行：平台实测高 32 / 文本 14 / 行内边距 16 */
+/* 行：平台实测高 32 / 文本 14 / 行内边距 16；带提示副行的行自适应高度。
+   行高可由 menu-row-height 覆盖（如平台行菜单的 40px） */
 .am-item {
   display: flex;
   align-items: center;
@@ -283,9 +346,35 @@ onBeforeUnmount(() => {
   font-size: var(--font-lg);
   font-family: inherit;
   text-align: left;
-  height: 32px;
-  padding: 0 16px;
+  min-height: var(--am-row-h, 32px);
+  padding: 4px 16px;
   cursor: pointer;
+}
+/* 禁用项（平台：灰字、无 hover、不可点） */
+.am-item.disabled {
+  color: var(--text-dim);
+  cursor: default;
+}
+.am-item.disabled:hover {
+  background: transparent;
+}
+.am-item-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+/* 主列里 label 不再纵向拉伸（.am-label 的 flex:1 是给行内布局推挤 badge/chev 用的） */
+.am-item-main .am-label {
+  flex: 0 1 auto;
+}
+.am-hint {
+  font-size: var(--font-sm);
+  color: var(--text-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .am-item .editor-icon {
   flex: none;

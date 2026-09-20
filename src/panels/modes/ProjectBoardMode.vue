@@ -6,7 +6,7 @@
  * Card body: draft title or `#number title` with a repo/ghost tag; priority
  * renders as a colored dot from the single-select field's option color.
  */
-import { computed, onBeforeUnmount, onMounted, ref } from "vue";
+import { computed, onBeforeUnmount, ref, watch } from "vue";
 import { storeToRefs } from "pinia";
 import { useProjectsStore } from "../../stores/projects";
 import { api, type FieldOption, type ProjectField, type ProjectItem } from "../../api";
@@ -17,21 +17,33 @@ import EditorIcon from "../../components/EditorIcon.vue";
 import { chipColors, type ChipColors } from "../field-chip";
 import IssueCreateDialog from "../IssueCreateDialog.vue";
 import ProjectAddItemsDrawer from "../ProjectAddItemsDrawer.vue";
+import ProjectOmnibar from "../ProjectOmnibar.vue";
 import OptionEditDialog from "../OptionEditDialog.vue";
 import { pushToast } from "../../toast";
 import { itemTitle } from "../item-fields";
 
 const store = useProjectsStore();
-const { selected, filteredItems, items } = storeToRefs(store);
+const { selected, filteredItems } = storeToRefs(store);
 const { t } = useI18n();
 
-onMounted(() => {
-  document.addEventListener("pointerdown", onDocPointerDown);
-  document.addEventListener("keydown", onOmniKeydown);
+/** 列头行实测高度 = 泳道组头的吸顶 top（平台：组头钉在列头行正下方，零间隙）。
+ * 列描述行有无/i18n 都会影响高度，故用 ResizeObserver 实测而非写死。 */
+const boardHeadsEl = ref<HTMLElement | null>(null);
+const headsH = ref(0);
+let headsRO: ResizeObserver | null = null;
+watch(boardHeadsEl, (el) => {
+  headsRO?.disconnect();
+  headsRO = null;
+  if (!el) return;
+  headsH.value = el.offsetHeight;
+  headsRO = new ResizeObserver(() => {
+    headsH.value = el.offsetHeight;
+  });
+  headsRO.observe(el);
 });
+
 onBeforeUnmount(() => {
-  document.removeEventListener("pointerdown", onDocPointerDown);
-  document.removeEventListener("keydown", onOmniKeydown);
+  headsRO?.disconnect();
 });
 
 /** 是否分泳道：分泳道时列头抽成单独一行、泳道为带（平台形态）；不分时保持列盒（Backlog 现状）。 */
@@ -121,6 +133,24 @@ async function onMenuPick(target: MenuTarget, value: string) {
 const createOpen = ref(false);
 const drawerOpen = ref(false);
 const repoMenu = ref<{ value: string; label: string; target: string; visibility: string | null }[]>([]);
+const repoChoices = ref<
+  { id: string; label: string; visibility?: string | null; target: string; remoteUrl?: string | null }[]
+>([]);
+async function ensureRepos() {
+  if (repoChoices.value.length) return;
+  try {
+    const rows = (await api.repoList()) as Array<{ id: string; displayName?: string | null; path?: string | null; remoteUrl?: string | null; visibility?: string | null }>;
+    repoChoices.value = rows.map((r) => ({
+      id: r.id,
+      label: r.displayName ?? r.path?.split("/").filter(Boolean).pop() ?? r.remoteUrl ?? r.id,
+      visibility: r.visibility ?? null,
+      target: r.path ?? r.remoteUrl ?? r.id,
+      remoteUrl: r.remoteUrl ?? null,
+    }));
+  } catch {
+    repoChoices.value = [];
+  }
+}
 /** 仓库候选：项目绑定优先，不足则并入全部登记仓库。 */
 async function ensureRepoMenu() {
   await ensureRepos();
@@ -143,12 +173,12 @@ async function ensureRepoMenu() {
   repoMenu.value = merged;
 }
 function openCreateDialog() {
-  omniOpen.value = false; // 收起 omnibar，但保留 addColumn/addLane 目标格
+  omni.value?.close(); // 收起 omnibar，但保留 addColumn/addLane 目标格
   void ensureRepoMenu();
   createOpen.value = true;
 }
 function openAddItemsDrawer() {
-  omniOpen.value = false;
+  omni.value?.close();
   void ensureRepoMenu();
   drawerOpen.value = true;
 }
@@ -478,134 +508,40 @@ function laneTotal(laneId: string | null): number {
   return columns.value.reduce((n, col) => n + cardsOf(col.id, laneId).length, 0);
 }
 
-// ---- 添加条目：GitHub 的底部 omnibar（整宽一行：＋ 图标 + 输入）
-// 输入标题回车 = 在当前目标格建草稿卡；输入 # = 选仓库后按编号建引用条目。
+// ---- 添加条目：GitHub 的底部 omnibar（共享组件 ProjectOmnibar）----
 const addColumn = ref<string | null>(null);
 const addLane = ref<string | null>(null);
-/** 底部输入条：平台不是常显——点新增才出现，外点 / Esc 隐藏。 */
+const omni = ref<InstanceType<typeof ProjectOmnibar> | null>(null);
+/** omnibar 开关（目标格指示条 omni-target-bar 需要）。 */
 const omniOpen = ref(false);
-/** omnibar 模式（平台的两个建议项）：create = 输入即新建；repo = 从仓库选条目。 */
-const omniMode = ref<"create" | "repo">("create");
-/** 建议菜单开关：omnibar 左侧的 ＋ 图标是按钮——点击才显示建议菜单
- * （平台实测：打开「添加条目」只有输入条，点 ＋ 才弹菜单）。 */
-const omniMenuOpen = ref(false);
-function toggleOmniMenu() {
-  omniMenuOpen.value = !omniMenuOpen.value;
-  focusOmni();
-}
-const omniText = ref("");
-const omniRepoId = ref("");
-const omniRepoMenu = ref(false);
-const repoChoices = ref<
-  { id: string; label: string; visibility?: string | null; target: string; remoteUrl?: string | null }[]
->([]);
-/** 选中仓库后的开放 Issue 列表（数据源 = 本地仓库缓存库，离线可用——③适配标注）。 */
-const omniIssues = ref<{ number: string; title: string }[]>([]);
-const omniLoadingIssues = ref(false);
 
 /** 目标格：由列头 ＋ / 段头 ＋ / 格底 Add item 指定；打开输入条并锁定该格。 */
 function quickAdd(optionId: string, laneId: string | null = null) {
   addColumn.value = optionId;
   addLane.value = laneId;
-  omniOpen.value = true;
-  omniMode.value = "create";
-  omniMenuOpen.value = false;
-  omniRepoId.value = "";
-  omniText.value = "";
-  focusOmni();
+  omni.value?.open();
 }
-function closeOmni() {
-  omniOpen.value = false;
-  omniMenuOpen.value = false;
-  omniText.value = "";
-  omniRepoId.value = "";
-  omniIssues.value = [];
-  addLane.value = null;
-}
-function onDocPointerDown(event: MouseEvent) {
-  if (!omniOpen.value) return;
-  const el = event.target as HTMLElement | null;
-  if (el && el.closest(".omnibar")) return;
-  closeOmni();
-}
-function onOmniKeydown(event: KeyboardEvent) {
-  if (event.key === "Escape" && omniOpen.value) closeOmni();
-}
-function focusOmni() {
-  requestAnimationFrame(() => {
-    const el = document.getElementById("board-omnibar");
-    // preventScroll：聚焦不要把可滚动的看板滚回左上（曾致点击新增后横滚跳回第一列）
-    if (el instanceof HTMLInputElement) el.focus({ preventScroll: true });
-  });
-}
-
-async function ensureRepos() {
-  if (repoChoices.value.length) return;
-  try {
-    const rows = (await api.repoList()) as Array<{ id: string; displayName?: string | null; path?: string | null; remoteUrl?: string | null; visibility?: string | null }>;
-    repoChoices.value = rows.map((r) => ({
-      id: r.id,
-      label: r.displayName ?? r.path?.split("/").filter(Boolean).pop() ?? r.remoteUrl ?? r.id,
-      visibility: r.visibility ?? null,
-      target: r.path ?? r.remoteUrl ?? r.id,
-      remoteUrl: r.remoteUrl ?? null,
-    }));
-  } catch {
-    repoChoices.value = [];
+/** omnibar 回车建草稿 → 落入目标格（列/泳道由 quickAdd 锁定）。 */
+async function onOmnibarDraft(title: string) {
+  if (!selected.value) return;
+  const created = await store.addItem({ projectId: selected.value.id, kind: "draft", draftTitle: title });
+  if (created) {
+    const col = addColumn.value ?? columns.value[0]?.id ?? null;
+    if (col !== null) await store.moveItem(created.id, col);
+    const lane = store.swimlaneField;
+    if (lane && addLane.value !== null) {
+      await store.setFieldValue(created.id, lane.id, addLane.value === "" ? undefined : addLane.value);
+    }
   }
 }
-
-function onOmniInput() {
-  if (omniText.value.includes("#") && !omniRepoId.value) {
-    pickOmniMode("repo");
-  }
-}
-/** 建议菜单两行的点击/激活（平台：Create new issue ⇄ Add item from repository）。 */
-function pickOmniMode(mode: "create" | "repo") {
-  omniMode.value = mode;
-  // 输入 # 也要能看见菜单——否则「# 选仓库」这条快路径点了没反应（菜单由 ＋ 开关控制）
-  omniMenuOpen.value = true;
-  if (mode === "repo") {
-    void ensureRepos();
-    omniRepoMenu.value = true;
-    focusOmni();
-  } else {
-    omniRepoMenu.value = false;
-    focusOmni();
-  }
-}
-/** 选了仓库 = 按编号建引用条目；输入框退化为编号位。 */
-/** 选仓库（平台状态 E）：载入该仓库的开放 Issue（排除已在板上的），chip + 列表。 */
-async function pickOmniRepo(repoId: string) {
-  omniRepoId.value = repoId;
-  omniText.value = "";
-  omniIssues.value = [];
-  omniLoadingIssues.value = true;
-  focusOmni();
-  const row = repoChoices.value.find((r) => r.id === repoId);
-  if (!row) return;
-  try {
-    const issues = (await api.listCachedIssues(row.target, "open")) as Array<{ number: string; title: string }>;
-    const onBoard = new Set(
-      items.value
-        .filter((i) => i.kind === "issue" && i.repoId === repoId)
-        .map((i) => i.number ?? ""),
-    );
-    omniIssues.value = issues.filter((i) => !onBoard.has(i.number));
-  } catch {
-    omniIssues.value = [];
-  } finally {
-    omniLoadingIssues.value = false;
-  }
-}
-/** 点选 Issue（平台状态 F）：以引用卡加入目标格。 */
-async function pickOmniIssue(issue: { number: string }) {
-  if (!selected.value || !omniRepoId.value) return;
+/** omnibar 点选 Issue → 以引用卡加入目标格。 */
+async function onOmnibarIssue(payload: { repoId: string; number: string }) {
+  if (!selected.value) return;
   const created = await store.addItem({
     projectId: selected.value.id,
     kind: "issue",
-    repoId: omniRepoId.value,
-    number: issue.number,
+    repoId: payload.repoId,
+    number: payload.number,
   });
   if (created) {
     const col = addColumn.value ?? columns.value[0]?.id ?? null;
@@ -615,43 +551,6 @@ async function pickOmniIssue(issue: { number: string }) {
       await store.setFieldValue(created.id, lane.id, addLane.value === "" ? undefined : addLane.value);
     }
   }
-  omniIssues.value = omniIssues.value.filter((i) => i.number !== issue.number);
-}
-function clearOmniRepo() {
-  omniRepoId.value = "";
-  omniText.value = "";
-  focusOmni();
-}
-/** repo 模式下按输入过滤（平台的 "Search or add items"）。 */
-const filteredOmniIssues = computed(() => {
-  const needle = omniText.value.trim().toLowerCase();
-  if (!needle) return omniIssues.value;
-  return omniIssues.value.filter(
-    (i) => i.title.toLowerCase().includes(needle) || i.number.toLowerCase().includes(needle),
-  );
-});
-async function submitOmni() {
-  if (!selected.value) return;
-  const text = omniText.value.trim();
-  if (!text) return;
-  // repo 模式回车 = 添加第一个过滤命中的 Issue（③适配：平台高亮项行为未逐帧验证）
-  if (omniRepoId.value) {
-    const first = filteredOmniIssues.value[0];
-    if (first) await pickOmniIssue(first);
-    omniText.value = "";
-    return;
-  }
-  const created = await store.addItem({ projectId: selected.value.id, kind: "draft", draftTitle: text });
-  if (created) {
-    const col = addColumn.value ?? columns.value[0]?.id ?? null;
-    if (col !== null) await store.moveItem(created.id, col);
-    const lane = store.swimlaneField;
-    if (lane && addLane.value !== null) {
-      await store.setFieldValue(created.id, lane.id, addLane.value === "" ? undefined : addLane.value);
-    }
-  }
-  omniText.value = "";
-  addLane.value = null;
 }
 
 // ---- 草稿转 Issue ----
@@ -678,9 +577,10 @@ async function submitConvert(item: ProjectItem, path: string) {
 
 <template>
   <div class="board-wrap" @drop="onDrop" @dragover.prevent>
-  <div class="board">
-    <!-- 分泳道时：列头单独一行（平台的列头行），最右是「Add a new column」 -->
-    <div v-if="laneMode" class="board-heads">
+  <div class="board" :style="{ '--heads-h': `${headsH}px` }">
+    <!-- 分泳道时：列头单独一行（平台的列头行），最右是「Add a new column」；
+         整板滚动时吸顶常驻（平台行为），泳道组头钉在它正下方 -->
+    <div v-if="laneMode" ref="boardHeadsEl" class="board-heads">
       <div v-for="col in columns" :key="col.id" class="head-cell">
         <div class="col-head">
           <span
@@ -734,7 +634,7 @@ async function submitConvert(item: ProjectItem, path: string) {
   </DropdownMenu>
     </div>
 
-    <div v-for="lane in lanes" :key="lane.id ?? '__none__'" class="lane">
+    <div v-for="lane in lanes" :key="lane.id ?? '__none__'" class="lane" :class="{ 'lane-fill': !laneMode }">
       <p v-if="lane.name" class="lane-head">
         <button
           class="lane-collapse"
@@ -750,7 +650,7 @@ async function submitConvert(item: ProjectItem, path: string) {
           :style="{ background: chipColors(lane.color).bg, color: lane.color }"
         ></span>
         {{ lane.name }}
-        <span class="lane-count">{{ laneTotal(lane.id) }}</span>
+        <span class="col-count">{{ laneTotal(lane.id) }}</span>
         <span v-for="sum in store.laneSums(lane.id ?? '')" :key="sum.label" class="col-sum">
           {{ sum.label }}: {{ sum.value }}
         </span>
@@ -796,7 +696,7 @@ async function submitConvert(item: ProjectItem, path: string) {
             >＋</button>
           </div>
           <p v-if="!laneMode && columnDescription(col)" class="col-desc">{{ columnDescription(col) }}</p>
-          <div class="col-body">
+          <div class="col-body" :class="{ 'col-scroll': !laneMode }">
           <span
             v-if="omniOpen && addColumn === col.id && addLane === lane.id"
             class="omni-target-bar"
@@ -957,83 +857,15 @@ async function submitConvert(item: ProjectItem, path: string) {
 
   </div>
 
-    <!-- GitHub 的底部 omnibar：点新增才出现，外点 / Esc 隐藏 -->
-    <div v-if="omniOpen" class="omnibar">
-      <!-- 建议菜单：由输入条左侧 ＋ 开关控制（平台同款）；内容随模式/输入变化 -->
-      <div v-show="omniMenuOpen" class="omni-menu">
-        <!-- create 模式 -->
-        <template v-if="omniMode === 'create'">
-          <button class="omni-sug active" type="button" @click="openCreateDialog">
-            <EditorIcon name="o.issue-opened" />
-            <span class="omni-sug-label">{{ t("project.omniCreate") }}</span>
-            <span class="omni-hint">⏎</span>
-          </button>
-          <button v-if="!omniText" class="omni-sug" type="button" @click="openAddItemsDrawer">
-            <EditorIcon name="o.repo" />
-            <span class="omni-sug-label">{{ t("project.omniFromRepo") }}</span>
-          </button>
-        </template>
-        <!-- repo 模式：选仓库（可见性图标：私有锁 / 公开册） -->
-        <template v-else-if="!omniRepoId">
-          <button
-            v-for="(r, ri) in repoChoices"
-            :key="r.id"
-            class="omni-sug"
-            :class="{ active: ri === 0 }"
-            type="button"
-            @click="pickOmniRepo(r.id)"
-          >
-            <EditorIcon :name="r.visibility === 'private' ? 'lock' : 'o.repo'" />
-            <span class="omni-sug-label">{{ r.label }}</span>
-          </button>
-          <p v-if="repoChoices.length === 0" class="omni-empty">{{ t("project.bindEmpty") }}</p>
-        </template>
-        <!-- repo 模式：该仓库开放 Issue 列表（排除已在板上）＋ 保留新建行 -->
-        <template v-else>
-          <button
-            v-for="iss in filteredOmniIssues"
-            :key="iss.number"
-            class="omni-sug"
-            :class="{ active: filteredOmniIssues[0] === iss }"
-            type="button"
-            @click="pickOmniIssue(iss)"
-          >
-            <EditorIcon name="o.issue-opened" />
-            <span class="omni-sug-label">{{ iss.title }}</span>
-            <span class="omni-hint">#{{ iss.number }}</span>
-          </button>
-          <p v-if="omniLoadingIssues" class="omni-empty">{{ t("list.loading") }}</p>
-          <p v-else-if="filteredOmniIssues.length === 0" class="omni-empty">{{ t("project.omniNoIssues") }}</p>
-          <button class="omni-sug" type="button" @click="focusOmni">
-            <EditorIcon name="o.plus" />
-            <span class="omni-sug-label">{{ t("project.omniCreate") }}</span>
-          </button>
-        </template>
-      </div>
-      <div class="omni-row">
-        <button
-          class="omni-plus"
-          type="button"
-          :class="{ on: omniMenuOpen }"
-          :title="t('project.omniMenuToggle')"
-          @click="toggleOmniMenu"
-        >
-          <EditorIcon name="o.plus" />
-        </button>
-        <button v-if="omniRepoId" class="omni-chip" type="button" :title="t('project.omniFromRepo')" @click="clearOmniRepo">
-          repo:{{ repoChoices.find((r) => r.id === omniRepoId)?.label ?? "" }}
-        </button>
-        <input
-          id="board-omnibar"
-          v-model="omniText"
-          class="omni-input"
-          :placeholder="omniRepoId ? t('project.omniSearchOrAdd') : t('project.omniPlaceholder')"
-          spellcheck="false"
-          @input="onOmniInput"
-          @keydown.enter="submitOmni"
-        />
-      </div>
-    </div>
+    <!-- GitHub 的底部 omnibar（共享组件 ProjectOmnibar）：点新增才出现，外点 / Esc 隐藏 -->
+    <ProjectOmnibar
+      ref="omni"
+      @create-draft="onOmnibarDraft"
+      @open-create-dialog="openCreateDialog"
+      @add-from-repo="openAddItemsDrawer"
+      @create-issue="onOmnibarIssue"
+      @open-change="omniOpen = $event"
+    />
   </div>
 </template>
 
@@ -1044,6 +876,9 @@ async function submitConvert(item: ProjectItem, path: string) {
   flex: 1;
   min-height: 0;
   position: relative;
+  /* 与过滤栏的间距放在滚动容器外：滚动区内列头顶格开始，
+     否则这段 padding 会在吸顶列头上方露出一条“残影缝” */
+  padding-top: 10px;
 }
 /* 「新增列」菜单：列流的最后一个元素（紧跟最后一列右侧，随行滚动） */
 .board-add-dd.board-add-dd {
@@ -1067,31 +902,45 @@ async function submitConvert(item: ProjectItem, path: string) {
   color: var(--accent);
 }
 .board {
-  /* 泳道段（行）用 1fr：内容少时等分面板高度（至少 100%）、
-     内容多时整段长高；滚动发生在这一层，omnibar 在滚动区之外常驻底边 */
-  display: grid;
-  grid-auto-rows: 1fr;
-  gap: 10px;
+  /* 整板滚动（平台形态）：列与泳道段按内容自然长高，垂直/横向滚动都发生在
+     这一层；列头行与泳道组头吸顶，omnibar 在滚动区之外常驻底边。
+     垂直 gap 为 0：列头单元格 → 泳道条 → 列体 上下零间隙拼成连续头部（平台形态）。
+     顶部不留 padding：吸顶列头必须顶格，上方不能有能露出滚动内容的缝隙 */
+  display: flex;
+  flex-direction: column;
+  gap: 0;
   flex: 1;
   min-height: 0;
-  padding: 10px;
+  padding: 0 10px 10px;
   overflow: auto;
-  align-items: stretch;
   position: relative;
 }
-/* 分泳道时的列头行（平台：单独一行、最右为「Add a new column」） */
+/* 分泳道时的列头行（平台：单独一行、最右为「Add a new column」）。
+   sticky 需以滚动容器内容为参照：flex 子项的参照是整个内容高度（此前 grid
+   布局下 sticky 被困在自身网格区域里，滚动时实际不吸顶）。
+   width 取 max-content：背景条要盖住全部列宽，横向滚动时不露底。 */
 .board-heads {
   position: sticky;
   top: 0;
   z-index: 6;
+  flex: none;
+  width: max-content;
+  min-width: 100%;
   display: flex;
   gap: 8px;
-  padding-bottom: 6px;
   background: var(--bg-panel);
 }
 .head-cell {
+  /* 平台列头 = 与泳道条一体的描边单元格：只圆上角、不封底，
+     侧边框向下穿过泳道条区域，由横条的下边框统一收口 */
+  box-sizing: border-box;
   flex: none;
   width: 280px;
+  padding: 6px 8px 8px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-bottom: none;
+  border-radius: 8px 8px 0 0;
 }
 /* 泳道段的折叠按钮（平台的 Collapse group） */
 .lane-collapse {
@@ -1108,37 +957,74 @@ async function submitConvert(item: ProjectItem, path: string) {
   color: var(--text);
   background: var(--bg-hover);
 }
-/* 泳道模式下的单元格：无列头（列头在单独一行） */
+/* 泳道模式下的单元格：无列头（列头在单独一行）；段高 = 条目最多列的
+   「卡片 + 添加条目」自然高度（平台形态），不给人工底高。
+   平台列体通栏灰底，左右边框各一条（与列头单元格侧框、泳道条列界线
+   对齐延续，边界处成对双线），上下边框由泳道条的两条横线承担 */
 .col.cell-plain {
   padding-top: 8px;
+  min-height: 0;
+  box-sizing: border-box;
+  background: transparent;
+  border-top: none;
+  border-bottom: none;
+  border-left: 1px solid var(--border);
+  border-right: 1px solid var(--border);
+  border-radius: 0;
 }
-/* 段：段头 + 一行列；行高由 .board 的 1fr 统一给（不再各段自算） */
+/* 末段列体补下边框收口（中间段的列底由下一段泳道条的上边框收口，不重复画）；
+   圆角只圆整段最外的两角（与列头单元格顶角、泳道条圆角同族），内部分隔保持直角 */
+.lane:last-of-type .col.cell-plain {
+  border-bottom: 1px solid var(--border);
+}
+.lane:last-of-type .col.cell-plain:first-child {
+  border-bottom-left-radius: 8px;
+}
+.lane:last-of-type .col.cell-plain:last-child {
+  border-bottom-right-radius: 8px;
+}
+/* 段：段头 + 一行列。分泳道时高度 = 内容（平台形态，整板滚动的前提）；
+   不分泳道（Backlog）单段撑满面板。width 取 max-content 让段头横条
+   贯通全部列宽（平台形态），min-width 保证列少时仍铺满视口。
+   flex-shrink:0 必须：列 flex 容器高度不足时会把子项压扁而不是溢出，
+   不禁收缩的话整板滚动永远不触发、卡片会溢出段边界 */
 .lane {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 0; /* 泳道条与列体贴合（平台：连续头部，靠横条下边框分隔） */
   min-height: 0;
+  width: max-content;
+  min-width: 100%;
+  flex-shrink: 0;
 }
+.lane-fill {
+  flex: 1 1 auto;
+}
+/* 泳道组头 = 列头下方的白色实底横条（平台形态：不透明白底、上下各一条
+   横线收口，不做任何列界线的模拟），滚动时钉在列头行正下方 */
 .lane-head {
+  position: sticky;
+  top: var(--heads-h, 0px);
+  z-index: 5;
   display: flex;
   align-items: center;
   gap: 6px;
-  width: fit-content;
+  width: 100%;
+  box-sizing: border-box;
+  min-height: 40px;
   margin: 0;
+  padding: 4px 10px;
   font-size: var(--font-base);
   font-weight: 600;
   color: var(--text);
-}
-.lane-count {
-  font-size: var(--font-xs);
-  font-weight: 400;
-  color: var(--text-dim);
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
 }
 .lane-cols {
   display: flex;
   gap: 8px;
   align-items: stretch;
-  flex: 1;
+  flex: 1 1 auto;
   min-height: 0;
 }
 .col {
@@ -1154,13 +1040,17 @@ async function submitConvert(item: ProjectItem, path: string) {
   border-radius: 8px;
   padding: 8px;
 }
-/* 列体：卡片 + Add item 在此滚动，列头固定不被滚走（菜单也不会被裁） */
+/* 列体：分泳道时随整板滚动（平台的泳道带等高、随板长高）；
+   Backlog（不分泳道）保留列内滚动（既有桌面适配）。
+   basis 必须 auto：段高=内容后，basis 0 会把段体高度坍缩成 0（卡片溢出段边界） */
 .col-body {
   display: flex;
   flex-direction: column;
   gap: 6px;
-  flex: 1;
+  flex: 1 1 auto;
   min-height: 0;
+}
+.col-body.col-scroll {
   overflow-y: auto;
 }
 /* Backlog（无泳道）：列排末尾的小 ＋（平台为列头行右端的小按钮，非占位列） */
@@ -1484,190 +1374,5 @@ async function submitConvert(item: ProjectItem, path: string) {
   text-align: center;
   color: var(--accent);
   font-size: var(--font-md);
-}
-/* 底部 omnibar（GitHub 的 Add item 输入条）：整宽、贴看板底边 */
-/* 建议菜单：贴输入条上沿、同宽（平台的两行建议项） */
-.omni-menu {
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-  margin-bottom: 6px;
-  padding: 4px;
-  background: var(--bg-panel);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
-}
-.omni-sug {
-  position: relative;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-  border: none;
-  background: transparent;
-  color: var(--text);
-  font-size: var(--font-base);
-  text-align: left;
-  padding: 7px 10px;
-  border-radius: 6px;
-  cursor: pointer;
-}
-.omni-sug:hover {
-  background: var(--bg-hover);
-}
-/* 激活模式：左侧蓝色竖条（平台的当前模式指示） */
-.omni-sug.active::before {
-  content: "";
-  position: absolute;
-  left: 0;
-  top: 6px;
-  bottom: 6px;
-  width: 3px;
-  border-radius: 2px;
-  background: var(--accent);
-}
-.omni-sug-label {
-  flex: 1;
-  min-width: 0;
-}
-.omni-hint {
-  flex: none;
-  color: var(--text-dim);
-  font-size: var(--font-sm);
-}
-.omni-plus {
-  display: inline-flex;
-  align-items: center;
-  border: none;
-  background: transparent;
-  color: var(--text-dim);
-  padding: 3px;
-  border-radius: 5px;
-  cursor: pointer;
-}
-.omni-plus:hover,
-.omni-plus.on {
-  color: var(--accent);
-  background: var(--bg-hover);
-}
-/* 建议菜单：非全宽（平台 ~400px，锚左侧）、限高滚动 */
-.omni-menu {
-  align-self: flex-start;
-  width: 420px;
-  max-height: 300px;
-  overflow-y: auto;
-}
-.omni-sug.active::before {
-  content: "";
-  position: absolute;
-  left: 0;
-  top: 6px;
-  bottom: 6px;
-  width: 3px;
-  border-radius: 2px;
-  background: var(--accent);
-}
-/* chip：平台为蓝色 repo: 前缀（可点回仓库列表） */
-.omni-chip {
-  flex: none;
-  border: none;
-  background: transparent;
-  color: var(--accent);
-  font-size: var(--font-base);
-  font-family: inherit;
-  cursor: pointer;
-  padding: 0 2px;
-}
-.omni-chip:hover {
-  text-decoration: underline;
-}
-/* omnibar：浮在看板底部（overlay，不占布局高度——平台同款） */
-.omnibar {
-  position: absolute;
-  left: 10px;
-  right: 10px;
-  bottom: 10px;
-  z-index: 20;
-}
-.omni-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-height: 38px;
-  padding: 0 10px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--bg-panel);
-}
-.omni-row:focus-within {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 1px var(--accent);
-}
-.omni-plus {
-  display: inline-flex;
-  color: var(--text-dim);
-}
-.omni-input {
-  flex: 1;
-  min-width: 0;
-  border: none;
-  outline: none;
-  background: transparent;
-  font-size: var(--font-base);
-  font-family: inherit;
-  color: var(--text);
-}
-.omni-input::placeholder {
-  color: var(--text-dim);
-}
-.omni-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  font-size: var(--font-sm);
-  padding: 1px 4px 1px 8px;
-  border-radius: 4px;
-  background: var(--bg-selected);
-  color: var(--accent);
-}
-.omni-chip-x {
-  border: none;
-  background: transparent;
-  color: inherit;
-  font-size: var(--font-md);
-  cursor: pointer;
-  padding: 0 2px;
-}
-.omni-repos {
-  margin-top: 4px;
-  max-height: 180px;
-  overflow-y: auto;
-  padding: 4px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--bg-panel);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
-}
-.omni-repo {
-  display: block;
-  width: 100%;
-  border: none;
-  background: transparent;
-  color: var(--text);
-  font-size: var(--font-md);
-  text-align: left;
-  padding: 5px 8px;
-  border-radius: 5px;
-  cursor: pointer;
-}
-.omni-repo:hover {
-  background: var(--bg-hover);
-}
-.omni-empty {
-  margin: 0;
-  padding: 4px 8px;
-  font-size: var(--font-sm);
-  color: var(--text-dim);
 }
 </style>

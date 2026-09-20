@@ -130,13 +130,22 @@ export interface ProjectViewEntry {
   config: ProjectViewConfig;
 }
 
+/** Table 布局的平台默认列集（取证 views/1?layout=table：Title + Assignees +
+ * Status + Priority；其余字段经列头「选择列/隐藏」或视图设置添加）。 */
+export const TABLE_DEFAULT_FIELDS = ["title", "assignees", "status", "priority"] as const;
+
 /** 种子视图：Backlog（现有看板，保持不变）+ Table + Priority board。
  * Roadmap 视图随 Roadmap 布局落地时补入（见任务台账 D）。 */
 export function defaultViewEntries(): ProjectViewEntry[] {
   const base = defaultViewConfig;
   return [
     { id: "backlog", name: "Backlog", layout: "board", config: base() },
-    { id: "table", name: "Table", layout: "table", config: base() },
+    {
+      id: "table",
+      name: "Table",
+      layout: "table",
+      config: { ...base(), fields: [...TABLE_DEFAULT_FIELDS] as ProjectViewConfig["fields"] },
+    },
     {
       id: "priority",
       name: "Priority board",

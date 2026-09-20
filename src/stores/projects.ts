@@ -15,6 +15,7 @@ import {
   entityFieldIds,
   fieldLabelKeys,
   projectFieldIds,
+  TABLE_DEFAULT_FIELDS,
   VIEW_CONFIG_VERSION,
   viewFieldIds,
 } from "../panels/project-views";
@@ -33,7 +34,7 @@ export const useProjectsStore = defineStore("projects", () => {
   const publishError = ref<string | null>(null);
   /** 跨工作区导航请求（看板卡片 → Issues；状态栏 → 项目工作区）。
    * repoId = 登记表 id，App.vue 消费时解析成 path/URL target。 */
-  const navRequest = ref<{ workspace: string; repoId?: string; number?: string } | null>(null);
+  const navRequest = ref<{ workspace: string; repoId?: string; number?: string; panel?: string } | null>(null);
   /** item 详情抽屉（Board / Table 共用；平台的面板挂在视图层而非某个布局）。 */
   const panelItemId = ref<string | null>(null);
 
@@ -59,6 +60,10 @@ export const useProjectsStore = defineStore("projects", () => {
       if ((saved.version ?? 1) < VIEW_CONFIG_VERSION) {
         const extra = viewFieldIds.filter((id) => !(saved.fields ?? []).includes(id));
         merged.fields = [...extra, ...(saved.fields ?? [])] as ProjectViewConfig["fields"];
+      }
+      // Table 布局列集迁移（活动视图的遗留副本）：未定制过 = 旧全集 → 平台默认列集
+      if (activeView.value.layout === "table" && isUntouchedLegacyFields(merged.fields)) {
+        merged.fields = [...TABLE_DEFAULT_FIELDS] as ProjectViewConfig["fields"];
       }
       view.value = merged;
     } catch {
@@ -188,12 +193,18 @@ export const useProjectsStore = defineStore("projects", () => {
     }
     if (statusF) aliasToField.set("status", statusF.id);
     if (prioF) aliasToField.set("priority", prioF.id);
+    // 固定字段别名（i18n 列名 → 固定键）：平台任意列都能按值筛选
+    for (const id of viewFieldIds) {
+      aliasToField.set(t(fieldLabelKeys[id]).toLowerCase(), id);
+    }
     const tokens = parseFilter(view.value.filter, aliasToField);
     const matches = (i: ProjectItem): boolean => {
       for (const [fieldId, needles] of tokens.byField) {
         const field = fields.value.find((f) => f.id === fieldId);
-        const name =
-          field?.options.find((o) => o.id === i.fieldValues[fieldId])?.name.toLowerCase() ?? "";
+        // 项目字段匹配选项名；固定字段匹配单元格显示文本
+        const name = field
+          ? (field.options.find((o) => o.id === i.fieldValues[fieldId])?.name.toLowerCase() ?? "")
+          : (cellOf(fieldId, i)?.text.toLowerCase() ?? "");
         if (!needles.some((n) => name.includes(n))) return false;
       }
       if (tokens.text) {
@@ -206,13 +217,25 @@ export const useProjectsStore = defineStore("projects", () => {
     const fs = view.value.fieldSort;
     if (fs) {
       const field = fields.value.find((f) => f.id === fs.fieldId) ?? null;
-      const idx = (i: ProjectItem) => {
-        if (!field) return 0;
-        const optId = i.fieldValues[field.id];
-        const at = field.options.findIndex((o) => o.id === optId);
-        return at === -1 ? Number.MAX_SAFE_INTEGER : at;
-      };
-      sorted.sort((a, b) => (fs.desc ? -1 : 1) * (idx(a) - idx(b)));
+      if (field) {
+        const idx = (i: ProjectItem) => {
+          const optId = i.fieldValues[field.id];
+          const at = field.options.findIndex((o) => o.id === optId);
+          return at === -1 ? Number.MAX_SAFE_INTEGER : at;
+        };
+        sorted.sort((a, b) => (fs.desc ? -1 : 1) * (idx(a) - idx(b)));
+        return sorted;
+      }
+      // 固定字段：按单元格显示文本排序（平台任意列可排序），空值恒排末尾
+      const txt = (i: ProjectItem) => cellOf(fs.fieldId, i)?.text ?? "";
+      sorted.sort((a, b) => {
+        const ta = txt(a);
+        const tb = txt(b);
+        if (!ta && !tb) return 0;
+        if (!ta) return 1;
+        if (!tb) return -1;
+        return (fs.desc ? -1 : 1) * ta.localeCompare(tb, "zh-Hans-CN");
+      });
       return sorted;
     }
     const dir = view.value.sortDesc ? -1 : 1;
@@ -425,6 +448,12 @@ export const useProjectsStore = defineStore("projects", () => {
   function persistViews() {
     localStorage.setItem(viewsKey(), JSON.stringify({ views: views.value, activeId: activeViewId.value }));
   }
+  /** Table 布局列集迁移的「未定制」判定：fields 覆盖全部固定字段
+   * （旧种子发的就是全集；用户加删过列则不再满足）。幂等，随加载常驻。 */
+  function isUntouchedLegacyFields(fields: ProjectViewConfig["fields"]): boolean {
+    const set = new Set<string>(fields as string[]);
+    return viewFieldIds.every((id) => set.has(id));
+  }
   function loadViews(raw: string | null) {
     if (!raw) {
       views.value = defaultViewEntries();
@@ -438,6 +467,13 @@ export const useProjectsStore = defineStore("projects", () => {
       // 新增的内置视图（如 Roadmap）补进旧列表——用户没删过它，只是当时还不存在
       for (const seed of defaultViewEntries()) {
         if (!restored.some((v) => v.id === seed.id)) restored.push(seed);
+      }
+      // Table 布局列集迁移（2026-09 对齐平台）：旧种子发的是全字段，凡未定制过
+      // 的 Table 视图收敛为平台默认列集；定制过的（增删过列）保持不动
+      for (const v of restored) {
+        if (v.layout === "table" && isUntouchedLegacyFields(v.config.fields)) {
+          v.config = { ...v.config, fields: [...TABLE_DEFAULT_FIELDS] as ProjectViewConfig["fields"] };
+        }
       }
       views.value = restored;
       activeViewId.value = list.some((v) => v.id === parsed.activeId)

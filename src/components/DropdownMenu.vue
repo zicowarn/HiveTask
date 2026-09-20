@@ -52,6 +52,16 @@ const props = withDefaults(
     filterable?: boolean;
     /** 勾选框变体（多选）：行尾渲染方框勾选（替代文本 ✓），配合 option.color 色点。 */
     checkbox?: boolean;
+    /** 勾选框渲染在行首（平台 Add field 面板形态：☑ 图标 名称）。 */
+    checkboxStart?: boolean;
+    /** 面板固定宽度（像素；如 Add field 面板的 400）。缺省按触发器/变体推断。 */
+    menuWidth?: number;
+    /** 面板最大高度（像素）。缺省按变体推断。 */
+    menuMaxHeight?: number;
+    /** 静态面板标题（平台的「+ Add field」头部：纯提示不可点）。 */
+    panelTitle?: { icon?: string; label: string } | null;
+    /** 动作行沉底（平台 Add field 面板的 New field 在列表末尾）。 */
+    actionBottom?: boolean;
   }>(),
   {
     options: () => [],
@@ -62,6 +72,11 @@ const props = withDefaults(
     disabled: false,
     filterable: false,
     checkbox: false,
+    checkboxStart: false,
+    menuWidth: undefined,
+    menuMaxHeight: undefined,
+    panelTitle: null,
+    actionBottom: false,
   },
 );
 
@@ -120,18 +135,20 @@ function place() {
   const rect = el.getBoundingClientRect();
   const GAP = 3;
   const MARGIN = 6;
-  const MAX = menuForm.value ? 380 : 260;
+  // 自适应高度：上限 = 视口可用空间（menuMaxHeight 仅作显式封顶）——
+  // 装得下的内容不出现滚动条，真超出才内部滚动（固定 380/260 上限已废）
+  const cap = props.menuMaxHeight ?? Number.POSITIVE_INFINITY;
   const spaceBelow = window.innerHeight - rect.bottom - GAP - MARGIN;
   const spaceAbove = rect.top - GAP - MARGIN;
-  const width = Math.max(rect.width, menuForm.value ? 200 : props.checkbox ? 190 : 120);
+  const width = Math.max(props.menuWidth ?? 0, rect.width, menuForm.value ? 200 : props.checkbox ? 190 : 120);
   const left = Math.min(Math.max(MARGIN, rect.left), Math.max(MARGIN, window.innerWidth - width - MARGIN));
-  if (spaceBelow < Math.min(MAX, 140) && spaceAbove > spaceBelow) {
+  if (spaceBelow < Math.min(140, cap) && spaceAbove > spaceBelow) {
     menuStyle.value = {
       position: "fixed",
       left: `${left}px`,
       bottom: `${window.innerHeight - rect.top + GAP}px`,
       width: `${width}px`,
-      maxHeight: `${Math.min(MAX, spaceAbove)}px`,
+      maxHeight: `${Math.min(cap, Math.max(80, spaceAbove))}px`,
       top: "auto",
     };
   } else {
@@ -140,7 +157,7 @@ function place() {
       left: `${left}px`,
       top: `${rect.bottom + GAP}px`,
       width: `${width}px`,
-      maxHeight: `${Math.min(MAX, Math.max(80, spaceBelow))}px`,
+      maxHeight: `${Math.min(cap, Math.max(80, spaceBelow))}px`,
       bottom: "auto",
     };
   }
@@ -273,8 +290,15 @@ onBeforeUnmount(() => {
           @keydown.enter.prevent="pickFirstMatch"
           @keydown.esc.stop="setOpen(false)"
         />
-        <!-- 动作行（平台菜单顶部：＋ New column，之下一条分隔线） -->
-        <template v-if="action">
+        <!-- 静态面板标题（平台的「+ Add field」头部：纯提示，不可点） -->
+        <div v-if="panelTitle" class="dd-title">
+          <EditorIcon v-if="panelTitle.icon" :name="panelTitle.icon" />
+          <span class="dd-act-label">{{ panelTitle.label }}</span>
+        </div>
+        <div v-if="panelTitle && sections.length" class="dd-sep"></div>
+        <!-- 动作行（平台看板 ＋ 菜单顶部：＋ New column，之下一条分隔线）；
+             actionBottom = 动作沉底（平台 Add field 面板的 New field 在列表末尾） -->
+        <template v-if="action && !actionBottom">
           <button class="dd-act" type="button" role="menuitem" @click="pickAction(action)">
             <EditorIcon v-if="action.icon" :name="action.icon" />
             <span class="dd-act-label">{{ action.label }}</span>
@@ -292,25 +316,47 @@ onBeforeUnmount(() => {
             :aria-selected="isOpen(option.value)"
             @click="pick(option)"
           >
-            <!-- 平台菜单形态：行首 ✓（选中可见，未选中留位对齐） -->
-            <EditorIcon
-              v-if="menuForm"
-              name="o.check"
-              class="dd-lead"
-              :class="{ on: isOpen(option.value) }"
-            />
-            <EditorIcon v-else-if="option.icon" :name="option.icon" />
-            <span v-if="option.color" class="dd-dot" :style="{ background: dotColor(option.color) }"></span>
-            <span class="dd-row-label">{{ option.label }}</span>
+            <!-- 平台菜单形态：行首 ✓（选中可见，未选中留位对齐）；
+                 checkboxStart 变体（Add field 面板）：行首方框勾选，后随图标+名称 -->
             <span
-              v-if="checkbox"
+              v-if="checkbox && checkboxStart"
               class="dd-checkbox"
               :class="{ on: isOpen(option.value) }"
               aria-hidden="true"
             >
               <EditorIcon v-if="isOpen(option.value)" name="o.check" />
             </span>
-            <span v-else-if="!menuForm" class="dd-check" :class="{ on: isOpen(option.value) }">✓</span>
+            <EditorIcon
+              v-else-if="menuForm"
+              name="o.check"
+              class="dd-lead"
+              :class="{ on: isOpen(option.value) }"
+            />
+            <EditorIcon v-else-if="option.icon && !checkbox" :name="option.icon" />
+            <!-- checkboxStart 行的字段图标：独立分支（不能挂在前一方框的 v-else-if 上） -->
+            <EditorIcon
+              v-if="checkbox && checkboxStart && option.icon"
+              :name="option.icon"
+            />
+            <span v-if="option.color" class="dd-dot" :style="{ background: dotColor(option.color) }"></span>
+            <span class="dd-row-label">{{ option.label }}</span>
+            <span
+              v-if="checkbox && !checkboxStart"
+              class="dd-checkbox"
+              :class="{ on: isOpen(option.value) }"
+              aria-hidden="true"
+            >
+              <EditorIcon v-if="isOpen(option.value)" name="o.check" />
+            </span>
+            <span v-else-if="!menuForm && !checkbox" class="dd-check" :class="{ on: isOpen(option.value) }">✓</span>
+          </button>
+        </template>
+        <!-- 沉底动作行（平台 Add field 面板的 New field 在列表末尾） -->
+        <template v-if="action && actionBottom">
+          <div class="dd-sep"></div>
+          <button class="dd-act" type="button" role="menuitem" @click="pickAction(action)">
+            <EditorIcon v-if="action.icon" :name="action.icon" />
+            <span class="dd-act-label">{{ action.label }}</span>
           </button>
         </template>
         <p v-if="groups.length === 0" class="dd-empty">{{ t("issue.noneAvailable") }}</p>
@@ -467,6 +513,16 @@ onBeforeUnmount(() => {
   font-family: inherit;
   text-align: left;
   cursor: pointer;
+}
+/* 静态面板标题（平台的「+ Add field」头部）：同动作行版式，纯提示不可点、无 hover */
+.dd-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  height: 32px;
+  padding: 0 8px;
+  color: var(--text);
 }
 .dd-act:hover {
   background: var(--bg-hover);
