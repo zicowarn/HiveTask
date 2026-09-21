@@ -14,6 +14,7 @@ import { useProjectsStore } from "../../stores/projects";
 import { api, type ProjectItem } from "../../api";
 import { useI18n } from "../../i18n";
 import { itemTitle } from "../item-fields";
+import { collectMarkers, collectDateMarkers, type RoadmapMarker } from "./roadmap-markers";
 import EditorIcon from "../../components/EditorIcon.vue";
 import DropdownMenu from "../../components/DropdownMenu.vue";
 import ActionMenu, { type ActionItem } from "../../components/ActionMenu.vue";
@@ -127,6 +128,54 @@ const todayIndex = computed(() => {
   return days.value.findIndex((d) => d.getTime() === t0.getTime());
 });
 
+// ---- Markers → 标记（平台弹窗：标题 + 三行开关；里程碑 = 绿线压截止日
+// 列尾 + 界线菱形 + 月带标题；开始/结束日期 = 日号下方深色小三角，每个
+// 不同日期一个。迭代标记无迭代字段数据通道，不列）。----
+const markerSections = [
+  {
+    title: t("roadmap.markers"),
+    options: [
+      { value: "milestones", label: t("roadmap.markersMilestones") },
+      { value: "start", label: t("roadmap.markersStartDate") },
+      { value: "due", label: t("roadmap.markersDueDate") },
+    ],
+  },
+];
+const markerValue = computed(() =>
+  [
+    store.view.markersMilestones && "milestones",
+    store.view.markersStartDate && "start",
+    store.view.markersDueDate && "due",
+  ].filter((v): v is string => !!v),
+);
+function onMarkersPick(value: string | string[]) {
+  const arr = Array.isArray(value) ? value : [value];
+  store.setMarkersMilestones(arr.includes("milestones"));
+  store.setMarkersStartDate(arr.includes("start"));
+  store.setMarkersDueDate(arr.includes("due"));
+  // 勾选动作即补拉（首次可能网络失败过；成功仓库走缓存，不重复请求）
+  if (arr.includes("milestones")) void store.loadRoadmapMilestones();
+}
+const markers = computed(() =>
+  store.view.markersMilestones
+    ? collectMarkers(filteredItems.value, store.roadmapMilestoneMeta)
+    : [],
+);
+const startTris = computed(() =>
+  store.view.markersStartDate ? collectDateMarkers(filteredItems.value, activeDateField.value?.id) : [],
+);
+const dueTris = computed(() =>
+  store.view.markersDueDate ? collectDateMarkers(filteredItems.value, endField.value?.id) : [],
+);
+/** 截止日的列尾（平台实测：05-25 线落在 25|26 日界上——due = 当日结束）。 */
+function markerLeft(m: RoadmapMarker): number {
+  return fieldW.value + offsetOf(new Date(m.date + "T00:00:00")) + dayWidth.value;
+}
+/** 日期小三角：日号正下方（列中心，平台实测「在 20、21、3 下方」）。 */
+function triLeft(dateIso: string): number {
+  return fieldW.value + offsetOf(new Date(dateIso + "T00:00:00")) + dayWidth.value / 2;
+}
+
 // ---- 泳道维度（如优先级）分组：激活时按选项分组渲染，无值段置底；
 // 行号跨组连续；展开/收起与 Table 分组共用 isLaneCollapsed ----
 const swimGrouped = computed(() => !!store.swimlaneField);
@@ -160,12 +209,16 @@ const roadmapGroups = computed(() => {
 });
 
 // ---- 范围覆盖条目日期：卡片日期早于/晚于当前范围时自动扩张（只增不减，
-// 不动用户视口）。否则卡片画在画布负坐标区——← 箭头亮着却永远跳不到。----
-watch([filteredItems, activeDateField], () => {
-  const times = filteredItems.value
-    .map(dateOf)
-    .filter((d): d is Date => !!d)
-    .map((d) => d.getTime());
+// 不动用户视口）。否则卡片画在画布负坐标区——← 箭头亮着却永远跳不到。
+// 里程碑标记线日期同样并入（否则线画在画布外永远看不到）。----
+watch([filteredItems, activeDateField, markers], () => {
+  const times = [
+    ...filteredItems.value
+      .map(dateOf)
+      .filter((d): d is Date => !!d)
+      .map((d) => d.getTime()),
+    ...markers.value.map((m) => new Date(m.date + "T00:00:00").getTime()),
+  ];
   if (!times.length) return;
   const min = Math.min(...times);
   const max = Math.max(...times);
@@ -470,26 +523,40 @@ watch([activeDateField, scrollEl], () => {
 });
 onMounted(() => {
   updateView();
+  void store.loadRoadmapMilestones();
   window.addEventListener("resize", updateView);
 });
+// 渲染集变化（切项目 / 刷新 / 同步 / 筛选）后补拉新出现的仓库；
+// 失败仓库不进缓存 → 每次触发自动重试（首次网络抖动不致「永远无线」）
+watch(filteredItems, () => void store.loadRoadmapMilestones());
 onBeforeUnmount(() => {
   window.removeEventListener("resize", updateView);
   window.clearTimeout(viewTimer);
 });
-
-function onMarkersClick() {
-  pushToast({ kind: "info", message: t("roadmap.markersTodo") });
-}
 </script>
 
 <template>
   <div class="rm">
     <!-- 工具栏（平台右对齐：Markers / Sort / Date fields / Month / Today / ‹ ›） -->
     <div class="rm-toolbar">
-      <button class="rm-tbtn" :title="t('roadmap.markers')" @click="onMarkersClick">
-        <EditorIcon name="o.location" />
-        <span>{{ t("roadmap.markers") }}</span>
-      </button>
+      <DropdownMenu
+        class="rm-dd"
+        :sections="markerSections"
+        multiple
+        checkbox
+        :model-value="markerValue"
+        @update:model-value="onMarkersPick"
+      >
+        <template #trigger="{ toggle }">
+          <button class="rm-tbtn" :title="t('roadmap.markers')" @click="toggle">
+            <span class="rm-mk-ico" :class="{ on: markerValue.length }">
+              <EditorIcon name="o.pin" />
+              <i class="rm-mk-dot"></i>
+            </span>
+            <span>{{ t("roadmap.markers") }}</span>
+          </button>
+        </template>
+      </DropdownMenu>
       <DropdownMenu
         class="rm-dd"
         :options="sortOptions"
@@ -549,6 +616,39 @@ function onMarkersClick() {
               <span class="rm-month">{{ m.label }}</span>
             </span>
           </div>
+          <!-- 里程碑标签带（平台表头三段式：月行 / 标签带 / 日号行）：
+               开启且有线时出现、取消勾选即消失——表头高度对称恢复（用户口径）。
+               标签带只认 markers.length（开启但暂无数据时不留空带） -->
+          <div v-if="markers.length" class="rm-mk-band">
+            <span
+              v-for="m in markers"
+              :key="m.key"
+              class="rm-mk-label"
+              :style="{ left: markerLeft(m) + 'px' }"
+            >{{ m.title }}</span>
+          </div>
+          <!-- 里程碑菱形（表头层内 top:100% = 底缘，随标签带出入自动跟随）
+               + 日期三角贴表头底缘 -->
+          <template v-if="markers.length || startTris.length || dueTris.length">
+            <span
+              v-for="m in markers"
+              :key="m.key + '-node'"
+              class="rm-mk-node"
+              :style="{ left: markerLeft(m) + 'px' }"
+            ></span>
+            <span
+              v-for="d in startTris"
+              :key="'tri-s-' + d"
+              class="rm-mk-tri"
+              :style="{ left: triLeft(d) + 'px' }"
+            ></span>
+            <span
+              v-for="d in dueTris"
+              :key="'tri-d-' + d"
+              class="rm-mk-tri"
+              :style="{ left: triLeft(d) + 'px' }"
+            ></span>
+          </template>
           <div class="rm-days">
             <!-- 手柄必须是最早的流内位置（行首）：sticky 只能把元素"推到"
                  left 界线处、不能从右侧拉回——放行尾会被推到画布末端不可见 -->
@@ -584,6 +684,28 @@ function onMarkersClick() {
             :style="{ left: i * dayWidth + 'px', width: dayWidth + 'px' }"
           ></div>
         </div>
+        <!-- 里程碑线（条目区段）：随包装层顶 = 表头底（top:0，band 出入自动
+              跟随）；z-1 + DOM 在网格层之后 = 灰底之上、行/卡片之下（平台层序） -->
+        <div
+          v-for="m in markers"
+          :key="m.key"
+          class="rm-mk-line"
+          :style="{ left: markerLeft(m) + 'px' }"
+        ></div>
+        <!-- 开始/结束日期线（用户实锤：平台 item dates 同为垂直线，不止三角；
+             深色与里程碑绿区分，三角锚点在表头 + 线贯穿内容区，同层序） -->
+        <template v-for="d in startTris" :key="'dline-s-' + d">
+          <div
+            class="rm-mk-dline"
+            :style="{ left: triLeft(d) + 'px' }"
+          ></div>
+        </template>
+        <template v-for="d in dueTris" :key="'dline-d-' + d">
+          <div
+            class="rm-mk-dline"
+            :style="{ left: triLeft(d) + 'px' }"
+          ></div>
+        </template>
         <!-- 泳道维度（如优先级）激活：按选项分组渲染，组间 12px 灰底间隙、
              组头带折叠/计数/汇总（与 Table 分组同机制）。
              整个条目区包一层 relative（rm-lanes）：今日红线以其为参照，
@@ -864,6 +986,82 @@ function onMarkersClick() {
 .rm-days {
   height: 32px;
   border-bottom: 1px solid var(--border);
+}
+/* ---- 里程碑标记（平台表头三段式：月行 40 / 标签带 30 / 日号行 32；标签带
+   开启且有线时出现、取消即消失 = 高度对称恢复；菱形/三角 bottom 贴缘、线 top:0 随包装层）---- */
+.rm-mk-band {
+  position: relative;
+  height: 30px;
+}
+.rm-mk-ico {
+  position: relative;
+  display: inline-flex;
+}
+.rm-mk-ico .rm-mk-dot {
+  display: none;
+  position: absolute;
+  right: -2px;
+  bottom: -1px;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+.rm-mk-ico.on .rm-mk-dot {
+  display: block; /* 平台：标记开启时图标角上的指示圆点 */
+}
+.rm-mk-label {
+  position: absolute;
+  top: 0;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  transform: translateX(-50%);
+  font-size: var(--font-sm);
+  color: var(--success);
+  white-space: nowrap;
+  pointer-events: none;
+}
+.rm-mk-node {
+  position: absolute;
+  top: 100%; /* 骑在表头底缘（百分比随标签带出入自动跟随）；head z-2 内完整可见 */
+  width: 7px;
+  height: 7px;
+  background: var(--success);
+  transform: translate(-50%, -50%) rotate(45deg);
+  pointer-events: none;
+}
+.rm-mk-line {
+  position: absolute;
+  top: 0; /* 内容区顶 = 表头底（流内表头撑开包装层，band 出入自动跟随） */
+  bottom: 0;
+  width: 1px;
+  background: var(--success);
+  z-index: 1; /* DOM 在网格层后 + 同 z = 灰底(不透明 z-1)之上、行(z-2)/卡片(transform)之下 */
+  pointer-events: none;
+}
+/* 开始/结束日期线：同族垂直线，深色与里程碑绿区分（列中心对齐三角） */
+.rm-mk-dline {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--text);
+  opacity: 0.4;
+  z-index: 1;
+  pointer-events: none;
+}
+/* 开始/结束日期标记：日号下方的深色小三角（tip 贴表头底缘） */
+.rm-mk-tri {
+  position: absolute;
+  bottom: -5px;
+  width: 0;
+  height: 0;
+  border-left: 4px solid transparent;
+  border-right: 4px solid transparent;
+  border-top: 5px solid var(--text);
+  transform: translateX(-50%);
+  pointer-events: none;
 }
 /* 手柄：sticky 钉在字段列右缘（= 日界，列宽按整天吸附），居中于界线；
    平台形态 = ⇔ 图标 + 悬停提示「拖拽调整表格列宽」 */

@@ -75,6 +75,13 @@ export interface ProjectViewConfig {
   collapsedLanes: string[];
   /** Roadmap：结束日期字段 id（配合开始日期字段画区间条；null = 单点）。 */
   dateEndFieldId: string | null;
+  /** Roadmap 标记开关（平台 Markers 菜单三行：milestones / Start date /
+   *  Due date；迭代标记无迭代字段数据通道，菜单不列）。 */
+  markersMilestones?: boolean;
+  /** Roadmap：开始/结束日期标记开关（平台 Markers → Start date / Due date，
+   *  日号下方的深色小三角；取值 = 视图选定的开始/结束日期字段）。 */
+  markersStartDate?: boolean;
+  markersDueDate?: boolean;
   /** 逐字段排序（平台的 Sort ascending/descending）；null = 用上面的通用排序。 */
   fieldSort: { fieldId: string; desc: boolean } | null;
   /** Team items 切片（平台 Slicer）：字段键（viewKey 语义，见 store）+
@@ -103,6 +110,9 @@ export function defaultViewConfig(): ProjectViewConfig {
     columnLimits: {},
     collapsedLanes: [],
     dateEndFieldId: null,
+    markersMilestones: false,
+    markersStartDate: false,
+    markersDueDate: false,
     fieldSort: null,
     sliceFieldId: null,
     sliceValue: null,

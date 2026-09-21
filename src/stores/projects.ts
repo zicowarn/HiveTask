@@ -6,8 +6,10 @@
 import { defineStore } from "pinia";
 import { translateError } from "../gh-errors";
 import { computed, ref, watch } from "vue";
-import { api, type BoundRepo, type FieldOption, type Project, type ProjectField, type ProjectItem } from "../api";
+import { api, type BoundRepo, type FieldOption, type MilestoneInfo, type Project, type ProjectField, type ProjectItem } from "../api";
 import { isTauri } from "../api";
+import { pushToast } from "../toast";
+import { useI18n } from "../i18n";
 import type { ProjectLayout, ProjectViewConfig, ProjectViewEntry } from "../panels/project-views";
 import {
   defaultViewConfig,
@@ -127,6 +129,66 @@ export const useProjectsStore = defineStore("projects", () => {
   }
   function setDateEndFieldId(id: string | null) {
     view.value.dateEndFieldId = id;
+  }
+  /** Roadmap 标记开关（平台 Markers 菜单：里程碑 / 开始日期 / 结束日期）。 */
+  function setMarkersMilestones(on: boolean) {
+    view.value.markersMilestones = on;
+  }
+  function setMarkersStartDate(on: boolean) {
+    view.value.markersStartDate = on;
+  }
+  function setMarkersDueDate(on: boolean) {
+    view.value.markersDueDate = on;
+  }
+
+  // ---- Roadmap 里程碑标记线元数据：条目引用的里程碑 → due_on ----
+  /** 反应式快照（repoId → 该仓库里程碑列表 + 显示名）；供标记线投影。 */
+  const roadmapMilestoneMeta = ref<Record<string, { label: string; list: MilestoneInfo[] }>>({});
+  /** 会话级缓存：同一仓库只拉一次（对齐 issues store 里程碑元数据的
+   *  「首访拉取、缓存到会话结束」语义；失败仓库静默跳过——标记线是投影，
+   *  不是数据义务）。 */
+  const milestoneMetaCache = new Map<string, { label: string; list: MilestoneInfo[] }>();
+  async function loadRoadmapMilestones() {
+    if (!isTauri()) return;
+    // repoId → target 从**登记表**解析，不依赖项目绑定（project_repos）：
+    // 线上导入的项目条目自带 repo_id，但从未手动绑定仓库 → boundRepos 为空，
+    // 曾因此静默不拉取（无 toast、无线）。条目引用的仓库必然在 repos 表。
+    const targets = new Map<string, string>(); // repoId → target（path / remote_url）
+    const labels = new Map<string, string>();
+    const wanted = new Set<string>();
+    for (const it of items.value) {
+      if (it.repoId && it.entity?.milestone) wanted.add(it.repoId);
+    }
+    if (!wanted.size) return;
+    const pending = [...wanted].filter((id) => !milestoneMetaCache.has(id));
+    if (!pending.length) return;
+    const { t } = useI18n();
+    try {
+      for (const row of await api.repoList()) {
+        const target = row.path || row.remoteUrl || "";
+        if (row.id && target && pending.includes(row.id)) {
+          targets.set(row.id, target);
+          labels.set(row.id, row.displayName || target.split("/").filter(Boolean).pop() || target);
+        }
+      }
+    } catch (e) {
+      console.warn("loadRoadmapMilestones: repoList failed", e);
+      return;
+    }
+    await Promise.all(
+      [...targets.entries()].map(async ([repoId, target]) => {
+        const label = labels.get(repoId) ?? target;
+        try {
+          milestoneMetaCache.set(repoId, { label, list: await api.milestoneList(target) });
+        } catch (e) {
+          // 失败不进缓存（下次触发会重试），但必须可见——静默吞掉曾导致
+          // 「勾了里程碑却无线」且无从排查（应用内 gh 间歇 EOF，命令行正常）。
+          console.warn("loadRoadmapMilestones failed:", target, e);
+          pushToast({ kind: "info", message: t("project.milestoneFetchFail", { repo: label }) });
+        }
+      }),
+    );
+    roadmapMilestoneMeta.value = Object.fromEntries(milestoneMetaCache);
   }
   function setColumnFieldId(id: string | null) {
     view.value.columnFieldId = id;
@@ -1046,6 +1108,11 @@ export const useProjectsStore = defineStore("projects", () => {
     setSortDesc,
     setColumnFieldId,
     setDateEndFieldId,
+    setMarkersMilestones,
+    setMarkersStartDate,
+    setMarkersDueDate,
+    roadmapMilestoneMeta,
+    loadRoadmapMilestones,
     setFieldSort,
     addFieldFilter,
     toggleField,
