@@ -98,11 +98,16 @@ export function renderTableHtml(table: ParsedTable): string {
 }
 
 export class TableWidget extends WidgetType {
+  /** 编辑会话：该表格正在被直接编辑（按起始行号识别；重算时沿用同一 widget，保住 DOM 与焦点）。 */
+  static editing: { startLine: number; widget: TableWidget } | null = null;
+
   constructor(
     readonly source: string,
     private readonly options?: {
       /** 表格在文档中的范围（直接编辑写回用）。 */
       range?: { from: number; to: number };
+      /** 表格起始行号（1 基）——编辑会话的身份标识。 */
+      startLine?: number;
       /** 双击/按钮 → 打开网格编辑器（宿主注入；widget 不 import bus，避免循环依赖）。 */
       onEdit?: () => void;
     },
@@ -194,7 +199,12 @@ export class TableWidget extends WidgetType {
         ev.stopPropagation();
         // CM6 的 mousedown handler 会在编辑器无焦点时 blur 掉 activeElement 并
         // 抢焦点到 contentDOM（focusPreventScroll + active.blur）——把焦点再抢回来。
-        setTimeout(() => cell.focus(), 0);
+        // 同时声明编辑会话：装饰重算时沿用同一 widget，DOM 与焦点才不会被重建冲掉。
+        TableWidget.editing = { startLine: this.options?.startLine ?? -1, widget: this };
+        setTimeout(() => {
+          cell.focus();
+          cell.classList.add("cm-kb-cell--focus");
+        }, 0);
       },
       { capture: true },
     );
@@ -210,7 +220,11 @@ export class TableWidget extends WidgetType {
       if (timer !== null) window.clearTimeout(timer);
       timer = window.setTimeout(flush, 600);
     });
-    cell.addEventListener("blur", flush);
+    cell.addEventListener("blur", () => {
+      cell.classList.remove("cm-kb-cell--focus");
+      TableWidget.editing = null;
+      flush();
+    });
     // Enter 换行会劈碎表格行——吞掉（Shift+Enter 也吞；要换行用 <br> 的场景去源码模式）
     cell.addEventListener("keydown", (ev) => {
       if (ev.key === "Enter") {
@@ -262,9 +276,25 @@ export function tableItems(state: EditorState, onEdit?: () => void): RenderItem[
       // 这个中间态。源码编辑走源码模式（livePreview 关）或网格对话框（铅笔）。
       // （旧规则"光标进范围即撤销 widget"已删：它是"点两下变源码"的直接根源。）
       const source = state.doc.sliceString(node.from, node.to);
+      // 装饰重算会新建 widget → DOM 重建 → 编辑中的焦点/类丢失。编辑会话期间
+      // **沿用同一个 widget 实例**，让 CM6 按 eq() 判定 DOM 可复用。
       if (!parseTable(source)) return;
+      // 装饰重算会新建 widget → DOM 重建 → 编辑中的焦点/类丢失。编辑会话期间
+      // **沿用同一个 widget 实例**，让 CM6 按 eq() 判定 DOM 可复用。
       const first = state.doc.lineAt(node.from);
       const last = state.doc.lineAt(node.to);
+      if (TableWidget.editing && TableWidget.editing.startLine === first.number) {
+        const live = TableWidget.editing.widget;
+        if (live.source === source) {
+          items.push({
+            from: first.from,
+            to: last.to,
+            deco: Decoration.replace({ block: true, widget: live }),
+          });
+          return;
+        }
+        TableWidget.editing = null; // 内容变了（如写回后的新状态），让新 widget 接管
+      }
       items.push({
         from: first.from,
         to: last.to,
@@ -272,6 +302,7 @@ export function tableItems(state: EditorState, onEdit?: () => void): RenderItem[
           block: true,
           widget: new TableWidget(source, {
             range: { from: first.from, to: last.to },
+            startLine: first.number,
             onEdit,
           }),
         }),
@@ -291,6 +322,13 @@ export const tableTheme = EditorView.baseTheme({
     verticalAlign: "top",
   },
   ".cm-kb-table th": { backgroundColor: "var(--bg-app)", fontWeight: "600" },
+  // 可编辑单元格：聚焦 = 1px 内描边 + 极淡强调底（与网格对话框 .tbl__focus 同一口径）；
+  // 去掉浏览器默认的系统蓝 outline（用户截图里那个粗框）
+  ".cm-kb-cell": { outline: "none", padding: "0", minHeight: "1em" },
+  ".cm-kb-cell.cm-kb-cell--focus": {
+    boxShadow: "inset 0 0 0 1px var(--accent)",
+    backgroundColor: "var(--accent-soft)",
+  },
   ".cm-kb-table code": {
     fontFamily: "var(--kb-mono)",
     fontSize: "0.92em",
