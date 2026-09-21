@@ -910,12 +910,14 @@ onBeforeUnmount(() => {
   overflow: hidden;
 }
 /* 工具栏：覆盖在月标签行右端的吸附层（平台同款——月标签与「标记」同行，
-   标签随时间轴滚动、滑到「标记」图标处被不透明底遮住进入隐藏） */
+   标签随时间轴滚动、滑到「标记」图标处被不透明底遮住进入隐藏）。
+   z20 必须高于吸顶表头（z10）：表头是不透明白底且跨满全宽，
+   层级低了会把工具栏整段盖没（实测翻车） */
 .rm-toolbar {
   position: absolute;
   top: 0;
   right: 10px;
-  z-index: 8;
+  z-index: 20;
   display: flex;
   align-items: center;
   justify-content: flex-end;
@@ -964,12 +966,13 @@ onBeforeUnmount(() => {
   display: flex;
   flex-direction: column;
 }
-/* 表头（吸顶层）：横贯全宽（字段列上方也是日期刻度），层级低于字段列——
-   水平滚动后由吸附的字段列盖住左段（平台同款） */
+/* 表头（吸顶层）：横贯全宽（字段列上方也是日期刻度）。层级必须在**内容层之上**：
+   z10 > 行(z2)/悬停行(z7)/组头·字段列·添加行(z3)——垂直滚动时行从下方穿过表头，
+   层级低了白字段格与卡片会盖掉日期行、里程碑标签带（只在卡片缝隙透出日号，实测翻车） */
 .rm-head {
   position: sticky;
   top: 0;
-  z-index: 2;
+  z-index: 10;
   background: var(--bg-panel);
   /* 表头是 UI 刻度不是内容：拖拽手柄时不得触发原生文本选择 */
   user-select: none;
