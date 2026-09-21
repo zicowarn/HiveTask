@@ -189,22 +189,18 @@ export class TableWidget extends WidgetType {
     cell.contentEditable = "plaintext-only";
     cell.style.textAlign = align ?? "left";
     cell.textContent = text;
-    // ⚠️ 必须 preventDefault + 捕获：CM6 在自己的 mousedown 处理里会把光标挪进表格范围，
-    // 触发装饰重算 → 塌回源码（用户实测"点一下就进源码"）。阻止默认定位，焦点交给
-    // contenteditable 单元格自己。
+    // ⚠️ 光标定位交给**浏览器原生行为**：不 preventDefault，WebKit 会把光标精确放到
+    // 点击处（命中文字=该位置；点空白=最近位置）。我们只做两件事：
+    // ① stopPropagation——拦住 CM6 的 mousedown handler（它会抢焦点并 blur 单元格）；
+    // ② 声明编辑会话 + 补聚焦类（装饰重算时沿用同一 widget，DOM 不被重建）。
+    // ⚠️ 不用 caretRangeFromPoint 手工定位：实测在 WKWebView 的 plaintext-only
+    // contenteditable 里几何命中不可靠，原生定位反而准确。
     cell.addEventListener(
       "mousedown",
       (ev) => {
-        ev.preventDefault();
         ev.stopPropagation();
-        // CM6 的 mousedown handler 会在编辑器无焦点时 blur 掉 activeElement 并
-        // 抢焦点到 contentDOM（focusPreventScroll + active.blur）——把焦点再抢回来。
-        // 同时声明编辑会话：装饰重算时沿用同一 widget，DOM 与焦点才不会被重建冲掉。
         TableWidget.editing = { startLine: this.options?.startLine ?? -1, widget: this };
-        setTimeout(() => {
-          cell.focus();
-          cell.classList.add("cm-kb-cell--focus");
-        }, 0);
+        cell.classList.add("cm-kb-cell--focus");
       },
       { capture: true },
     );
