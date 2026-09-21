@@ -302,8 +302,11 @@ export const tableTheme = EditorView.baseTheme({
   // 悬停浮现的「编辑」按钮：右上角小铅笔
   ".cm-kb-table-edit": {
     position: "absolute",
-    top: "4px",
-    right: "4px",
+    /* icon 整体在表格上方：底边贴 <table> 顶边（wrap 有 6px 顶 padding，用 top:0 起），
+       右缘与 <table> 右缘对齐（wrap 无右 padding，right:0 即表格右缘） */
+    top: "6px",
+    transform: "translateY(-100%)",
+    right: "0",
     display: "inline-flex",
     alignItems: "center",
     justifyContent: "center",
