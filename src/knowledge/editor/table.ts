@@ -187,10 +187,22 @@ export class TableWidget extends WidgetType {
     cell.contentEditable = "plaintext-only";
     cell.style.textAlign = align ?? "left";
     cell.textContent = text;
-    cell.addEventListener("mousedown", (ev) => ev.stopPropagation());
-    cell.addEventListener("focus", () => {
+    // ⚠️ 必须 preventDefault + 捕获：CM6 在自己的 mousedown 处理里会把光标挪进表格范围，
+    // 触发装饰重算 → 塌回源码（用户实测"点一下就进源码"）。阻止默认定位，焦点交给
+    // contenteditable 单元格自己。
+    cell.addEventListener(
+      "mousedown",
+      (ev) => {
+        ev.preventDefault();
+        ev.stopPropagation();
+      },
+      { capture: true },
+    );
+    const claimSession = (): void => {
       TableWidget.editing = { from: range.from, to: range.to, widget: this };
-    });
+    };
+    cell.addEventListener("mousedown", claimSession, { capture: true });
+    cell.addEventListener("focus", claimSession);
     let timer: number | null = null;
     const flush = (): void => {
       if (timer !== null) {
