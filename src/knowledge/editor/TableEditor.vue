@@ -368,14 +368,14 @@ function onKeydown(e: KeyboardEvent) {
   background: var(--bg-chip);
 }
 .tbl__focus {
-  outline: 2px solid var(--accent);
-  outline-offset: -2px;
+  outline: none;
+  box-shadow: inset 0 0 0 1px var(--accent);
+  background: var(--accent-soft);
 }
 .tbl__cell {
-  min-width: 90px;
+  min-width: 40px;
   max-width: 260px;
-  min-height: 26px;
-  padding: 4px 8px;
+  padding: 3px 6px;
   font-size: var(--font-md);
   color: var(--text);
   outline: none;
