@@ -205,6 +205,9 @@ impl Source for GhSource {
     fn update_milestone(&self, repo: &RepoRef, number: i64, title: &str, description: Option<&str>, due_on: Option<&str>) -> Result<crate::models::MilestoneInfo> {
         update_milestone(&format!("{}/{}", repo.owner, repo.repo), number, title, description, due_on)
     }
+    fn fetch_issue_relations(&self, repo: &RepoRef, number: &str) -> Result<crate::models::IssueRelations> {
+        fetch_issue_relations(&format!("{}/{}", repo.owner, repo.repo), number)
+    }
 }
 
 /// 过滤器的 gh 方言（恰好与前端口径一致）。
@@ -295,6 +298,69 @@ fn parse_issue_value(v: &Value) -> Issue {
         url: string_field(v, "url"),
     }
 }
+
+/// Issue 关系（依赖 blockedBy/blocking + 父子 subIssues/subIssuesSummary）
+/// ——**详情级按需拉取**：嵌套连接进列表必炸 node budget（PR_LIST_FIELDS
+/// 的教训）；且关系数据只被详情面板与甘特用，列表不需要。
+///
+/// 一次 GraphQL 取全四类；子 Issue 只取前 50（平台 UI 同样折叠展示）。
+pub fn fetch_issue_relations(slug: &str, number: &str) -> Result<crate::models::IssueRelations> {
+    let (owner, repo) = slug
+        .split_once('/')
+        .ok_or_else(|| anyhow!("仓库 slug 形态异常: {slug}"))?;
+    let n: u64 = number
+        .parse()
+        .map_err(|_| anyhow!("Issue 编号非数字（该来源可能不支持关系数据）: {number}"))?;
+    let query = format!(
+        "query{{ repository(owner:\"{owner}\",name:\"{repo}\"){{ issue(number:{n}){{ \
+         blockedBy(first:50){{ nodes{{ number title state }} }} \
+         blocking(first:50){{ nodes{{ number title state }} }} \
+         parent{{ number title state }} \
+         subIssues(first:50){{ nodes{{ number title state }} }} \
+         subIssuesSummary{{ total completed }} \
+         }} }} }}"
+    );
+    let stdout = run_gh(&["api", "graphql", "-f", &format!("query={query}")])?;
+    let v: Value = serde_json::from_str(&stdout).context("解析 gh api graphql（关系）输出失败")?;
+    let issue = &v["data"]["repository"]["issue"];
+    if issue.is_null() {
+        return Err(anyhow!("仓库或 Issue 不可见（关系数据拉取失败）"));
+    }
+    Ok(parse_relations_value(issue))
+}
+
+fn parse_relations_value(issue: &Value) -> crate::models::IssueRelations {
+    use crate::models::{IssueRef, IssueRelations, SubIssueSummary};
+    let refs = |conn: &Value| -> Vec<IssueRef> {
+        conn["nodes"]
+            .as_array()
+            .map(|arr| arr.iter().filter_map(parse_issue_ref).collect())
+            .unwrap_or_default()
+    };
+    let parent = parse_issue_ref(&issue["parent"]);
+    let summary = &issue["subIssuesSummary"];
+    let sub_summary = match (summary["total"].as_i64(), summary["completed"].as_i64()) {
+        (Some(total), Some(completed)) if total > 0 => Some(SubIssueSummary { total, completed }),
+        _ => None,
+    };
+    IssueRelations {
+        blocked_by: refs(&issue["blockedBy"]),
+        blocking: refs(&issue["blocking"]),
+        parent,
+        sub_issues: refs(&issue["subIssues"]),
+        sub_summary,
+    }
+}
+
+fn parse_issue_ref(v: &Value) -> Option<crate::models::IssueRef> {
+    let number = v["number"].as_u64()?;
+    Some(crate::models::IssueRef {
+        number: number.to_string(),
+        title: v["title"].as_str().unwrap_or_default().to_string(),
+        state: v["state"].as_str().unwrap_or("OPEN").to_string(),
+    })
+}
+
 
 /// Minimal fields for `gh pr list --json`. Nested connections (reviews,
 /// reviewRequests, commits, comments, labels, assignees, body) must stay out:
@@ -1272,6 +1338,58 @@ pub fn git_origin(repo: &Path) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// 关系解析（GraphQL 输出形状）：四类齐全 → 全量映射，state 取原样。
+    #[test]
+    fn relations_parse_full_shape() {
+        let v: Value = serde_json::from_str(
+            r#"{
+              "blockedBy": {"nodes": [{"number": 7, "title": "阻塞者", "state": "OPEN"}]},
+              "blocking": {"nodes": [{"number": 9, "title": "被阻塞", "state": "CLOSED"}]},
+              "parent": {"number": 3, "title": "父", "state": "OPEN"},
+              "subIssues": {"nodes": [{"number": 11, "title": "子", "state": "OPEN"}]},
+              "subIssuesSummary": {"total": 2, "completed": 1}
+            }"#,
+        )
+        .unwrap();
+        let r = parse_relations_value(&v);
+        assert_eq!(r.blocked_by.len(), 1);
+        assert_eq!(r.blocked_by[0].number, "7");
+        assert_eq!(r.blocking[0].state, "CLOSED");
+        assert_eq!(r.parent.unwrap().title, "父");
+        assert_eq!(r.sub_issues.len(), 1);
+        let s = r.sub_summary.unwrap();
+        assert_eq!((s.total, s.completed), (2, 1));
+    }
+
+    /// 空关系（无依赖/无父子）：nodes 空数组 + summary 0/0 → 全空。
+    /// summary total=0 不出进度（前端不显示「0/0」）。
+    #[test]
+    fn relations_parse_empty_shape() {
+        let v: Value = serde_json::from_str(
+            r#"{"blockedBy": {"nodes": []}, "blocking": {"nodes": []},
+                "parent": null, "subIssues": {"nodes": []},
+                "subIssuesSummary": {"total": 0, "completed": 0}}"#,
+        )
+        .unwrap();
+        let r = parse_relations_value(&v);
+        assert!(r.blocked_by.is_empty() && r.blocking.is_empty());
+        assert!(r.parent.is_none() && r.sub_issues.is_empty());
+        assert!(r.sub_summary.is_none());
+    }
+
+    /// 节点缺 title/state 时诚实兜底（空串/OPEN），不 panic。
+    #[test]
+    fn relations_parse_missing_fields() {
+        let v: Value = serde_json::from_str(
+            r#"{"blockedBy": {"nodes": [{"number": 5}]}}"#,
+        )
+        .unwrap();
+        let r = parse_relations_value(&v);
+        assert_eq!(r.blocked_by[0].number, "5");
+        assert_eq!(r.blocked_by[0].title, "");
+        assert_eq!(r.blocked_by[0].state, "OPEN");
+    }
 
     const SAMPLE: &str = r#"[
       {

@@ -174,6 +174,13 @@ pub trait Source: Send + Sync {
     fn set_milestone_state(&self, repo: &RepoRef, number: i64, closed: bool) -> Result<crate::models::MilestoneInfo>;
     /// 编辑里程碑名称/描述/截止日（写穿透；本地不支持）。
     fn update_milestone(&self, repo: &RepoRef, number: i64, title: &str, description: Option<&str>, due_on: Option<&str>) -> Result<crate::models::MilestoneInfo>;
+    /// Issue 关系数据（依赖 / 父子 / 子 Issue 进度）——详情级按需拉取。
+    ///
+    /// 能力矩阵见《架构设计-项目甘特图》§4.2（2026-09-21 API 实证）：
+    /// GitHub 四类全有；Gitea 仅依赖（blocks 端点，**方向与本口径相反**：
+    /// Gitea 的 blocks = 本条阻塞他人 → 映射为 blocking，blockedBy 另拉）；
+    /// Gitee / 本地皆无 → 返回空（诚实缺席，前端不造假数据）。
+    fn fetch_issue_relations(&self, repo: &RepoRef, number: &str) -> Result<crate::models::IssueRelations>;
 }
 
 /// JSON 编号字段 → 文本口径：字符串直取（Gitee v5 issue "IKCTH7"），

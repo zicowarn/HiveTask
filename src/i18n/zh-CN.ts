@@ -553,6 +553,11 @@ export const zhCN = {
   "merge.rebase": "变基合并",
   "merge.rebaseDesc": "逐个变基到主分支，不产生合并提交",
 
+  // Issue relations（依赖 / 父子 / 子 Issue 进度）
+  "relations.parent": "父 Issue",
+  "relations.blockedBy": "被阻塞于",
+  "relations.blocking": "阻塞",
+  "relations.subIssues": "子 Issue",
   // Detail state actions
   "detail.close": "关闭",
   "detail.reopen": "重新打开",

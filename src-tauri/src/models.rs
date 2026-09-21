@@ -31,6 +31,45 @@ pub struct Issue {
     pub url: Option<String>,
 }
 
+/// Issue 关系数据（依赖 + 父子 + 子 Issue 进度），按需拉取的**详情级**数据。
+///
+/// 刻意不进 SQLite、不进列表查询：关系数据易变且各家能力不一（《架构设计-
+/// 项目甘特图》§4.2 降级矩阵——GitHub 全有、Gitea 仅依赖、Gitee/本地皆无），
+/// 与「里程碑元数据运行时缓存、真源在平台」同口径。
+#[derive(Debug, Clone, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct IssueRelations {
+    /// 被本条阻塞的（GitHub `blockedBy` / Gitea `blocks`）。
+    pub blocked_by: Vec<IssueRef>,
+    /// 本条阻塞的（GitHub `blocking`）。
+    pub blocking: Vec<IssueRef>,
+    /// 父 Issue（GitHub `parent`；Gitea/Gitee/本地恒 None）。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub parent: Option<IssueRef>,
+    /// 子 Issue（GitHub `subIssues`；Gitea/Gitee/本地恒空）。
+    pub sub_issues: Vec<IssueRef>,
+    /// 子 Issue 进度（GitHub `subIssuesSummary`）；无能力的来源恒 None。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sub_summary: Option<SubIssueSummary>,
+}
+
+/// 关系条目里对另一条 Issue 的轻引用。
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct IssueRef {
+    pub number: String,
+    pub title: String,
+    /// "OPEN" | "CLOSED"（各家归一）。
+    pub state: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SubIssueSummary {
+    pub total: i64,
+    pub completed: i64,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Pull {

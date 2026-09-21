@@ -608,6 +608,16 @@ fn milestone_list(repo_path: String) -> Result<Vec<models::MilestoneInfo>, Strin
         .map_err(|e| e.to_string())
 }
 
+/// Issue 关系数据（依赖 / 父子 / 子 Issue 进度）——详情级按需拉取。
+/// 能力矩阵与降级口径见《架构设计-项目甘特图》§4.2；无能力的来源返回空。
+#[tauri::command]
+fn issue_relations(repo_path: String, number: String) -> Result<models::IssueRelations, String> {
+    let repo = resolve(&repo_path)?;
+    source::source_for_ref(repo.platform.as_deref(), &repo.host)
+        .fetch_issue_relations(&repo, &number)
+        .map_err(|e| e.to_string())
+}
+
 /// 远端分支名清单（PR 创建表单 head/base 候选；本地 = 本地分支）。
 #[tauri::command]
 fn remote_branch_list(repo_path: String) -> Result<Vec<String>, String> {
@@ -1280,6 +1290,7 @@ pub fn run() {
             create_milestone,
             remote_branch_list,
             milestone_list,
+            issue_relations,
             label_list,
             assignee_list,
             create_label,

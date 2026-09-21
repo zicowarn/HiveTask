@@ -552,6 +552,11 @@ export const enUS: Record<MessageKey, string> = {
   "merge.rebase": "Rebase and merge",
   "merge.rebaseDesc": "Rebase commits onto the base branch, no merge commit",
 
+  // Issue relations（依赖 / 父子 / 子 Issue 进度）
+  "relations.parent": "Parent",
+  "relations.blockedBy": "Blocked by",
+  "relations.blocking": "Blocking",
+  "relations.subIssues": "Sub-issues",
   // Detail state actions
   "detail.close": "Close",
   "detail.reopen": "Reopen",

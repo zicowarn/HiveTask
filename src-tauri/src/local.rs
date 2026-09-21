@@ -150,6 +150,11 @@ impl Source for LocalSource {
     fn create_pull(&self, _repo: &RepoRef, _head: &str, _base: &str, _title: &str, _body: Option<&str>) -> Result<Pull> {
         Err(anyhow!("本地仓库没有 Pull Request——分支即 PR，走本地分支 review"))
     }
+    /// 本地 journal 事件模型无依赖/父子概念（《项目甘特图》§4.2 实证口径）
+    /// → 恒空，前端诚实不显示。
+    fn fetch_issue_relations(&self, _repo: &RepoRef, _number: &str) -> Result<crate::models::IssueRelations> {
+        Ok(crate::models::IssueRelations::default())
+    }
     fn list_milestones(&self, repo: &RepoRef) -> Result<Vec<crate::models::MilestoneInfo>> {
         // 本地里程碑 = Issue 上的纯文本标签（无截止/平台语义）
         let workdir = self.workdir(repo)?;

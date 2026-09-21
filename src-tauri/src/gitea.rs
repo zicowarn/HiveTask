@@ -606,6 +606,47 @@ impl Source for GiteaSource {
         let value = self.send_json(reqwest::Method::PATCH, &url, payload)?;
         Ok(parse_milestone_value(&value))
     }
+
+    /// 依赖：Gitea 有原生 blocks 端点（gitea.com swagger 实证 GET/POST/DELETE
+    /// `/repos/{o}/{r}/issues/{index}/blocks`），语义 = **本条阻塞他人**（与
+    /// GitHub blockedBy 相反）→ 映射为 blocking；blockedBy 需反向扫描当前
+    /// 仓库 issue 列表的 blocks（Gitea 无反向端点），**v1 不做**：返回空 +
+    /// blocking 有值时前端照实展示（反向依赖诚实缺席）。
+    /// Gitee：swagger v5 实证无该能力 → 恒返回空（《项目甘特图》§4.2）。
+    /// 父子/子 Issue：两家皆无（实证）→ 恒空。
+    fn fetch_issue_relations(&self, repo: &RepoRef, number: &str) -> Result<crate::models::IssueRelations> {
+        let mut out = crate::models::IssueRelations::default();
+        if self.platform == "gitee" {
+            return Ok(out);
+        }
+        let slug = self.slug_ref(repo);
+        // index 是仓库内编号（Gitea 的 issue number 即 index）
+        let url = self.api(&format!(
+            "/repos/{}/{}/issues/{number}/blocks?limit=50",
+            slug.owner, slug.repo
+        ));
+        // 老版本无此端点（404）→ 诚实降级为空，不报错
+        let Ok(value) = self.get(&url) else {
+            return Ok(out);
+        };
+        out.blocking = value.as_array().map(|arr| arr.iter().filter_map(parse_issue_ref).collect()).unwrap_or_default();
+        Ok(out)
+    }
+}
+
+/// Gitea issue JSON → 关系轻引用（number/title/state 归一 OPEN|CLOSED）。
+fn parse_issue_ref(v: &Value) -> Option<crate::models::IssueRef> {
+    let number = v.get("number").and_then(Value::as_i64)?;
+    Some(crate::models::IssueRef {
+        number: number.to_string(),
+        title: v.get("title").and_then(Value::as_str).unwrap_or_default().to_string(),
+        state: normalize_issue_state(v.get("state").and_then(Value::as_str).unwrap_or("open")),
+    })
+}
+
+/// 各家 state 方言 → Issue 口径 "OPEN" | "CLOSED"。
+fn normalize_issue_state(state: &str) -> String {
+    if state.eq_ignore_ascii_case("closed") { "CLOSED" } else { "OPEN" }.to_string()
 }
 
 /// Gitea/Gitee 里程碑 REST JSON → MilestoneInfo（id 即编号；无 html_url）。
@@ -625,6 +666,33 @@ fn parse_milestone_value(v: &Value) -> crate::models::MilestoneInfo {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// 依赖轻引用解析：number/state 归一（Gitea "open"/"closed" → OPEN/CLOSED），
+    /// 数组顺序保持（端点是列表语义，不重排）。
+    #[test]
+    fn parse_issue_refs_normalizes_state() {
+        let v: Value = serde_json::from_str(
+            r#"[{"number": 7, "title": "A", "state": "open"},
+                {"number": 9, "title": "B", "state": "closed"}]"#,
+        )
+        .unwrap();
+        let refs: Vec<_> = v.as_array().unwrap().iter().filter_map(parse_issue_ref).collect();
+        assert_eq!(refs.len(), 2);
+        assert_eq!(refs[0].number, "7");
+        assert_eq!(refs[0].state, "OPEN");
+        assert_eq!(refs[1].state, "CLOSED");
+    }
+
+    /// 缺字段/非法节点诚实跳过（不 panic、不占位）。
+    #[test]
+    fn parse_issue_ref_skips_invalid() {
+        let v: Value = serde_json::from_str(r#"[{"title": "no number"}, {"number": 5}]"#).unwrap();
+        let refs: Vec<_> = v.as_array().unwrap().iter().filter_map(parse_issue_ref).collect();
+        assert_eq!(refs.len(), 1);
+        assert_eq!(refs[0].number, "5");
+        assert_eq!(refs[0].title, "");
+        assert_eq!(refs[0].state, "OPEN");
+    }
 
     /// 真 Gitea API 的 issue 样本（v1 字段形态）。
     const ISSUE_SAMPLE: &str = r#"{

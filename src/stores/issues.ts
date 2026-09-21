@@ -1,6 +1,6 @@
 import { defineStore } from "pinia";
 import { computed, ref } from "vue";
-import { api, isTauri, type LabelInfo, type MilestoneInfo } from "../api";
+import { api, isTauri, type IssueRelations, type LabelInfo, type MilestoneInfo } from "../api";
 import { t } from "../i18n";
 import { isNetworkError, reportError, translateError } from "../gh-errors";
 import { pushToast } from "../toast";
@@ -27,6 +27,10 @@ export const useIssuesStore = defineStore("issues", () => {
   const commentsLoading = ref(false);
   const commentSubmitting = ref(false);
   const stateWorking = ref(false);
+  // 选中 Issue 的关系数据（依赖/父子/子 Issue 进度）：详情级按需拉取，
+  // 与 comments 同生命周期（切选中即换、失败诚实留空）。
+  const relations = ref<IssueRelations | null>(null);
+  const relationsLoading = ref(false);
 
   function select(issue: Issue | null) {
     selectedNumber.value = issue ? issue.number : null;
@@ -119,6 +123,28 @@ export const useIssuesStore = defineStore("issues", () => {
 
   function clearComments() {
     comments.value = [];
+  }
+
+  /** 关系数据与选中同生命周期：切选中即清（防旧数据闪现在新 Issue 上）。 */
+  function clearRelations() {
+    relations.value = null;
+  }
+
+  /** 详情级按需拉取（列表不带——node budget 教训）；失败诚实留空不打扰。 */
+  async function loadRelations(number: string) {
+    const repo = useRepoStore();
+    const path = repo.current;
+    if (!path || !isTauri()) return;
+    relationsLoading.value = true;
+    try {
+      const fresh = await api.issueRelations(path, number);
+      if (selectedNumber.value === number) relations.value = fresh;
+    } catch {
+      // 无能力的来源返回空而非报错；真失败（网络）也不该打断阅读
+      if (selectedNumber.value === number) relations.value = null;
+    } finally {
+      relationsLoading.value = false;
+    }
   }
 
   /** Cache-first paint, then reconcile with GitHub. Guards against races:
@@ -311,6 +337,10 @@ export const useIssuesStore = defineStore("issues", () => {
     labelColor,
     clearComments,
     loadComments,
+    clearRelations,
+    loadRelations,
+    relations,
+    relationsLoading,
     addComment,
     setClosed,
   };

@@ -4,6 +4,7 @@ import { storeToRefs } from "pinia";
 import PanelShell from "../workbench/PanelShell.vue";
 import MarkdownView from "../components/MarkdownView.vue";
 import CommentsSection from "../components/CommentsSection.vue";
+import EditorIcon from "../components/EditorIcon.vue";
 import MilestoneDetailView from "./MilestoneDetailView.vue";
 import { stripHtmlComments } from "../components/markdown";
 import { useIssuesStore } from "../stores/issues";
@@ -78,8 +79,13 @@ const {
 watch(
   () => issues.selected?.number,
   (number) => {
-    if (number != null && number !== "") void issues.loadComments(number);
-    else issues.clearComments();
+    if (number != null && number !== "") {
+      void issues.loadComments(number);
+      void issues.loadRelations(number);
+    } else {
+      issues.clearComments();
+      issues.clearRelations();
+    }
   },
   { immediate: true },
 );
@@ -87,6 +93,12 @@ watch(
 function onSubmitComment(body: string) {
   if (issues.selected) void issues.addComment(issues.selected.number, body);
 }
+
+/** 关系条有内容才渲染（四项全空 = 无能力来源或真无关系，都不摆空壳）。 */
+const hasRelations = computed(() => {
+  const r = issues.relations;
+  return !!r && (!!r.parent || r.blockedBy.length > 0 || r.blocking.length > 0 || r.subIssues.length > 0);
+});
 
 function hasVisibleBody(body?: string | null): boolean {
   return !!body && stripHtmlComments(body).trim().length > 0;
@@ -172,6 +184,62 @@ function openUrl(url?: string | null) {
 
       <div class="detail-body">
         <p v-if="editError" class="edit-error">{{ editError }}</p>
+
+        <!-- 关系条（依赖 / 父子 / 子 Issue 进度）：详情级按需拉取；无能力的
+             来源四项全空 → 整条不渲染（诚实缺席，不摆空壳）。v1 只读展示，
+             不做跳转（关联 Issue 未必在当前筛选集，跳转另立项） -->
+        <section v-if="hasRelations" class="detail-relations">
+          <div v-if="issues.relations?.parent" class="rel-row">
+            <span class="rel-label">{{ t("relations.parent") }}</span>
+            <span class="rel-chip" :class="{ closed: issues.relations.parent.state === 'CLOSED' }">
+              <EditorIcon :name="issues.relations.parent.state === 'CLOSED' ? 'o.issue-closed' : 'o.issue-opened'" />
+              <span class="rel-num">#{{ issues.relations.parent.number }}</span>
+              <span class="rel-title">{{ issues.relations.parent.title }}</span>
+            </span>
+          </div>
+          <div v-if="issues.relations?.blockedBy.length" class="rel-row">
+            <span class="rel-label">{{ t("relations.blockedBy") }}</span>
+            <span
+              v-for="r in issues.relations.blockedBy"
+              :key="'b' + r.number"
+              class="rel-chip"
+              :class="{ closed: r.state === 'CLOSED' }"
+            >
+              <EditorIcon :name="r.state === 'CLOSED' ? 'o.issue-closed' : 'o.issue-opened'" />
+              <span class="rel-num">#{{ r.number }}</span>
+              <span class="rel-title">{{ r.title }}</span>
+            </span>
+          </div>
+          <div v-if="issues.relations?.blocking.length" class="rel-row">
+            <span class="rel-label">{{ t("relations.blocking") }}</span>
+            <span
+              v-for="r in issues.relations.blocking"
+              :key="'k' + r.number"
+              class="rel-chip"
+              :class="{ closed: r.state === 'CLOSED' }"
+            >
+              <EditorIcon :name="r.state === 'CLOSED' ? 'o.issue-closed' : 'o.issue-opened'" />
+              <span class="rel-num">#{{ r.number }}</span>
+              <span class="rel-title">{{ r.title }}</span>
+            </span>
+          </div>
+          <div v-if="issues.relations?.subIssues.length" class="rel-row">
+            <span class="rel-label">{{ t("relations.subIssues") }}</span>
+            <span v-if="issues.relations.subSummary" class="rel-count">
+              {{ issues.relations.subSummary.completed }}/{{ issues.relations.subSummary.total }}
+            </span>
+            <span
+              v-for="r in issues.relations.subIssues"
+              :key="'s' + r.number"
+              class="rel-chip"
+              :class="{ closed: r.state === 'CLOSED' }"
+            >
+              <EditorIcon :name="r.state === 'CLOSED' ? 'o.issue-closed' : 'o.issue-opened'" />
+              <span class="rel-num">#{{ r.number }}</span>
+              <span class="rel-title">{{ r.title }}</span>
+            </span>
+          </div>
+        </section>
 
         <template v-if="!editing">
           <MarkdownView v-if="hasVisibleBody(selected.body)" :source="selected.body" />
@@ -307,6 +375,58 @@ function openUrl(url?: string | null) {
   background: var(--bg-chip);
   color: var(--text-dim);
   border: 1px solid var(--border);
+}
+/* 关系条：标签列 + 可换行的 chip 流（依赖/父子/子 Issue） */
+.detail-relations {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 14px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border);
+}
+.rel-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.rel-label {
+  min-width: 64px;
+  font-size: var(--font-sm);
+  color: var(--text-dim);
+}
+.rel-count {
+  font-size: var(--font-xs);
+  padding: 1px 7px;
+  border-radius: 10px;
+  background: var(--bg-chip);
+  color: var(--text-dim);
+  border: 1px solid var(--border);
+}
+.rel-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 380px;
+  padding: 2px 9px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: var(--bg-chip);
+  font-size: var(--font-sm);
+  color: var(--text);
+}
+.rel-chip.closed {
+  color: var(--text-dim);
+}
+.rel-chip .rel-num {
+  color: var(--text-dim);
+  flex: none;
+}
+.rel-chip .rel-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .detail-body {
   flex: 1;

@@ -163,6 +163,29 @@ export interface ProjectItem {
   entity?: ProjectEntityMeta | null;
 }
 
+/** Issue 关系数据（依赖 / 父子 / 子 Issue 进度）——详情级按需拉取。
+ *  能力矩阵见知识库《架构设计-项目甘特图》§4.2：GitHub 全有；Gitea 仅
+ *  blocking（blocks 端点方向映射）；Gitee/本地恒空（前端诚实不显示）。 */
+export interface IssueRelations {
+  blockedBy: IssueRef[];
+  blocking: IssueRef[];
+  parent?: IssueRef | null;
+  subIssues: IssueRef[];
+  subSummary?: SubIssueSummary | null;
+}
+
+export interface IssueRef {
+  number: string;
+  title: string;
+  /** "OPEN" | "CLOSED"（各家归一）。 */
+  state: string;
+}
+
+export interface SubIssueSummary {
+  total: number;
+  completed: number;
+}
+
 /** 引用实体（Issue/PR）的只读元数据。 */
 export interface ProjectEntityMeta {
   title: string;
@@ -691,6 +714,9 @@ export const api = {
   // ---- 里程碑元数据（组头 Due by / Overdue、里程碑详情的数据源）----
   milestoneList: (repoPath: string) =>
     invoke<MilestoneInfo[]>("milestone_list", { repoPath }),
+  /** Issue 关系（依赖/父子/子 Issue）；无能力的来源返回全空。 */
+  issueRelations: (repoPath: string, number: string) =>
+    invoke<IssueRelations>("issue_relations", { repoPath, number }),
   labelList: (repoPath: string) => invoke<LabelInfo[]>("label_list", { repoPath }),
   createLabel: (repoPath: string, name: string, color: string) =>
     invoke<LabelInfo>("create_label", { repoPath, name, color }),
