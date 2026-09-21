@@ -192,6 +192,9 @@ export class TableWidget extends WidgetType {
       (ev) => {
         ev.preventDefault();
         ev.stopPropagation();
+        // CM6 的 mousedown handler 会在编辑器无焦点时 blur 掉 activeElement 并
+        // 抢焦点到 contentDOM（focusPreventScroll + active.blur）——把焦点再抢回来。
+        setTimeout(() => cell.focus(), 0);
       },
       { capture: true },
     );
