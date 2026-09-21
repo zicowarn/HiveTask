@@ -15,6 +15,7 @@ import type { SyntaxNodeRef } from "@lezer/common";
 import { Decoration, EditorView, WidgetType } from "@codemirror/view";
 import type { EditorState } from "@codemirror/state";
 import MarkdownIt from "markdown-it";
+import { serializeTable, parseTable as parseGrid, type TableModel } from "./markdown-table";
 import type { RenderItem } from "./live-render";
 import { t } from "../../i18n";
 
@@ -97,10 +98,17 @@ export function renderTableHtml(table: ParsedTable): string {
 }
 
 export class TableWidget extends WidgetType {
+  /** 编辑会话：正在直接编辑渲染单元格时，抑制装饰重建（否则输入中表格会被重画）。 */
+  static editing: { from: number; to: number; widget: TableWidget } | null = null;
+
   constructor(
     readonly source: string,
-    /** 双击/按钮 → 打开网格编辑器（由宿主注入；widget 不 import bus，避免循环依赖）。 */
-    private readonly onEdit?: () => void,
+    private readonly options?: {
+      /** 表格在文档中的范围（直接编辑写回用）。 */
+      range?: { from: number; to: number };
+      /** 双击/按钮 → 打开网格编辑器（宿主注入；widget 不 import bus，避免循环依赖）。 */
+      onEdit?: () => void;
+    },
   ) {
     super();
   }
@@ -111,10 +119,40 @@ export class TableWidget extends WidgetType {
     const wrap = document.createElement("div");
     wrap.className = "cm-kb-table";
     const parsed = parseTable(this.source);
-    wrap.innerHTML = parsed ? renderTableHtml(parsed) : "";
-    // 悬停浮现的「编辑」按钮：渲染态直达网格编辑器（不必先点进源码再按 ⌥⌘T）。
-    // mousedown preventDefault：阻止 CM6 把这次点击当光标操作。
-    if (this.onEdit) {
+    const range = this.options?.range;
+    const editable = Boolean(range);
+    if (parsed && editable && range) {
+      // ---- muya 思路：渲染态的单元格**直接可编辑**（contenteditable=plaintext-only）。
+      // 输入实时写回源码（去抖 600ms）；blur 立即写回。Cell 内容按纯文本处理。
+      wrap.classList.add("cm-kb-table--editable");
+      const table = document.createElement("table");
+      const thead = document.createElement("thead");
+      const headRow = document.createElement("tr");
+      parsed.header.forEach((cellText, col) => {
+        const th = document.createElement("th");
+        th.appendChild(this.makeCell(col, -1, cellText, parsed.align[col], range));
+        headRow.appendChild(th);
+      });
+      thead.appendChild(headRow);
+      table.appendChild(thead);
+      const tbody = document.createElement("tbody");
+      for (let r = 0; r < parsed.rows.length; r += 1) {
+        const tr = document.createElement("tr");
+        parsed.rows[r].forEach((cellText, col) => {
+          const td = document.createElement("td");
+          td.appendChild(this.makeCell(col, r, cellText, parsed.align[col], range));
+          tr.appendChild(td);
+        });
+        tbody.appendChild(tr);
+      }
+      table.appendChild(tbody);
+      wrap.appendChild(table);
+    } else {
+      wrap.innerHTML = parsed ? renderTableHtml(parsed) : "";
+    }
+
+    // 悬停浮现的「编辑」按钮：双击/按钮 → 网格编辑器（结构性编辑：增删行列、对齐）。
+    if (this.options?.onEdit) {
       const btn = document.createElement("button");
       btn.className = "cm-kb-table-edit";
       btn.type = "button";
@@ -126,20 +164,84 @@ export class TableWidget extends WidgetType {
       btn.addEventListener("click", (ev) => {
         ev.preventDefault();
         ev.stopPropagation();
-        this.onEdit?.();
+        this.options?.onEdit?.();
       });
       wrap.appendChild(btn);
     }
-    // 双击表格主体 = 同样直达编辑器（发现的自然性：双击是"编辑"的通用直觉）
+    // 双击表格主体 = 同样直达网格编辑器（结构性编辑）
     wrap.addEventListener("dblclick", (ev) => {
       ev.preventDefault();
       ev.stopPropagation();
-      this.onEdit?.();
+      this.options?.onEdit?.();
     });
     return wrap;
   }
+
+  /** 一个可编辑单元格：focus 抢占编辑会话；input 去抖写回；blur 立即写回。 */
+  private makeCell(
+    _col: number,
+    _row: number,
+    text: string,
+    align: Align,
+    range: { from: number; to: number },
+  ): HTMLElement {
+    const cell = document.createElement("div");
+    cell.className = "cm-kb-cell";
+    cell.contentEditable = "plaintext-only";
+    cell.style.textAlign = align ?? "left";
+    cell.textContent = text;
+    cell.addEventListener("mousedown", (ev) => ev.stopPropagation());
+    cell.addEventListener("focus", () => {
+      TableWidget.editing = { from: range.from, to: range.to, widget: this };
+    });
+    let timer: number | null = null;
+    const flush = (): void => {
+      if (timer !== null) {
+        window.clearTimeout(timer);
+        timer = null;
+      }
+      this.writeBack(range, cell);
+    };
+    cell.addEventListener("input", () => {
+      TableWidget.editing = { from: range.from, to: range.to, widget: this };
+      if (timer !== null) window.clearTimeout(timer);
+      timer = window.setTimeout(flush, 600);
+    });
+    cell.addEventListener("blur", flush);
+    // Enter 换行会劈碎表格行——吞掉（Shift+Enter 也吞；要换行用 <br> 的场景去源码模式）
+    cell.addEventListener("keydown", (ev) => {
+      if (ev.key === "Enter") {
+        ev.preventDefault();
+        (ev.target as HTMLElement).blur();
+      }
+    });
+    return cell;
+  }
+
+  /** 把当前渲染表格的每格内容重建成 Markdown，写回文档中的表格范围。 */
+  private writeBack(range: { from: number; to: number }, edited: HTMLElement): void {
+    const tableEl = edited.closest("table");
+    if (!tableEl) return;
+    const readRow = (tr: HTMLTableRowElement): string[] =>
+      Array.from(tr.querySelectorAll(".cm-kb-cell")).map((cell) =>
+        (cell.textContent ?? "").replace(/\n/g, " ").trim(),
+      );
+    const headRow = tableEl.querySelector<HTMLTableRowElement>("thead tr");
+    if (!headRow) return;
+    const header = readRow(headRow);
+    const rows = Array.from(tableEl.querySelectorAll("tbody tr")).map((tr) => readRow(tr as HTMLTableRowElement));
+    const parsed = parseGrid(this.source);
+    const model: TableModel = { header, aligns: parsed?.aligns ?? [], rows };
+    const markdown = serializeTable(model);
+    TableWidget.editing = null;
+    window.dispatchEvent(
+      new CustomEvent("kb:table-writeback", { detail: { ...range, markdown } }),
+    );
+  }
+
   ignoreEvent(): boolean {
-    return true; // 单击不进光标（保持"渲染态整块"）；编辑走按钮/双击
+    // 可编辑模式下必须放行事件（contenteditable 单元格要接收点击/键盘）
+    return !this.options?.range;
   }
 }
 
@@ -152,6 +254,7 @@ function cursorTouches(state: EditorState, from: number, to: number): boolean {
  * 并且只能由 state facet（`EditorView.decorations`）提供——ViewPlugin 提供会抛
  * `Decorations that replace line breaks may not be specified via plugins`。
  */
+
 export function tableItems(state: EditorState, onEdit?: () => void): RenderItem[] {
   const items: RenderItem[] = [];
   fullSyntaxTree(state).iterate({
@@ -165,7 +268,13 @@ export function tableItems(state: EditorState, onEdit?: () => void): RenderItem[
       items.push({
         from: first.from,
         to: last.to,
-        deco: Decoration.replace({ block: true, widget: new TableWidget(source, onEdit) }),
+        deco: Decoration.replace({
+          block: true,
+          widget: new TableWidget(source, {
+            range: { from: first.from, to: last.to },
+            onEdit,
+          }),
+        }),
       });
     },
   });

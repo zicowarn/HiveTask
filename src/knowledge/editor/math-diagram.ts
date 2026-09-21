@@ -10,7 +10,7 @@
 import { fullSyntaxTree } from "./tree";
 import type { SyntaxNodeRef } from "@lezer/common";
 import { tableItems, tableTheme } from "./table";
-import { Decoration, EditorView, WidgetType, type DecorationSet } from "@codemirror/view";
+import { Decoration, EditorView, ViewPlugin, WidgetType, type DecorationSet } from "@codemirror/view";
 import type { EditorState, Extension } from "@codemirror/state";
 import katex from "katex";
 import "katex/dist/katex.css";
@@ -243,5 +243,28 @@ export function mathAndDiagram(onTableEdit?: () => void): Extension {
     EditorView.decorations.compute(["doc", "selection"], (state) => mathAndDiagramDecorations(state, onTableEdit)),
     mathAndDiagramTheme,
     tableTheme,
+    // 渲染态单元格直接编辑的写回通道（TableWidget 发 kb:table-writeback）
+    EditorView.domEventHandlers({}),
+    viewPluginBridge(),
   ];
+}
+
+/** 把 widget 的写回事件接进 CM6 事务（view 只在这里拿得到）。 */
+function viewPluginBridge(): Extension {
+  return ViewPlugin.fromClass(
+    class {
+      private handler = (event: Event): void => {
+        const detail = (event as CustomEvent<{ from: number; to: number; markdown: string }>).detail;
+        this.view.dispatch({
+          changes: { from: detail.from, to: detail.to, insert: detail.markdown },
+        });
+      };
+      constructor(public view: EditorView) {
+        window.addEventListener("kb:table-writeback", this.handler);
+      }
+      destroy(): void {
+        window.removeEventListener("kb:table-writeback", this.handler);
+      }
+    },
+  );
 }
