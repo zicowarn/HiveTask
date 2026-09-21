@@ -11,6 +11,7 @@ import PanelShell from "../workbench/PanelShell.vue";
 import EditorIcon from "../components/EditorIcon.vue";
 import ActionMenu, { type ActionItem } from "../components/ActionMenu.vue";
 import ProjectViewSettings from "./ProjectViewSettings.vue";
+import TeamSlicePanel from "./TeamSlicePanel.vue";
 import ProjectItemDrawer from "./ProjectItemDrawer.vue";
 import type { ProjectItem } from "../api";
 import { resolvePanel } from "../workbench/registry";
@@ -32,6 +33,8 @@ const { projects, loading, error, publishError } = storeToRefs(store);
 
 // 视图页签（对齐平台）：页签 = 视图，布局是视图属性（View 弹层的 Layout 分段切换）。
 const activeMode = computed(() => modes.find((m) => m.key === store.layout) ?? modes[0]);
+
+
 /** 新建视图：平台该按钮是 ActionMenu（已取证 haspopup=true）——先选布局再建。 */
 const newViewItems = computed(() => [
   ...modes.map((m) => ({
@@ -260,6 +263,13 @@ function openItemInWorkspace(item: ProjectItem) {
     </div>
 
     <div v-else class="pj-body">
+      <!-- Team items 切片左导航（平台 Slicer，2026-09 取证 views/3：265px 白底、
+           头部 34px 灰底切换钮、值行 48px + 20px 头像 + 计数胶囊 + 行首 ✓）。
+           不切片（No slicing）时整个收起，主区恢复全量 -->
+      <aside v-if="store.sliceActive" class="team-nav">
+        <TeamSlicePanel />
+      </aside>
+      <div class="pj-main">
       <div class="pj-topbar">
         <div class="filter-box">
           <svg class="filter-icon" viewBox="0 0 16 16" style="width: var(--icon-size, 14px); height: var(--icon-size, 14px)" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true">
@@ -295,6 +305,7 @@ function openItemInWorkspace(item: ProjectItem) {
 
       <div class="pj-view">
         <component :is="activeMode.component" />
+      </div>
       </div>
     </div>
 
@@ -424,10 +435,31 @@ function openItemInWorkspace(item: ProjectItem) {
 }
 .pj-body {
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
   flex: 1;
   min-height: 0;
 }
+/* 主列：切片不启用时是 body 唯一子级（渲染与改造前一致） */
+.pj-main {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+/* Team items 左导航（平台 SlicerPanel 实测：265px 白底、无右边框——
+   与主区的分界靠主区自身留白；值行间 inset 分隔线由行 border 提供） */
+.team-nav {
+  display: flex;
+  flex-direction: column;
+  flex: none;
+  width: 265px;
+  min-height: 0;
+  background: var(--bg-panel);
+  border-right: 1px solid var(--border);
+}
+/* 导航主体（顶行字段切换 + Deselect、带描述的值列表、底部空值开关）
+   全部在 TeamSlicePanel.vue 内实现 */
 /* 顶栏：筛选条 + ⚙视图（项目选择在头部切换对话框）。
    筛选框上下间隙对称（8/8）；其下边框即为与下方视图的分界线，视图侧不再画顶线 */
 .pj-topbar {

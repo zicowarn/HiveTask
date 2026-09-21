@@ -89,7 +89,38 @@ CSS 变量，因此在 `[data-theme="light"]` 下覆盖 `background-image` 换�
 `SettingsBasicMode.vue`（单选三例）、`IssueCreateDialog.vue` 侧栏
 （多选 + 色点选项）。
 
-## 5. 待统一（技术债登记处）
+## 5. 项目视图布局不变量（三个模式共用，改布局前必读）
+
+> 背景：Table/Roadmap/Board 对齐期间反复出现「修这里、坏那里」——根因是缺一份
+> 统一的布局契约，各处用局部补丁追同一批视觉目标。以下不变量是契约本体，
+> 任何布局改动不得破坏；新尺寸必须**实测**（截图量像素/探针量 DOM）后再写，
+> 禁止按设计稿猜。
+
+1. **表格行高**：数据行实际渲染节距是 40px（`td height:38` 是 cell 最小值
+   语义，会被行内容撑高）。**全局所有「＋新增」行白区统一 40px**——Table
+   组内（`height:52` = 40+12 灰隙）、Table 表尾（`tfoot tr.add-row td
+   height:40`）、Roadmap（`.rm-addrow min-height:40`）；禁止用 padding
+   撑出不定高（实测翻车）。改动任一处必须重新实测其余两处。
+2. **组间 12px 间隙**：一律用**不透明的真实灰带**（`border` 载体，
+   `var(--bg-app)`），禁止 margin/透明区（会与邻区同色而"隐形"）。
+   载体归 Tab­le =「每组最后一个可见行」的 border-bottom（展开组=添加行、
+   折叠组=组头 `--collapsed`）；Roadmap = 组头行 border-top（`gi > 0`）。
+   **竖向线必须跨灰带连续**（字段列右缘、周线、今日红线）：灰带是不透明
+   色块会盖住下层的线，竖线绘制层级必须抬到灰带之上（Roadmap 的
+   `.rm-gridlayer`/`.rm-fieldedge` z1 即为此），出现竖线断线先查层序。
+3. **看板宽度权威**：列头行（`.board-heads`）与所有泳道（`.lane`）必须包在
+   同一个 `width: max-content; min-width: 100%` 的父级（`.board-flow`）里，
+   自身 `width: 100%` 跟随——各行独立 max-content 会导致折叠泳道比展开
+   泳道短一截（实测翻车）。
+4. **看板列头内容**：`.head-cell` 固定 280px；名称可收缩截断（ellipsis），
+   计数/汇总胶囊 `flex: none`——⋯/＋ 在任何列名长度下都不得溢出卡片。
+5. **弹性收缩**：横向排布的卡片/行容器，子项一律先想清楚 `flex-shrink`——
+   容器高度/宽度不足时 flex 默认压扁子项而不是溢出（多次翻车）。
+6. **吸顶元素**：sticky 的参照是最近的滚动容器；一旦给祖先加
+   `overflow`/再包一层，必须重验吸顶与宽度参照（grid 困 sticky、
+   overflow 裁菜单均有前科）。
+
+## 6. 待统一（技术债登记处）
 
 - [ ] ☀/☾ 主题按钮仍是字符符号（字形尚饱满，暂可接受）→ 换 Octicons
       sun/moon-16，随主题切换图标。

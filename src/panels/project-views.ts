@@ -77,6 +77,12 @@ export interface ProjectViewConfig {
   dateEndFieldId: string | null;
   /** 逐字段排序（平台的 Sort ascending/descending）；null = 用上面的通用排序。 */
   fieldSort: { fieldId: string; desc: boolean } | null;
+  /** Team items 切片（平台 Slicer）：字段键（viewKey 语义，见 store）+
+   *  选中值；字段 null = 不切片（左导航整个收起）。 */
+  sliceFieldId: string | null;
+  sliceValue: string | null;
+  /** 切片值面板：零条目值是否显示（平台 Show/Hide empty values）。 */
+  sliceShowEmpty: boolean;
   /** 显示字段（board 渲染在卡片上，table 决定列）。 */
   fields: ViewFieldId[];
 }
@@ -98,6 +104,9 @@ export function defaultViewConfig(): ProjectViewConfig {
     collapsedLanes: [],
     dateEndFieldId: null,
     fieldSort: null,
+    sliceFieldId: null,
+    sliceValue: null,
+    sliceShowEmpty: false,
     fields: [...viewFieldIds],
   };
 }
@@ -134,8 +143,9 @@ export interface ProjectViewEntry {
  * Status + Priority；其余字段经列头「选择列/隐藏」或视图设置添加）。 */
 export const TABLE_DEFAULT_FIELDS = ["title", "assignees", "status", "priority"] as const;
 
-/** 种子视图：Backlog（现有看板，保持不变）+ Table + Priority board。
- * Roadmap 视图随 Roadmap 布局落地时补入（见任务台账 D）。 */
+/** 种子视图：Backlog（现有看板，保持不变）+ Table + Priority board +
+ *  Team items（切片视图：左导航按 Assignees 切、主区按 Status 分组，平台
+ *  Team items 实测形态）+ Roadmap。 */
 export function defaultViewEntries(): ProjectViewEntry[] {
   const base = defaultViewConfig;
   return [
@@ -151,6 +161,18 @@ export function defaultViewEntries(): ProjectViewEntry[] {
       name: "Priority board",
       layout: "board",
       config: { ...base(), swimlaneFieldId: "priority", sortBy: "priority" },
+    },
+    {
+      id: "team",
+      name: "Team items",
+      layout: "table",
+      config: {
+        ...base(),
+        swimlaneFieldId: "status",
+        fields: [...TABLE_DEFAULT_FIELDS] as ProjectViewConfig["fields"],
+        sliceFieldId: "assignees",
+        sliceValue: null,
+      },
     },
     { id: "roadmap", name: "Roadmap", layout: "roadmap", config: base() },
   ];

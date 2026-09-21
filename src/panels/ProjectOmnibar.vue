@@ -67,7 +67,9 @@ function closeBar() {
 function onDocPointerDown(event: MouseEvent) {
   if (!open.value) return;
   const el = event.target as HTMLElement | null;
-  if (el && el.closest(".omnibar")) return;
+  // 宿主行（data-omni-host，即打开本输入条的那一行）也不关——
+  // 否则 pointerdown 先关、行 click 再开，再点 ＋ 永远关不掉（点击异常实测）
+  if (el && (el.closest(".omnibar") || el.closest("[data-omni-host]"))) return;
   closeBar();
 }
 function onKeydown(event: KeyboardEvent) {
@@ -328,8 +330,13 @@ defineExpose({
 .omni-chip:hover {
   text-decoration: underline;
 }
-/* 建议菜单：贴输入条上沿、非全宽（平台 ~400px，锚左侧）、限高滚动 */
+/* 建议菜单：贴输入条上沿、非全宽（平台 ~400px，锚左侧）、限高滚动。
+   表格 add 行的 td 高度固定（table-layout: fixed），菜单比行高时向下溢出，
+   后续表格行会按绘制顺序盖住菜单把它切成数段——提为定位元素（z5）
+   让它完整绘制在所有表格行之上 */
 .omni-menu {
+  position: relative;
+  z-index: 5;
   align-self: flex-start;
   width: 420px;
   max-height: 300px;

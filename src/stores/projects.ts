@@ -176,8 +176,8 @@ export const useProjectsStore = defineStore("projects", () => {
     return tokens;
   }
 
-  /** 过滤 + 排序后的条目（Board/Table 两种投影共用）。 */
-  const filteredItems = computed(() => {
+  /** 过滤 + 排序后的条目（切片过滤之前；左导航的计数与 Team items 值列表用它）。 */
+  const preSliceItems = computed(() => {
     const statusF = fields.value.find((f) => f.kind === "builtin_status") ?? null;
     const prioF = fields.value.find((f) => f.name === "优先级") ?? null;
     const optionIndex = (field: ProjectField | null, item: ProjectItem): number => {
@@ -255,6 +255,16 @@ export const useProjectsStore = defineStore("projects", () => {
       sorted.sort((a, b) => Number(a.rank) - Number(b.rank));
     }
     return sorted;
+  });
+
+  /** 切片过滤后的条目（Board/Table/Roadmap 三种投影共用；平台 Team items：
+   *  左导航选中某值 → 主区只显示该值的条目）。选中 "" = 无值切片（No Assignees
+   *  这类聚合行），仍要过滤——只有字段为 null（不切片）才放行全量。 */
+  const filteredItems = computed(() => {
+    const key = view.value.sliceFieldId;
+    const val = view.value.sliceValue;
+    if (!key || val === null) return preSliceItems.value;
+    return preSliceItems.value.filter((i) => sliceValuesOf(i, key).includes(val));
   });
 
   const selected = computed(() => projects.value.find((p) => p.id === selectedId.value) ?? null);
@@ -637,6 +647,172 @@ export const useProjectsStore = defineStore("projects", () => {
   function fieldByViewKey(id: string): ProjectField | null {
     return fields.value.find((f) => viewKeyOfField(f) === id) ?? null;
   }
+
+  // ---- Team items 切片（平台 Slicer，2026-09 取证 views/3）----
+  // 切片字段键：assignees/repository 为固定语义键，其余 = 项目字段的 viewKey
+  // （status/priority 固定、自建字段按 id）。null 字段 = 不切片（左导航收起）。
+
+  /** 条目在某切片字段上的取值集合（assignees 可多值——条目计入每个负责人行；
+   *  其余单值；空 = ""，对应导航的「无 X」行）。 */
+  function sliceValuesOf(item: ProjectItem, key: string): string[] {
+    if (key === "assignees") {
+      const list = item.entity?.assignees ?? [];
+      return list.length ? list : [""];
+    }
+    if (key === "repository") return [item.repoId ?? ""];
+    const field = fieldByViewKey(key);
+    if (!field) return [];
+    return [item.fieldValues[field.id] ?? ""];
+  }
+
+  interface SliceRow {
+    value: string;
+    label: string;
+    description: string | null;
+    count: number;
+    color: string | null;
+    avatar: string | null;
+  }
+
+  const sliceActive = computed(() => !!view.value.sliceFieldId);
+  const sliceFieldName = computed(() => {
+    const key = view.value.sliceFieldId;
+    return key ? fieldName(key) : "";
+  });
+
+  /** 左导航值行：字段值全列出（含计数），有缺值条目时追加「无 X」行。
+   *  单选按选项序、数字/日期按值升序、负责人按计数降序（平台 zicowarn 10 →
+   *  No Assignees 2 的实测序）。 */
+  const sliceRows = computed<SliceRow[]>(() => {
+    const key = view.value.sliceFieldId;
+    if (!key) return [];
+    const base = preSliceItems.value;
+    if (key === "assignees") {
+      const logins = new Set<string>();
+      for (const i of base) for (const a of i.entity?.assignees ?? []) logins.add(a);
+      const rows: SliceRow[] = [...logins].map((l) => ({
+        value: l,
+        label: l,
+        description: null,
+        count: base.filter((i) => (i.entity?.assignees ?? []).includes(l)).length,
+        color: null,
+        avatar: `https://github.com/${l}.png?size=40`,
+      }));
+      rows.sort((a, b) => b.count - a.count || a.label.localeCompare(b.label));
+      const none = base.filter((i) => !(i.entity?.assignees ?? []).length).length;
+      if (none) {
+        rows.push({ value: "", label: t("project.columnNoValue", { field: fieldName("assignees") }), description: null, count: none, color: null, avatar: null });
+      }
+      return rows;
+    }
+    if (key === "repository") {
+      const seen = new Map<string, string>();
+      for (const i of base) if (i.repoId) seen.set(i.repoId, i.repoLabel ?? i.repoId);
+      const rows: SliceRow[] = [...seen.entries()].map(([id, label]) => ({
+        value: id,
+        label,
+        description: null,
+        count: base.filter((i) => i.repoId === id).length,
+        color: null,
+        avatar: null,
+      }));
+      rows.sort((a, b) => b.count - a.count || a.label.localeCompare(b.label));
+      const none = base.filter((i) => !i.repoId).length;
+      if (none) {
+        rows.push({ value: "", label: t("project.columnNoValue", { field: t("project.colSource") }), description: null, count: none, color: null, avatar: null });
+      }
+      return rows;
+    }
+    const field = fieldByViewKey(key);
+    if (!field) return [];
+    if (field.kind === "builtin_status" || field.kind === "single_select") {
+      const rows: SliceRow[] = field.options.map((o) => ({
+        value: o.id,
+        label: o.name,
+        description: o.description ?? null,
+        count: base.filter((i) => (i.fieldValues[field.id] ?? "") === o.id).length,
+        color: o.color || null,
+        avatar: null,
+      }));
+      if (base.some((i) => !i.fieldValues[field.id])) {
+        rows.push({ value: "", label: t("project.columnNoValue", { field: fieldName(key) }), description: null, count: 0, color: null, avatar: null });
+      }
+      return rows;
+    }
+    // 数字 / 日期等自由值字段：取出现的去重值，按值升序
+    const values = new Set<string>();
+    for (const i of base) {
+      const v = i.fieldValues[field.id] ?? "";
+      if (v) values.add(v);
+    }
+    const rows: SliceRow[] = [...values].sort().map((v) => ({
+      value: v,
+      label: v,
+      description: null,
+      count: base.filter((i) => (i.fieldValues[field.id] ?? "") === v).length,
+      color: null,
+      avatar: null,
+    }));
+    if (base.some((i) => !i.fieldValues[field.id])) {
+      rows.push({ value: "", label: t("project.columnNoValue", { field: fieldName(key) }), description: null, count: 0, color: null, avatar: null });
+    }
+    return rows;
+  });
+
+  /** 切片选中值归一：值失效（数据刷新后消失/切了字段）时自动落到第一个
+   *  有条目的值——平台 Team items 始终有选中切片。 */
+  function normalizeSlice() {
+    const key = view.value.sliceFieldId;
+    if (!key) return;
+    if (view.value.sliceValue === null) return; // Deselect 后保持未选中
+    const rows = sliceRows.value;
+    if (!rows.length) {
+      if (view.value.sliceValue) view.value.sliceValue = null;
+      return;
+    }
+    if (rows.some((r) => r.value === view.value.sliceValue)) return;
+    const hit = rows.find((r) => r.count > 0) ?? rows[0]!;
+    view.value.sliceValue = hit.value;
+  }
+  watch(sliceRows, normalizeSlice);
+
+  function setSliceField(key: string | null) {
+    view.value.sliceFieldId = key;
+    view.value.sliceValue = null;
+    normalizeSlice();
+  }
+  function setSliceValue(value: string | null) {
+    view.value.sliceValue = value;
+  }
+  function setSliceShowEmpty(show: boolean) {
+    view.value.sliceShowEmpty = show;
+  }
+
+  /** Slice by 菜单候选（平台 12 项 → 按本项目数据模型收敛，见交付说明）：
+   *  固定字段 Assignees/Status/Repository + 项目单选/数字/日期字段。 */
+  const sliceFieldChoices = computed(() => {
+    const out: { value: string; label: string; icon: string }[] = [
+      { value: "assignees", label: fieldName("assignees"), icon: "o.people" },
+      { value: "status", label: fieldName("status"), icon: "o.single-select" },
+      { value: "repository", label: t("project.colSource"), icon: "o.repo" },
+    ];
+    for (const f of fields.value) {
+      const key = viewKeyOfField(f);
+      if (key === "status" || key === "priority") continue;
+      const icon =
+        f.kind === "single_select" ? "o.single-select"
+        : f.kind === "number" ? "o.number"
+        : f.kind === "date" ? "o.calendar"
+        : null;
+      if (!icon) continue;
+      out.push({ value: key, label: f.name, icon });
+    }
+    // 优先级是单选字段但被上面 continue 跳过——按平台菜单位次补到自建字段之前
+    const prio = fields.value.find((f) => viewKeyOfField(f) === "priority");
+    if (prio) out.splice(3, 0, { value: "priority", label: t("project.colPriority"), icon: "o.single-select" });
+    return out;
+  });
+
   /** 列定义：分列字段的 options；有条目缺该字段值时追加「无」列（id = ""）。 */
   function columnOptions(): FieldOption[] {
     const field = columnField.value;
@@ -859,6 +1035,13 @@ export const useProjectsStore = defineStore("projects", () => {
     duplicateView,
     deleteView,
     filteredItems,
+    sliceActive,
+    sliceFieldName,
+    sliceRows,
+    sliceFieldChoices,
+    setSliceField,
+    setSliceValue,
+    setSliceShowEmpty,
     setSortBy,
     setSortDesc,
     setColumnFieldId,

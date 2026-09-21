@@ -46,8 +46,13 @@ onBeforeUnmount(() => {
   headsRO?.disconnect();
 });
 
-/** 是否分泳道：分泳道时列头抽成单独一行、泳道为带（平台形态）；不分时保持列盒（Backlog 现状）。 */
-const laneMode = computed(() => !!store.swimlaneField);
+/** 是否分泳道：分泳道时列头抽成单独一行、泳道为带（平台形态）；不分时保持列盒（Backlog 现状）。
+ *  泳道字段与分列字段同字段时退化（Team items 视图二者同为 Status——自身 × 自身无意义），
+ *  按不分泳道渲染（③适配标注：平台 Board 布局无泳道概念，此处是本实现的守卫）。 */
+const laneMode = computed(() => {
+  const lane = store.swimlaneField;
+  return !!lane && lane.id !== store.columnField?.id;
+});
 
 /** 列 = 视图「分列方式」字段的选项（含条目缺值时的「无」列；隐藏列剔除）。 */
 const columns = computed(() => store.columnOptions().filter((o) => !store.isHidden("column", o.id)));
@@ -517,6 +522,15 @@ const omniOpen = ref(false);
 
 /** 目标格：由列头 ＋ / 段头 ＋ / 格底 Add item 指定；打开输入条并锁定该格。 */
 function quickAdd(optionId: string, laneId: string | null = null) {
+  // 再点同一格的 ＋ = 收起（切换语义，与 Table/Roadmap 一致）；点其他格 = 改投目标。
+  // ＋ 触发点在 omnibar 打开期间都标 data-omni-host（外点关闭豁免），
+  // 否则 pointerdown 先关、click 再开，永远关不掉（点击异常实测翻车）
+  if (omniOpen.value && addColumn.value === optionId && addLane.value === laneId) {
+    omni.value?.close();
+    addColumn.value = null;
+    addLane.value = null;
+    return;
+  }
   addColumn.value = optionId;
   addLane.value = laneId;
   omni.value?.open();
@@ -578,6 +592,7 @@ async function submitConvert(item: ProjectItem, path: string) {
 <template>
   <div class="board-wrap" @drop="onDrop" @dragover.prevent>
   <div class="board" :style="{ '--heads-h': `${headsH}px` }">
+   <div class="board-flow">
     <!-- 分泳道时：列头单独一行（平台的列头行），最右是「Add a new column」；
          整板滚动时吸顶常驻（平台行为），泳道组头钉在它正下方 -->
     <div v-if="laneMode" ref="boardHeadsEl" class="board-heads">
@@ -604,6 +619,7 @@ async function submitConvert(item: ProjectItem, path: string) {
           <button
             class="col-btn plus"
             :title="t('project.addHere')"
+            :data-omni-host="omniOpen ? '' : undefined"
             @click="quickAdd(col.id, lanes[0]?.id ?? null)"
           >＋</button>
         </div>
@@ -692,6 +708,7 @@ async function submitConvert(item: ProjectItem, path: string) {
             <button
               class="col-btn plus"
               :title="t('project.addHere')"
+              :data-omni-host="omniOpen ? '' : undefined"
               @click="quickAdd(col.id, lanes[0]?.id ?? null)"
             >＋</button>
           </div>
@@ -775,6 +792,7 @@ async function submitConvert(item: ProjectItem, path: string) {
           type="button"
           :class="{ target: omniOpen && addColumn === col.id && addLane === lane.id }"
           :title="t('project.addItemRow')"
+          :data-omni-host="omniOpen ? '' : undefined"
           @click="quickAdd(col.id, lane.id)"
         >
           <EditorIcon name="o.plus" />
@@ -811,6 +829,7 @@ async function submitConvert(item: ProjectItem, path: string) {
     </template>
   </DropdownMenu>
       </div>
+   </div>
     </div>
 
     <!-- ① Create new issue（模态，复用 IssueCreateDialog） -->
@@ -919,13 +938,20 @@ async function submitConvert(item: ProjectItem, path: string) {
    sticky 需以滚动容器内容为参照：flex 子项的参照是整个内容高度（此前 grid
    布局下 sticky 被困在自身网格区域里，滚动时实际不吸顶）。
    width 取 max-content：背景条要盖住全部列宽，横向滚动时不露底。 */
+/* 全板宽度权威：列头行与所有泳道的共同父级。width 取 max-content
+   （最宽内容行），min-width 保证列少时铺满视口；子级行一律 width:100%
+   跟它对齐——泳道之间、泳道与列头之间的宽度差从构造上不可能出现
+   （此前各行独立 max-content，折叠泳道会比展开泳道短一截，实测翻车） */
+.board-flow {
+  width: max-content;
+  min-width: 100%;
+}
 .board-heads {
   position: sticky;
   top: 0;
   z-index: 6;
   flex: none;
-  width: max-content;
-  min-width: 100%;
+  width: 100%;
   display: flex;
   gap: 8px;
   background: var(--bg-panel);
@@ -993,8 +1019,7 @@ async function submitConvert(item: ProjectItem, path: string) {
   flex-direction: column;
   gap: 0; /* 泳道条与列体贴合（平台：连续头部，靠横条下边框分隔） */
   min-height: 0;
-  width: max-content;
-  min-width: 100%;
+  width: 100%; /* 跟随 board-flow（宽度权威），与列头行严格等宽 */
   flex-shrink: 0;
 }
 .lane-fill {
@@ -1068,13 +1093,23 @@ async function submitConvert(item: ProjectItem, path: string) {
   color: var(--text);
 }
 /* 列名 = 体系内「组头名称」档（--font-base/600，AGENTS.md 层级示例）。
-   平台此处是 24px 大标题，桌面不引入体系外尺寸，列宽也更窄。 */
+   平台此处是 24px 大标题，桌面不引入体系外尺寸，列宽也更窄。
+   可收缩 + 省略号：列头内容（名+计数+汇总+⋯+＋）超出 280 列宽时截断名称，
+   ＋/⋯ 必须留在卡片内（In progress 长名曾把 ＋ 顶出右缘，实测翻车） */
 .col-name {
   margin: 0;
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
   font-size: var(--font-base);
   font-weight: 600;
   line-height: 1.2;
   white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.col-count,
+.col-sum {
+  flex: none;
 }
 .col-spacer {
   flex: 1;

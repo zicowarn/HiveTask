@@ -57,7 +57,7 @@ const renderGroups = computed(() => {
   const f = swim.value;
   if (!f) {
     return [
-      { id: "__flat__", name: null as string | null, color: null as string | null, items: filteredItems.value, start: 0 },
+      { id: "__flat__", name: null as string | null, color: null as string | null, description: null as string | null, items: filteredItems.value, start: 0 },
     ];
   }
   let n = 0;
@@ -70,12 +70,16 @@ const renderGroups = computed(() => {
         id: o.id,
         name: o.id === "" ? t("project.columnNoValue", { field: f.name }) : o.name,
         color: o.color || null,
+        description: o.description || null,
         items,
         start: n,
       };
       n += items.length;
       return g;
-    });
+    })
+    // 切片激活时空分组不渲染（平台 Team items：选 Done 只显示 Done 组；
+    // 空组无条目不影响行号连续性）
+    .filter((g) => store.view.sliceFieldId === null || g.items.length > 0);
 });
 /** 组头 ⋯：从视图中隐藏该组（泳道维度隐藏走 hiddenLanes，与看板同机制）。 */
 function groupMenuItems(): ActionItem[] {
@@ -404,6 +408,25 @@ async function startGroupAdd(gid: string) {
   await nextTick();
   omni.value?.open();
 }
+/** 组内添加行的点击 = 切换（再点同一行 ＋ 收起）。输入条内部点击不参与——
+ *  外点关闭监听已豁免宿主行（data-omni-host），关闭职责归本 handler */
+function onGroupAddRowClick(gid: string, event: MouseEvent) {
+  if ((event.target as HTMLElement | null)?.closest(".omnibar")) return;
+  if (addingGroup.value === gid) {
+    addingGroup.value = null;
+    return;
+  }
+  void startGroupAdd(gid);
+}
+/** 扁平模式表尾添加行：同一切换语义 */
+function onFlatAddRowClick(event: MouseEvent) {
+  if ((event.target as HTMLElement | null)?.closest(".omnibar")) return;
+  if (adding.value) {
+    adding.value = false;
+    return;
+  }
+  void openAdd();
+}
 const createOpen = ref(false);
 const drawerOpen = ref(false);
 const repoChoices = ref<
@@ -628,6 +651,8 @@ function onRowClick(item: ProjectItem, event: MouseEvent) {
                 <span v-for="s in store.laneSums(g.id)" :key="s.label" class="grp-sum">
                   {{ s.label }}: {{ s.value }}
                 </span>
+                <!-- 组头描述（平台：选项说明随组头展示，如 "This is actively being worked on"） -->
+                <span v-if="g.description" class="grp-desc">{{ g.description }}</span>
                 <span class="th-spacer"></span>
                 <ActionMenu
                   trigger-icon="ellipsis"
@@ -749,10 +774,17 @@ function onRowClick(item: ProjectItem, event: MouseEvent) {
                扁平模式的添加行走 tfoot）。组间隙不挂在这行上——折叠组不渲染
                添加行，间隙会随折叠消失（P1→P2 无间隙十轮未解的根因），
                载体改为组头行的 border-top，见 .tbl-grouprow--gap -->
-          <tr v-if="swim" class="add-row" @click="addingGroup !== g.id && startGroupAdd(g.id)">
-            <td class="add-plus"><EditorIcon name="o.plus" /></td>
-            <td :colspan="columns.length + 1" class="add-cell">
+          <tr
+            v-if="swim"
+            class="add-row"
+            :data-omni-host="addingGroup === g.id ? '' : undefined"
+            @click="onGroupAddRowClick(g.id, $event)"
+          >
+            <!-- 单格全宽（含行号列）：＋/输入框两种状态都从行最左开始，
+                 ＋ 与文本紧邻——分格会让文本缩进到标题列、＋ 与文本间距过大（实测翻车） -->
+            <td :colspan="columns.length + 2" class="add-cell">
               <button v-if="addingGroup !== g.id" type="button" class="add-trigger">
+                <EditorIcon name="o.plus" />
                 <span>{{ t("project.addItemRow") }}</span>
               </button>
               <ProjectOmnibar
@@ -773,11 +805,15 @@ function onRowClick(item: ProjectItem, event: MouseEvent) {
       <!-- 全宽 add 行仅扁平模式（泳道维度激活时改为每组独立添加） -->
       <tfoot v-if="!swim">
         <!-- 底部 add 行（平台：+ 在行首、提示文案随行；点击展开 omnibar 输入条） -->
-        <tr class="add-row" @click="!adding && openAdd()">
-          <td class="add-plus"><EditorIcon name="o.plus" /></td>
-          <!-- colspan 覆盖 num + 全部数据列 + 表尾新建列（fixed 布局下行数必须对齐） -->
-          <td :colspan="columns.length + 1" class="add-cell">
+        <tr
+          class="add-row"
+          :data-omni-host="adding ? '' : undefined"
+          @click="onFlatAddRowClick($event)"
+        >
+          <!-- 单格全宽（含行号列 + 表尾新建列）：同组内添加行，＋/输入框都顶行首 -->
+          <td :colspan="columns.length + 2" class="add-cell">
             <button v-if="!adding" type="button" class="add-trigger" @click.stop="openAdd">
+              <EditorIcon name="o.plus" />
               <span>{{ t("project.addItemRow") }}</span>
             </button>
             <ProjectOmnibar
@@ -1111,20 +1147,18 @@ tbody tr:hover td {
   border-color: var(--accent);
   background: var(--bg-app);
 }
-/* 底部 add 行（平台：+ 在行号位、提示文案；点击展开内联输入） */
+/* 底部 add 行（平台：+ 在行号位、提示文案；点击展开内联输入）。
+   高度与组内添加行/数据行统一为 40px 白区（全局「＋新增」行等高，
+   曾用 padding 撑出不定高，实测翻车）；灰隙不在此行——它只属于组间 */
+tfoot tr.add-row td {
+  height: 40px;
+  padding: 0 10px;
+}
 tfoot td {
   border-bottom: 1px solid var(--border);
-  padding: 6px 10px;
 }
 .add-row {
   cursor: pointer;
-}
-.add-plus {
-  text-align: center;
-  color: var(--text-dim);
-}
-.add-row:hover .add-plus {
-  color: var(--text);
 }
 .add-trigger {
   /* 块级（非 inline-flex）：inline 级会参与 td 行盒基线计算，把行高撑到
@@ -1212,6 +1246,14 @@ tfoot td {
   font-size: var(--font-sm);
   color: var(--text-dim);
 }
+/* 组头描述（平台 14px 常规次级色 → 桌面 13px token；③适配标注） */
+.grp-desc {
+  font-size: var(--font-base);
+  color: var(--text-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 /* 泳道分组的组间隙（平台每组 section 间 12px）：挂在每组「最后一个可见行」的
    border-bottom 上——border-bottom 向下绘制，不会像 border-top 那样在 collapse
    模型下向上叠进上一行的白盒（实测会啃掉 13px，添加行因此显矮）。
@@ -1223,8 +1265,10 @@ tbody tr.add-row > td,
   border-bottom: 12px solid var(--bg-app);
 }
 /* 全局 box-sizing: border-box 下 12px 灰隙计入行盒内部（会啃掉白区，实测添加行
-   只剩 31.5px）；显式补高 12px 使白区恒为 38，与其他行一致 */
+   只剩 31.5px）；显式补高使白区与数据行一致。数据行实测渲染节距是 40px
+   （td height 38 是 cell 的最小值语义，实际被行内容撑到 40），白区取 40：
+   height = 40 白区 + 12 灰隙 = 52 */
 tbody tr.add-row > td {
-  height: 50px;
+  height: 52px;
 }
 </style>

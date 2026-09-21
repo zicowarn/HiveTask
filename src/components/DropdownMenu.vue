@@ -62,6 +62,8 @@ const props = withDefaults(
     panelTitle?: { icon?: string; label: string } | null;
     /** 动作行沉底（平台 Add field 面板的 New field 在列表末尾）。 */
     actionBottom?: boolean;
+    /** menuForm 下不渲染行首 ✓ 占位（平台 Slice by 菜单：纯图标+名称，无勾选列）。 */
+    hideCheck?: boolean;
   }>(),
   {
     options: () => [],
@@ -77,6 +79,7 @@ const props = withDefaults(
     menuMaxHeight: undefined,
     panelTitle: null,
     actionBottom: false,
+    hideCheck: false,
   },
 );
 
@@ -327,10 +330,16 @@ onBeforeUnmount(() => {
               <EditorIcon v-if="isOpen(option.value)" name="o.check" />
             </span>
             <EditorIcon
-              v-else-if="menuForm"
+              v-else-if="menuForm && !hideCheck"
               name="o.check"
               class="dd-lead"
               :class="{ on: isOpen(option.value) }"
+            />
+            <!-- menuForm 行的字段图标（平台 Slice by 菜单形态：✓ + 图标 + 名称） -->
+            <EditorIcon
+              v-if="menuForm && option.icon"
+              :name="option.icon"
+              class="dd-field-icon"
             />
             <EditorIcon v-else-if="option.icon && !checkbox" :name="option.icon" />
             <!-- checkboxStart 行的字段图标：独立分支（不能挂在前一方框的 v-else-if 上） -->
@@ -574,5 +583,10 @@ onBeforeUnmount(() => {
 }
 .dd-lead.on {
   visibility: visible;
+}
+/* menuForm 行的字段图标（Slice by 菜单）：次级色 */
+.dd-field-icon {
+  flex: none;
+  color: var(--text-dim);
 }
 </style>

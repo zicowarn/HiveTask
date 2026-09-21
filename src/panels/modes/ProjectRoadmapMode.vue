@@ -134,7 +134,7 @@ const roadmapGroups = computed(() => {
   const f = store.swimlaneField;
   if (!f) {
     return [
-      { id: "__flat__", name: null as string | null, color: null as string | null, items: filteredItems.value, start: 0 },
+      { id: "__flat__", name: null as string | null, color: null as string | null, description: null as string | null, items: filteredItems.value, start: 0 },
     ];
   }
   let n = 0;
@@ -147,12 +147,16 @@ const roadmapGroups = computed(() => {
         id: o.id,
         name: o.id === "" ? t("project.columnNoValue", { field: f.name }) : o.name,
         color: o.color || null,
+        description: o.description || null,
         items,
         start: n,
       };
       n += items.length;
       return g;
-    });
+    })
+    // 切片激活时空分组不渲染（平台 Team items：选 Done 只显示 Done 组；
+    // 空组无条目不影响行号连续性）
+    .filter((g) => store.view.sliceFieldId === null || g.items.length > 0);
 });
 
 // ---- 范围覆盖条目日期：卡片日期早于/晚于当前范围时自动扩张（只增不减，
@@ -352,6 +356,16 @@ async function startGroupAdd(gid: string) {
   addingGroup.value = gid;
   await nextTick();
   groupOmni.value?.open();
+}
+/** 组内添加行点击 = 切换（再点收起）；输入条内部点击不参与。
+ *  外点关闭监听已豁免宿主行（data-omni-host），否则先关后开关不掉 */
+function onGroupAddRowClick(gid: string, event: MouseEvent) {
+  if ((event.target as HTMLElement | null)?.closest(".omnibar")) return;
+  if (addingGroup.value === gid) {
+    addingGroup.value = null;
+    return;
+  }
+  void startGroupAdd(gid);
 }
 const createOpen = ref(false);
 const drawerOpen = ref(false);
@@ -591,6 +605,8 @@ function onMarkersClick() {
               <span v-for="s in store.laneSums(g.id)" :key="s.label" class="rm-groupsum">
                 {{ s.label }}: {{ s.value }}
               </span>
+              <!-- 组头描述（平台：选项说明随组头展示；Table 同款） -->
+              <span v-if="g.description" class="rm-groupdesc">{{ g.description }}</span>
             </div>
             <div class="rm-groupband"></div>
           </div>
@@ -690,7 +706,8 @@ function onMarkersClick() {
             v-if="swimGrouped && !store.isLaneCollapsed(g.id)"
             class="rm-addrow"
             :style="{ width: fieldW + 'px' }"
-            @click="addingGroup !== g.id && startGroupAdd(g.id)"
+            :data-omni-host="addingGroup === g.id ? '' : undefined"
+            @click="onGroupAddRowClick(g.id, $event)"
           >
             <button v-if="addingGroup !== g.id" type="button" class="rm-additem">
               <EditorIcon name="o.plus" />
@@ -732,6 +749,8 @@ function onMarkersClick() {
           class="rm-todayline"
           :style="{ left: fieldW + (todayIndex - kDays) * dayWidth + dayWidth / 2 - 0.5 + 'px' }"
         ></div>
+        <!-- 字段列右缘贯通线：组间灰带过处行边框断线，用它补成连续竖线 -->
+        <div class="rm-fieldedge" :style="{ left: fieldW - 1 + 'px' }"></div>
         </div>
         <!-- 字段列收尾条：右边框与白底延伸到窗口底（平台同款） -->
         <!-- 表格收口线：Add item 行下的整行宽 border（平台同款），之后灰带铺到底 -->
@@ -917,6 +936,16 @@ function onMarkersClick() {
   position: relative;
   flex: none;
 }
+/* 字段列右缘贯通线：补齐组间灰带过处的断线（行自身 border-right 只在行内）。
+   z1：灰带（z-auto）之上、条目行（z2）之下；与今日红线同层，后绘者在上 */
+.rm-fieldedge {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  z-index: 1;
+  background: var(--border);
+}
 /* 今日红线：半透明红 1px；上接表头红点，下到条目区底。
    层序：灰底网格 z0 < 本线 z1 < 条目行 z2（红线从卡片背后穿过，平台同款） */
 .rm-todayline {
@@ -928,12 +957,14 @@ function onMarkersClick() {
   background: color-mix(in srgb, var(--danger) 30%, transparent);
 }
 /* 网格背景层：整个时间轴区统一灰底（--bg-app = #f6f8fa 平台实测同源），
-   每 7 天一条周线；行下方直到窗口底同样铺满 */
+   每 7 天一条周线；行下方直到窗口底同样铺满。
+   z1：必须压在组间灰带（组头 border-top，z-auto）之上——否则灰带过处
+   周线断线（实测翻车）；同时低于条目行 z2（卡片盖在周线上） */
 .rm-gridlayer {
   position: absolute;
   top: 72px;
   bottom: 0;
-  z-index: 0;
+  z-index: 1;
   background: var(--bg-app);
 }
 .rm-cell {
@@ -958,15 +989,18 @@ function onMarkersClick() {
   display: flex;
   height: 40px;
 }
-/* 泳道组头（平台 Group by 行）：白底横贯、折叠/色点/名称/计数/汇总；
-   组间 12px 灰底间隙（折叠后同样保留） */
+/* 泳道组头（平台 Group by 行）：白底横贯、折叠/色点/名称/计数/汇总。
+   组间 12px 间隙 = 真实灰带（border-top 全宽）——不用 margin：margin 区域透明，
+   字段列侧露白、画布侧露网格灰，与邻区同色导致间隙"隐形"（实测翻车）。
+   全局 border-box 下行高补到 52（12 灰带 + 40 内容） */
 .rm-grouprow {
   position: relative;
   display: flex;
   height: 40px;
 }
 .rm-grouprow.gap {
-  margin-top: 12px;
+  border-top: 12px solid var(--bg-app);
+  height: 52px;
 }
 .rm-grouphead {
   position: sticky;
@@ -975,6 +1009,7 @@ function onMarkersClick() {
   display: flex;
   align-items: center;
   gap: 8px;
+  height: 40px;
   padding: 0 10px 0 20px;
   background: var(--bg-panel);
   border-right: 1px solid var(--border);
@@ -1024,6 +1059,14 @@ function onMarkersClick() {
   border-radius: 9999px;
   font-size: var(--font-sm);
   color: var(--text-dim);
+}
+/* 组头描述（平台 14px 常规次级色 → 桌面 13px token；③适配标注） */
+.rm-groupdesc {
+  font-size: var(--font-base);
+  color: var(--text-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .rm-groupband {
   flex: none;
@@ -1204,10 +1247,14 @@ function onMarkersClick() {
   left: 0;
   z-index: 3;
   flex: none;
+  display: flex;
+  align-items: center;
   background: var(--bg-panel);
   border-right: 1px solid var(--border);
-  /* 平台：Add item 行下不再画线，字段列白底与右边框继续延伸到窗口底 */
-  min-height: 34px;
+  /* 平台：Add item 行下不再画线，字段列白底与右边框继续延伸到窗口底。
+     高度 = 数据行 40px（34px 曾比数据行矮一截，实测翻车）；组间隙由
+     下一组组头的 border-top 灰带承担，不在这行上加 */
+  min-height: 40px;
 }
 /* 字段列收尾条：撑满 Add item 之下的剩余高度（右边框贯穿到底，平台同款） */
 /* 底部灰带：Add item 之下整行宽（含字段列区域）统一灰底到窗口底。
