@@ -257,7 +257,11 @@ export function tableItems(state: EditorState, onEdit?: () => void): RenderItem[
   fullSyntaxTree(state).iterate({
     enter: (node: SyntaxNodeRef) => {
       if (node.name !== "Table") return;
-      if (cursorTouches(state, node.from, node.to)) return;
+      // 单元格直接编辑期间保持渲染态：编辑会话覆盖该表时，selection 变化
+      // （光标被挪进范围）不应把表格塌回源码——那正是用户报的"点两下变源码"。
+      const session = TableWidget.editing;
+      if (session && session.from === node.from && session.to === node.to) return;
+      if (!session && cursorTouches(state, node.from, node.to)) return;
       const source = state.doc.sliceString(node.from, node.to);
       if (!parseTable(source)) return;
       const first = state.doc.lineAt(node.from);
