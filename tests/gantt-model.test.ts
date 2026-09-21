@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { arrowPath, buildGanttTree, defaultEndField, ganttRange, type GanttTask } from "../src/panels/gantt-model";
+import { arrowPath, buildGanttTree, defaultEndField, ganttRange, wouldCreateCycle, type GanttTask } from "../src/panels/gantt-model";
 import type { IssueRelations } from "../src/api";
 
 const rel = (partial: Partial<IssueRelations>): IssueRelations => ({
@@ -145,6 +145,35 @@ describe("甘特时间窗与箭头几何", () => {
     expect(d).toContain("V 64"); // 绕行到目标行下方 14px
     expect(tipX).toBe(120);
     expect(tipY).toBe(50);
+  });
+});
+
+describe("甘特依赖合并与环检测（G3-a 容器泳道）", () => {
+  it("dependsOn = 平台镜像 ∪ 本地真源（去重）", () => {
+    const nodes = buildGanttTree([
+      task({ id: "a", number: "1", relations: rel({ blockedBy: [{ number: "2", title: "", state: "OPEN" }] }), localDeps: ["c"] }),
+      task({ id: "b", number: "2" }),
+      task({ id: "c", number: "3", localDeps: ["b"] }),
+    ]);
+    const a = nodes.find((n) => n.id === "a")!;
+    expect(a.dependsOn).toEqual(["b", "c"]); // 平台 b + 本地 c
+  });
+
+  it("本地依赖与平台依赖指向同一条目时去重", () => {
+    const nodes = buildGanttTree([
+      task({ id: "a", number: "1", relations: rel({ blockedBy: [{ number: "2", title: "", state: "OPEN" }] }), localDeps: ["b"] }),
+      task({ id: "b", number: "2" }),
+    ]);
+    expect(nodes.find((n) => n.id === "a")!.dependsOn).toEqual(["b"]);
+  });
+
+  it("wouldCreateCycle：自指/直达/传递环 与 无环方向", () => {
+    const deps: Record<string, string[]> = { a: ["b"], b: ["c"] };
+    expect(wouldCreateCycle(deps, "a", "a")).toBe(true); // 自指
+    expect(wouldCreateCycle(deps, "a", "b")).toBe(false); // b→c，c 无出边，不回 a → 无环
+    expect(wouldCreateCycle(deps, "c", "a")).toBe(true); // a→b→c 回到 c
+    expect(wouldCreateCycle(deps, "b", "c")).toBe(false); // 无环方向
+    expect(wouldCreateCycle(deps, "a", "c")).toBe(false);
   });
 });
 

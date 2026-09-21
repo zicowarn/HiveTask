@@ -897,11 +897,45 @@ export const useProjectsStore = defineStore("projects", () => {
     }
   }
 
+  // ---- 甘特依赖边（容器真源泳道；随项目装载，写动作失败抛错由调用方提示） ----
+  /** itemId → 被依赖条目 id 列表（投影合并平台镜像 ∪ 本地真源用）。 */
+  const localDeps = ref<Record<string, string[]>>({});
+
+  async function loadDeps() {
+    if (!isTauri() || !selectedId.value) {
+      localDeps.value = {};
+      return;
+    }
+    try {
+      const rows = await api.projectDepList(selectedId.value);
+      const map: Record<string, string[]> = {};
+      for (const d of rows) {
+        (map[d.itemId] ??= []).push(d.dependsOn);
+      }
+      localDeps.value = map;
+    } catch {
+      localDeps.value = {}; // 读失败不阻塞面板（甘特按无本地依赖渲染）
+    }
+  }
+
+  async function addItemDep(itemId: string, dependsOn: string) {
+    if (!selectedId.value) return;
+    await api.projectDepAdd(selectedId.value, itemId, dependsOn);
+    await loadDeps();
+  }
+
+  async function removeItemDep(itemId: string, dependsOn: string) {
+    if (!selectedId.value) return;
+    await api.projectDepRemove(selectedId.value, itemId, dependsOn);
+    await loadDeps();
+  }
+
   async function loadSelected() {
     if (!isTauri() || !selectedId.value) {
       fields.value = [];
       items.value = [];
       boundRepos.value = [];
+      localDeps.value = {};
       return;
     }
     try {
@@ -911,6 +945,7 @@ export const useProjectsStore = defineStore("projects", () => {
         api.projectRepoList(selectedId.value),
       ]);
       expandCatalogue();
+      void loadDeps();
     } catch (e) {
       error.value = translateError(String(e));
     }
@@ -1113,6 +1148,9 @@ export const useProjectsStore = defineStore("projects", () => {
     setMarkersDueDate,
     roadmapMilestoneMeta,
     loadRoadmapMilestones,
+    localDeps,
+    addItemDep,
+    removeItemDep,
     setFieldSort,
     addFieldFilter,
     toggleField,

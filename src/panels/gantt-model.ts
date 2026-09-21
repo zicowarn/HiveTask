@@ -13,6 +13,8 @@ export interface GanttTask {
   id: string;
   repoId: string | null;
   number: string | null;
+  /** 条目形态（依赖编辑的写路由按它分级：draft/本地 issue 可写，平台引用 G3-b）。 */
+  kind: "issue" | "pull" | "draft";
   title: string;
   /** 计划起止（YYYY-MM-DD 或 ISO；调用方保证合法或 null）。 */
   start: string | null;
@@ -21,6 +23,8 @@ export interface GanttTask {
    *  子 Issue 摘要只是过程度量。 */
   closed?: boolean;
   relations: IssueRelations | null;
+  /** 容器真源依赖（app.db project_item_deps，origin=NULL）：被依赖条目 id。 */
+  localDeps?: string[];
 }
 
 export interface GanttNode {
@@ -85,6 +89,9 @@ export function buildGanttTree(tasks: GanttTask[]): GanttNode[] {
       const target = t.repoId ? byKey.get(`${t.repoId}::${ref.number}`) : undefined;
       if (target) out.push(target.id);
     }
+    for (const dep of t.localDeps ?? []) {
+      if (!out.includes(dep)) out.push(dep); // 平台镜像 ∪ 容器真源，去重
+    }
     return out;
   };
 
@@ -138,6 +145,28 @@ export function buildGanttTree(tasks: GanttTask[]): GanttNode[] {
   };
   for (const r of roots) walk(r);
   return flat;
+}
+
+/**
+ * 环检测（新建依赖前的 UX 预检；Rust 侧 dep_add_in 为权威，两者同构）：
+ * 从 dependsOn 沿「依赖谁」方向走，回到 itemId 即成环。
+ */
+export function wouldCreateCycle(
+  deps: Record<string, string[]>,
+  itemId: string,
+  dependsOn: string,
+): boolean {
+  if (itemId === dependsOn) return true;
+  const stack = [dependsOn];
+  const seen = new Set<string>();
+  while (stack.length) {
+    const cur = stack.pop()!;
+    if (cur === itemId) return true;
+    if (seen.has(cur)) continue;
+    seen.add(cur);
+    stack.push(...(deps[cur] ?? []));
+  }
+  return false;
 }
 
 /**

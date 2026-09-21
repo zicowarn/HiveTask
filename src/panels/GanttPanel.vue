@@ -21,17 +21,18 @@ import { api, isTauri, type IssueRelations, type ProjectItem } from "../api";
 import { useI18n } from "../i18n";
 import { useTheme } from "../theme";
 import { pushToast } from "../toast";
+import { translateError } from "../gh-errors";
 import { itemTitle } from "./item-fields";
 import EditorIcon from "../components/EditorIcon.vue";
 import DropdownMenu from "../components/DropdownMenu.vue";
-import { buildGanttTree, defaultEndField, type GanttNode, type GanttTask } from "./gantt-model";
+import { buildGanttTree, defaultEndField, wouldCreateCycle, type GanttNode, type GanttTask } from "./gantt-model";
 
 /** 面板外壳身份：Editor 面板必须经 PanelShell 提供切换器/分栏/关闭
  *  （leafId/panelType 由 WorkbenchNode 透传）。缺了它 = 切进来出不去。 */
 defineProps<{ leafId?: string; panelType?: string }>();
 
 const store = useProjectsStore();
-const { filteredItems, fields, selectedId, loading: storeLoading } = storeToRefs(store);
+const { filteredItems, fields, selectedId, loading: storeLoading, localDeps } = storeToRefs(store);
 const { t, locale } = useI18n();
 const { resolvedTheme } = useTheme();
 
@@ -114,11 +115,13 @@ const tasks = computed<GanttTask[]>(() =>
     id: it.id,
     repoId: it.repoId,
     number: it.number,
+    kind: it.kind,
     title: itemTitle(it),
     start: dateOf(it, startField.value?.id),
     end: dateOf(it, endField.value?.id),
     closed: (it.entity?.state ?? "").toUpperCase() === "CLOSED",
     relations: relationsByKey.value[relKey(it.repoId, it.number)] ?? null,
+    localDeps: localDeps.value[it.id],
   })),
 );
 const nodes = computed(() => buildGanttTree(tasks.value));
@@ -127,6 +130,103 @@ const undatedCount = computed(() => nodes.value.filter((n) => !n.start).length);
 /** 数字 id 映射（jordium 的 Task.id 是 number）：条目 id → 序号，正反向各一份。 */
 const idOf = computed(() => new Map(nodes.value.map((n, i) => [n.id, i + 1])));
 const nodeById = computed(() => new Map(nodes.value.map((n) => [n.id, n])));
+/** jordium 数字 id → 条目 id（事件负载反解）。 */
+const nodeIdOf = computed(() => {
+  const out = new Map<number, string>();
+  for (const [nodeId, jid] of idOf.value) out.set(jid, nodeId);
+  return out;
+});
+
+// ---- 依赖编辑（G3-a 容器真源泳道）----
+/** 仓库平台缓存（形态分级用：本地 issue 引用也属容器形态）。 */
+const repoPlatform = ref<Record<string, string>>({});
+onMounted(async () => {
+  void loadRelations();
+  try {
+    const repos = await api.repoList();
+    const map: Record<string, string> = {};
+    for (const r of repos) if (r.id) map[r.id] = r.platform ?? "";
+    repoPlatform.value = map;
+  } catch {
+    /* 平台未知 → 按平台形态处理（保守） */
+  }
+});
+
+/** 写路由（《架构设计-甘特计划面》§4）：草稿与本地仓库的 issue 引用 = 容器
+ *  真源（直接写 app.db）；GitHub/Gitea/Gitee 引用 = 平台真源（写穿透属
+ *  G3-b，当前诚实拒绝）；PR 引用不参与（blockedBy 是 issue 语义）。 */
+function isContainerForm(nodeId: string): boolean {
+  const item = filteredItems.value.find((i) => i.id === nodeId);
+  if (!item) return false;
+  if (item.kind === "draft") return true;
+  if (item.kind === "issue" && item.repoId) {
+    return repoPlatform.value[item.repoId] === "local";
+  }
+  return false;
+}
+
+/** 锚点连线（两个事件负载同构：targetTask 依赖 newTask）。
+ *  库已先改自己内部数组——我们不认它，只认写库成功后的重投影。 */
+async function onDepLink(payload: { targetTask?: JTask; newTask?: JTask }) {
+  const targetId = payload.targetTask?.id != null ? nodeIdOf.value.get(payload.targetTask.id) : undefined;
+  const newId = payload.newTask?.id != null ? nodeIdOf.value.get(payload.newTask.id) : undefined;
+  if (!targetId || !newId) return;
+  if (!isContainerForm(targetId) || !isContainerForm(newId)) {
+    pushToast({ kind: "info", message: t("gantt.depPlatformTodo") });
+    jTasks.value = toJordiumTasks(nodes.value); // 回滚库内的乐观改动
+    return;
+  }
+  if (wouldCreateCycle(localDeps.value, targetId, newId)) {
+    pushToast({ kind: "error", message: t("gantt.depCycle") });
+    jTasks.value = toJordiumTasks(nodes.value);
+    return;
+  }
+  try {
+    await store.addItemDep(targetId, newId);
+  } catch (e) {
+    pushToast({ kind: "error", message: translateError(String(e)) });
+    jTasks.value = toJordiumTasks(nodes.value);
+  }
+}
+
+/** 连线删除：负载 sourceTaskId=前驱、targetTaskId=后继（target 依赖 source）。
+ *  只删容器真源边；平台镜像边删不掉（归 G1 刷新/G3-b），回滚乐观改动。 */
+async function onDepUnlink(payload: { sourceTaskId?: number; targetTaskId?: number }) {
+  const sourceId = payload.sourceTaskId != null ? nodeIdOf.value.get(payload.sourceTaskId) : undefined;
+  const targetId = payload.targetTaskId != null ? nodeIdOf.value.get(payload.targetTaskId) : undefined;
+  if (!sourceId || !targetId) return;
+  const isLocal = (localDeps.value[targetId] ?? []).includes(sourceId);
+  if (!isLocal) {
+    jTasks.value = toJordiumTasks(nodes.value); // 平台镜像边：不可删，恢复
+    return;
+  }
+  try {
+    await store.removeItemDep(targetId, sourceId);
+  } catch (e) {
+    pushToast({ kind: "error", message: translateError(String(e)) });
+    jTasks.value = toJordiumTasks(nodes.value);
+  }
+}
+
+/** 新增任务（容器草稿 + 播种 今天→+3 天：编辑器默认值，可拖改——
+ *  《甘特计划面》§7，非数据伪造）。 */
+async function addSeededTask() {
+  if (!selectedId.value) return;
+  const item = await store.addItem({
+    projectId: selectedId.value,
+    kind: "draft",
+    draftTitle: t("gantt.newTaskName"),
+  });
+  const start = new Date();
+  const end = new Date(start.getTime() + 3 * 86_400_000);
+  const iso = (d: Date) => d.toISOString().slice(0, 10);
+  try {
+    if (startField.value) await store.setFieldValue(item.id, startField.value.id, iso(start));
+    if (endField.value) await store.setFieldValue(item.id, endField.value.id, iso(end));
+  } catch (e) {
+    pushToast({ kind: "error", message: translateError(String(e)) });
+  }
+}
 
 /** 折叠状态跨重建保留（库的折叠事件回写到这里）。 */
 const collapsed = ref<Set<number>>(new Set());
@@ -300,6 +400,10 @@ watch(
           :model-value="scale"
           @update:model-value="scale = $event as GanttScale"
         />
+        <button class="gt-add" @click="addSeededTask">
+          <EditorIcon name="o.plus" />
+          <span>{{ t("gantt.addTask") }}</span>
+        </button>
       </div>
       <p v-if="relationsError" class="gt-warn">{{ t("gantt.depsFailed") }}</p>
 
@@ -324,7 +428,7 @@ watch(
           :link-config="linkConfig"
           :task-list-config="taskListConfig"
           :allow-drag-and-resize="true"
-          :enable-link-anchor="false"
+          :enable-link-anchor="true"
           :use-default-drawer="false"
           :enable-task-list-context-menu="false"
           :enable-task-bar-context-menu="false"
@@ -333,6 +437,9 @@ watch(
           @taskbar-drag-end="onBarDatesChanged"
           @taskbar-resize-end="onBarDatesChanged"
           @task-collapse-change="onCollapseChange"
+          @predecessor-added="onDepLink"
+          @successor-added="onDepLink"
+          @link-deleted="onDepUnlink"
         />
       </div>
     </div>
@@ -402,6 +509,24 @@ watch(
 }
 .gt-dd-scale :deep(.dd-trigger) {
   width: 72px;
+}
+/* 新增任务：与刷新按钮同款 22px 小按钮 */
+.gt-add {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 22px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  background: var(--bg-panel);
+  color: var(--text);
+  font-size: var(--font-md);
+  border-radius: 5px;
+  cursor: pointer;
+}
+.gt-add:hover {
+  border-color: var(--accent);
+  color: var(--accent);
 }
 .gt-warn {
   margin: 0;

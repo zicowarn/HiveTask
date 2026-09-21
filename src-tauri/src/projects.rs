@@ -638,7 +638,105 @@ fn next_rank_in(conn: &Connection, project_id: &str) -> Result<String, String> {
 pub fn item_remove_in(conn: &Connection, item_id: &str) -> Result<(), String> {
     conn.execute("DELETE FROM project_field_values WHERE item_id = ?1", (item_id,))
         .map_err(|e| e.to_string())?;
+    // 依赖边双向级联（甘特计划面 §3：条目删除，两端都清）
+    conn.execute("DELETE FROM project_item_deps WHERE item_id = ?1 OR depends_on = ?1", (item_id,))
+        .map_err(|e| e.to_string())?;
     conn.execute("DELETE FROM project_items WHERE id = ?1", (item_id,)).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+// ---- 甘特依赖边（容器真源泳道；《架构设计-甘特计划面》§3–4）----
+
+/// 一条依赖边：item_id 依赖 depends_on（FS 语义）。G3-a 只写容器真源
+/// （origin NULL）；平台镜像行待 G3-b 写穿透落地时由 G1 刷新整组重写。
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ItemDep {
+    pub item_id: String,
+    pub depends_on: String,
+    pub origin: Option<String>,
+}
+
+pub fn deps_in(conn: &Connection, project_id: &str) -> Result<Vec<ItemDep>, String> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT d.item_id, d.depends_on, d.origin
+             FROM project_item_deps d
+             JOIN project_items i ON i.id = d.item_id
+             WHERE i.project_id = ?1
+             ORDER BY d.item_id, d.depends_on",
+        )
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map((project_id,), |row| {
+            Ok(ItemDep {
+                item_id: row.get(0)?,
+                depends_on: row.get(1)?,
+                origin: row.get(2)?,
+            })
+        })
+        .map_err(|e| e.to_string())?;
+    rows.collect::<std::result::Result<Vec<_>, _>>().map_err(|e| e.to_string())
+}
+
+/// 依赖是否成环：从 depends_on 沿「依赖谁」方向走，若回到 item_id 则成环
+/// （A→B、B→A 是最短环；合并图语义与前端 wouldCreateCycle 同构）。
+fn dep_creates_cycle(conn: &Connection, project_id: &str, item_id: &str, depends_on: &str) -> bool {
+    let Ok(deps) = deps_in(conn, project_id) else { return true }; // 读不出图 = 拒写（保守）
+    let mut graph = std::collections::HashMap::<&str, Vec<&str>>::new();
+    for d in &deps {
+        graph.entry(d.item_id.as_str()).or_default().push(d.depends_on.as_str());
+    }
+    let mut stack = vec![depends_on];
+    let mut seen = std::collections::HashSet::new();
+    while let Some(cur) = stack.pop() {
+        if cur == item_id {
+            return true;
+        }
+        if !seen.insert(cur) {
+            continue;
+        }
+        if let Some(nexts) = graph.get(cur) {
+            stack.extend(nexts.iter().copied());
+        }
+    }
+    false
+}
+
+/// 新增依赖边（容器真源）。校验：同项目、非自指、不成环；幂等（已存在即成功）。
+pub fn dep_add_in(conn: &Connection, project_id: &str, item_id: &str, depends_on: &str) -> Result<(), String> {
+    if item_id == depends_on {
+        return Err("不能依赖自己".to_string());
+    }
+    for id in [item_id, depends_on] {
+        let n: i64 = conn
+            .query_row("SELECT COUNT(*) FROM project_items WHERE id = ?1 AND project_id = ?2", (id, project_id), |r| r.get(0))
+            .map_err(|e| e.to_string())?;
+        if n == 0 {
+            return Err("条目不在该项目内".to_string());
+        }
+    }
+    if dep_creates_cycle(conn, project_id, item_id, depends_on) {
+        return Err("会形成循环依赖".to_string());
+    }
+    conn.execute(
+        "INSERT OR IGNORE INTO project_item_deps (item_id, depends_on, origin) VALUES (?1, ?2, NULL)",
+        (item_id, depends_on),
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// 删除依赖边；只删容器真源（origin IS NULL）——平台镜像行的删除属 G3-b
+/// 写穿透，此口子不得误删镜像（镜像由 G1 刷新整组重写管理）。
+pub fn dep_remove_in(conn: &Connection, project_id: &str, item_id: &str, depends_on: &str) -> Result<(), String> {
+    conn.execute(
+        "DELETE FROM project_item_deps
+         WHERE item_id = ?1 AND depends_on = ?2 AND origin IS NULL
+           AND item_id IN (SELECT id FROM project_items WHERE project_id = ?3)",
+        (item_id, depends_on, project_id),
+    )
+    .map_err(|e| e.to_string())?;
     Ok(())
 }
 
@@ -1050,6 +1148,24 @@ pub fn project_repo_list(project_id: String) -> Result<Vec<BoundRepo>, String> {
     bound_repos_in(&conn, &project_id)
 }
 
+#[tauri::command]
+pub fn project_dep_list(project_id: String) -> Result<Vec<ItemDep>, String> {
+    let conn = crate::appdb::open().map_err(|e| e.to_string())?;
+    deps_in(&conn, &project_id)
+}
+
+#[tauri::command]
+pub fn project_dep_add(project_id: String, item_id: String, depends_on: String) -> Result<(), String> {
+    let conn = crate::appdb::open().map_err(|e| e.to_string())?;
+    dep_add_in(&conn, &project_id, &item_id, &depends_on)
+}
+
+#[tauri::command]
+pub fn project_dep_remove(project_id: String, item_id: String, depends_on: String) -> Result<(), String> {
+    let conn = crate::appdb::open().map_err(|e| e.to_string())?;
+    dep_remove_in(&conn, &project_id, &item_id, &depends_on)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1079,6 +1195,81 @@ mod tests {
         assert_eq!(status.options.len(), 3);
         assert_eq!(status.options[0].name, "Todo");
         assert_eq!(fields.iter().find(|f| f.kind == "single_select").unwrap().name, "优先级");
+    }
+
+    // ---- 甘特依赖边（G3-a）----
+
+    fn seed_items(conn: &Connection, project_id: &str, n: usize) -> Vec<String> {
+        (0..n)
+            .map(|i| {
+                item_add_in(conn, project_id, "draft", None, None, Some(&format!("t{i}")), None)
+                    .unwrap()
+                    .id
+            })
+            .collect()
+    }
+
+    #[test]
+    fn dep_add_list_remove_roundtrip() {
+        let conn = mem_db();
+        let p = project_create_in(&conn, "看板", None, None).unwrap();
+        let ids = seed_items(&conn, &p.id, 3);
+        // a 依赖 b、a 依赖 c
+        dep_add_in(&conn, &p.id, &ids[0], &ids[1]).unwrap();
+        dep_add_in(&conn, &p.id, &ids[0], &ids[2]).unwrap();
+        // 幂等：重复加同一条边不报错
+        dep_add_in(&conn, &p.id, &ids[0], &ids[1]).unwrap();
+        let deps = deps_in(&conn, &p.id).unwrap();
+        assert_eq!(deps.len(), 2);
+        assert!(deps.iter().all(|d| d.origin.is_none()), "G3-a 只写容器真源");
+        dep_remove_in(&conn, &p.id, &ids[0], &ids[1]).unwrap();
+        assert_eq!(deps_in(&conn, &p.id).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn dep_rejects_self_cross_project_and_cycle() {
+        let conn = mem_db();
+        let p1 = project_create_in(&conn, "甲", None, None).unwrap();
+        let p2 = project_create_in(&conn, "乙", None, None).unwrap();
+        let a = seed_items(&conn, &p1.id, 3);
+        let b = seed_items(&conn, &p2.id, 1);
+
+        assert!(dep_add_in(&conn, &p1.id, &a[0], &a[0]).is_err(), "自指拒绝");
+        assert!(dep_add_in(&conn, &p1.id, &a[0], &b[0]).is_err(), "跨项目拒绝");
+
+        dep_add_in(&conn, &p1.id, &a[0], &a[1]).unwrap(); // a0 → a1
+        dep_add_in(&conn, &p1.id, &a[1], &a[2]).unwrap(); // a1 → a2
+        assert!(dep_add_in(&conn, &p1.id, &a[2], &a[0]).is_err(), "三节点环拒绝");
+        assert!(dep_add_in(&conn, &p1.id, &a[2], &a[1]).is_err(), "两节点环拒绝");
+        assert_eq!(deps_in(&conn, &p1.id).unwrap().len(), 2, "拒绝后不加边");
+    }
+
+    #[test]
+    fn dep_remove_only_touches_container_truth() {
+        let conn = mem_db();
+        let p = project_create_in(&conn, "看板", None, None).unwrap();
+        let ids = seed_items(&conn, &p.id, 2);
+        // 手工插一条"平台镜像"行（origin 非空）——删除口子不得动它
+        conn.execute(
+            "INSERT INTO project_item_deps (item_id, depends_on, origin) VALUES (?1, ?2, 'gh')",
+            (&ids[0], &ids[1]),
+        )
+        .unwrap();
+        dep_remove_in(&conn, &p.id, &ids[0], &ids[1]).unwrap();
+        let deps = deps_in(&conn, &p.id).unwrap();
+        assert_eq!(deps.len(), 1, "镜像行保留（归 G1 刷新管理）");
+        assert_eq!(deps[0].origin.as_deref(), Some("gh"));
+    }
+
+    #[test]
+    fn item_remove_cascades_deps_both_directions() {
+        let conn = mem_db();
+        let p = project_create_in(&conn, "看板", None, None).unwrap();
+        let ids = seed_items(&conn, &p.id, 3);
+        dep_add_in(&conn, &p.id, &ids[0], &ids[1]).unwrap(); // 出边
+        dep_add_in(&conn, &p.id, &ids[2], &ids[0]).unwrap(); // 入边
+        item_remove_in(&conn, &ids[0]).unwrap();
+        assert_eq!(deps_in(&conn, &p.id).unwrap().len(), 0, "两端级联清空");
     }
 
     #[test]

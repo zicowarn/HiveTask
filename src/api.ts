@@ -199,6 +199,13 @@ export interface ProjectEntityMeta {
 }
 
 /** 项目绑定的仓库（接入配置标签随 repos 行携带）。 */
+/** 甘特依赖边：itemId 依赖 dependsOn（FS）。origin NULL = 容器真源。 */
+export interface ItemDep {
+  itemId: string;
+  dependsOn: string;
+  origin: string | null;
+}
+
 export interface BoundRepo {
   repoId: string;
   label: string;
@@ -665,6 +672,14 @@ export const api = {
     invoke<void>("project_repo_unbind", { projectId, repoId }),
   projectRepoList: (projectId: string) =>
     invoke<BoundRepo[]>("project_repo_list", { projectId }),
+  /** 甘特依赖边（容器真源泳道；《架构设计-甘特计划面》§3–4）。
+   *  add/remove 的环检测与归属校验在 Rust 侧权威执行。 */
+  projectDepList: (projectId: string) =>
+    invoke<ItemDep[]>("project_dep_list", { projectId }),
+  projectDepAdd: (projectId: string, itemId: string, dependsOn: string) =>
+    invoke<void>("project_dep_add", { projectId, itemId, dependsOn }),
+  projectDepRemove: (projectId: string, itemId: string, dependsOn: string) =>
+    invoke<void>("project_dep_remove", { projectId, itemId, dependsOn }),
   /** 线上仓库清单（按接入凭据拉取，用于「刷新从线上查找」）。 */
   /** 拉取线上 Projects 条目落本地看板；返回 [imported, skipped]。 */
   projectSyncItems: (projectId: string) =>
