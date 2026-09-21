@@ -127,6 +127,34 @@ const todayIndex = computed(() => {
   return days.value.findIndex((d) => d.getTime() === t0.getTime());
 });
 
+// ---- 泳道维度（如优先级）分组：激活时按选项分组渲染，无值段置底；
+// 行号跨组连续；展开/收起与 Table 分组共用 isLaneCollapsed ----
+const swimGrouped = computed(() => !!store.swimlaneField);
+const roadmapGroups = computed(() => {
+  const f = store.swimlaneField;
+  if (!f) {
+    return [
+      { id: "__flat__", name: null as string | null, color: null as string | null, items: filteredItems.value, start: 0 },
+    ];
+  }
+  let n = 0;
+  return store
+    .swimlaneOptions()
+    .filter((o) => !store.isHidden("lane", o.id))
+    .map((o) => {
+      const items = filteredItems.value.filter((i) => (i.fieldValues[f.id] ?? "") === o.id);
+      const g = {
+        id: o.id,
+        name: o.id === "" ? t("project.columnNoValue", { field: f.name }) : o.name,
+        color: o.color || null,
+        items,
+        start: n,
+      };
+      n += items.length;
+      return g;
+    });
+});
+
 // ---- 范围覆盖条目日期：卡片日期早于/晚于当前范围时自动扩张（只增不减，
 // 不动用户视口）。否则卡片画在画布负坐标区——← 箭头亮着却永远跳不到。----
 watch([filteredItems, activeDateField], () => {
@@ -521,35 +549,59 @@ function onMarkersClick() {
             :style="{ left: i * dayWidth + 'px', width: dayWidth + 'px' }"
           ></div>
         </div>
-        <!-- 条目行：字段格（吸附左）+ 白色卡片条 -->
-        <div v-for="(item, idx) in filteredItems" :key="item.id" class="rm-row">
-          <div class="rm-field" :style="{ width: fieldW + 'px' }">
-            <!-- 行号左侧悬停 ▾（平台：▾ + 行号并排，行号不隐藏）。
-                 行号 = 纯序号（1/2/3…，平台形态）；条目自己的 #编号 在标题后 -->
-            <span class="rm-numwrap">
-              <ActionMenu
-                class="rm-rowmenu"
-                trigger-icon="chevron"
-                open-on-hover
-                align="left"
-                :menu-width="280"
-                :menu-row-height="40"
-                :title="t('project.actItemMenu')"
-                :items="rowMenuItems(item)"
-                @pick="onRowMenuPick(item, $event)"
-              />
-              <span class="rm-num">{{ idx + 1 }}</span>
-            </span>
-            <EditorIcon
-              v-if="item.kind !== 'draft' && item.entity"
-              class="rm-state"
-              :name="item.kind === 'pull' ? 'pull' : (item.entity?.state ?? '').toUpperCase() === 'CLOSED' ? 'o.issue-closed' : 'o.issue-opened'"
-              :style="{ color: (item.entity?.state ?? '').toUpperCase() === 'CLOSED' || (item.entity?.state ?? '').toUpperCase() === 'MERGED' ? 'var(--merged)' : 'var(--success)' }"
-            />
-            <span class="rm-title" :class="{ ghosty: item.ghost }">{{ itemTitle(item) }}</span>
-            <span v-if="item.number" class="rm-ref">#{{ item.number }}</span>
-            <span class="rm-flex"></span>
+        <!-- 泳道维度（如优先级）激活：按选项分组渲染，组间 12px 灰底间隙、
+             组头带折叠/计数/汇总（与 Table 分组同机制） -->
+        <template v-for="(g, gi) in roadmapGroups" :key="g.id">
+          <div v-if="swimGrouped" class="rm-grouprow" :class="{ gap: gi > 0 }">
+            <div class="rm-grouphead" :style="{ width: fieldW + 'px' }">
+              <button
+                class="rm-groupcollapse"
+                :title="store.isLaneCollapsed(g.id) ? t('project.expandLane') : t('project.collapseLane')"
+                @click="store.toggleLaneCollapsed(g.id)"
+              >
+                <EditorIcon :name="store.isLaneCollapsed(g.id) ? 'chevron' : 'o.chevron-down'" />
+              </button>
+              <span v-if="g.color" class="rm-groupdot" :style="{ background: g.color }"></span>
+              <span class="rm-groupname">{{ g.name }}</span>
+              <span class="rm-groupcount">{{ g.items.length }}</span>
+              <span v-for="s in store.laneSums(g.id)" :key="s.label" class="rm-groupsum">
+                {{ s.label }}: {{ s.value }}
+              </span>
+            </div>
+            <div class="rm-groupband"></div>
           </div>
+          <!-- 条目行：字段格（吸附左）+ 白色卡片条 -->
+          <div
+            v-for="(item, idx) in g.items"
+            v-show="!store.isLaneCollapsed(g.id)"
+            :key="item.id"
+            class="rm-row"
+          >
+            <div class="rm-field" :style="{ width: fieldW + 'px' }">
+              <span class="rm-numwrap">
+                <ActionMenu
+                  class="rm-rowmenu"
+                  trigger-icon="chevron"
+                  open-on-hover
+                  align="left"
+                  :menu-width="280"
+                  :menu-row-height="40"
+                  :title="t('project.actItemMenu')"
+                  :items="rowMenuItems(item)"
+                  @pick="onRowMenuPick(item, $event)"
+                />
+                <span class="rm-num">{{ g.start + idx + 1 }}</span>
+              </span>
+              <EditorIcon
+                v-if="item.kind !== 'draft' && item.entity"
+                class="rm-state"
+                :name="item.kind === 'pull' ? 'pull' : (item.entity?.state ?? '').toUpperCase() === 'CLOSED' ? 'o.issue-closed' : 'o.issue-opened'"
+                :style="{ color: (item.entity?.state ?? '').toUpperCase() === 'CLOSED' || (item.entity?.state ?? '').toUpperCase() === 'MERGED' ? 'var(--merged)' : 'var(--success)' }"
+              />
+              <span class="rm-title" :class="{ ghosty: item.ghost }">{{ itemTitle(item) }}</span>
+              <span v-if="item.number" class="rm-ref">#{{ item.number }}</span>
+              <span class="rm-flex"></span>
+            </div>
           <!-- 时间条 = 平台的白色卡片（状态图标 + 标题 + 灰 #编号 + 右端头像）。
                barwrap 从字段列右缘起（canvas 坐标），条内 left = 时间轴局部偏移；
                沟槽位（紧贴字段列缘）：无日期条目 = ＋（写入今天）、
@@ -607,7 +659,8 @@ function onMarkersClick() {
               <span class="rm-handle right" @pointerdown.stop="beginDrag(item, 'end', $event)"></span>
             </span>
           </div>
-        </div>
+          </div>
+          </template>
         <!-- 字段列底部 Add item 行（吸附左；共享 omnibar） -->
         <div class="rm-addrow" :style="{ width: fieldW + 'px' }">
           <button v-if="!omniOpen" type="button" class="rm-additem" @click="openAdd">
@@ -830,6 +883,77 @@ function onMarkersClick() {
   position: relative;
   display: flex;
   height: 40px;
+}
+/* 泳道组头（平台 Group by 行）：白底横贯、折叠/色点/名称/计数/汇总；
+   组间 12px 灰底间隙（折叠后同样保留） */
+.rm-grouprow {
+  position: relative;
+  display: flex;
+  height: 40px;
+}
+.rm-grouprow.gap {
+  margin-top: 12px;
+}
+.rm-grouphead {
+  position: sticky;
+  left: 0;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 10px 0 20px;
+  background: var(--bg-panel);
+  border-right: 1px solid var(--border);
+  min-width: 0;
+}
+.rm-groupcollapse {
+  display: inline-flex;
+  align-items: center;
+  border: none;
+  background: transparent;
+  color: var(--text-dim);
+  padding: 2px;
+  border-radius: 5px;
+  cursor: pointer;
+}
+.rm-groupcollapse:hover {
+  color: var(--text);
+  background: var(--bg-hover);
+}
+.rm-groupdot {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+}
+.rm-groupname {
+  font-size: var(--font-base);
+  font-weight: 600;
+  color: var(--text);
+}
+.rm-groupcount {
+  display: inline-flex;
+  align-items: center;
+  height: 18px;
+  padding: 2px 6px;
+  border-radius: 20px;
+  background: #818b981f;
+  font-size: var(--font-sm);
+  color: var(--text-dim);
+}
+.rm-groupsum {
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  padding: 0 6px;
+  border: 1px solid var(--border);
+  border-radius: 9999px;
+  font-size: var(--font-sm);
+  color: var(--text-dim);
+}
+.rm-groupband {
+  flex: none;
+  width: 0;
 }
 /* 悬停行整体提层：行菜单（行内 absolute 后代）必须盖住后续行的
    不透明字段列（同为 z3，DOM 靠后者会盖住前行菜单） */

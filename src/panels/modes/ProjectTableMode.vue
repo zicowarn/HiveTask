@@ -32,11 +32,60 @@ const { t } = useI18n();
 
 const rows = computed(() => filteredItems.value);
 
+/** 泳道维度（视图「泳道」字段，如优先级）：存在时表格按其分组（平台
+ * Priority board 切 Table 布局 = 按优先级分组的表格，分组字段不再重复为列）。 */
+const swim = computed(() => store.swimlaneField);
+const swimKey = computed(() => {
+  const f = swim.value;
+  if (!f) return "";
+  if (f.kind === "builtin_status") return "status";
+  return f.name === "优先级" ? "priority" : f.id;
+});
+
 /** 列 = 视图「字段」开关打开的那些；顺序跟随 view.fields（平台的列移动
- * 就是对这个数组重排序。注意：字段显隐开关会把顺序归一回目录序）。 */
+ * 就是对这个数组重排序。注意：字段显隐开关会把顺序归一回目录序）。
+ * 泳道维度激活时，分组字段本身不重复为列（平台同款：泳道字段不上列）。 */
 const columns = computed(() =>
-  (store.view.fields as string[]).filter((id) => store.fieldCatalogue.some((f) => f.id === id)),
+  (store.view.fields as string[])
+    .filter((id) => store.fieldCatalogue.some((f) => f.id === id))
+    .filter((id) => id !== swimKey.value),
 );
+
+/** 分组渲染模型：泳道维度激活 = 每个选项一组（无值段置底，平台 No Priority）；
+ * 未激活 = 单一扁平组（无组头）。start = 组内行号的全局偏移（跨组连续编号）。 */
+const renderGroups = computed(() => {
+  const f = swim.value;
+  if (!f) {
+    return [
+      { id: "__flat__", name: null as string | null, color: null as string | null, items: filteredItems.value, start: 0 },
+    ];
+  }
+  let n = 0;
+  return store
+    .swimlaneOptions()
+    .filter((o) => !store.isHidden("lane", o.id))
+    .map((o) => {
+      const items = filteredItems.value.filter((i) => (i.fieldValues[f.id] ?? "") === o.id);
+      const g = {
+        id: o.id,
+        name: o.id === "" ? t("project.columnNoValue", { field: f.name }) : o.name,
+        color: o.color || null,
+        items,
+        start: n,
+      };
+      n += items.length;
+      return g;
+    });
+});
+/** 组头 ⋯：从视图中隐藏该组（泳道维度隐藏走 hiddenLanes，与看板同机制）。 */
+function groupMenuItems(): ActionItem[] {
+  return [
+    { value: "hide", label: t("project.actHide"), icon: "o.hide" },
+  ];
+}
+function onGroupPick(groupId: string) {
+  store.toggleHidden("lane", groupId);
+}
 function headerOf(id: string): string {
   return store.fieldName(id);
 }
@@ -345,6 +394,16 @@ function commit(id: string, item: ProjectItem, value: string) {
 // ---- 底部 add 行（平台的 Add item：共享 omnibar + Create dialog + 抽屉）----
 const omni = ref<InstanceType<typeof ProjectOmnibar> | null>(null);
 const adding = ref(false);
+/** 泳道分组模式下正在添加的组（每组独立 Add item 行）。 */
+const addingGroup = ref<string | null>(null);
+function setOmni(el: unknown) {
+  omni.value = el as InstanceType<typeof ProjectOmnibar> | null;
+}
+async function startGroupAdd(gid: string) {
+  addingGroup.value = gid;
+  await nextTick();
+  omni.value?.open();
+}
 const createOpen = ref(false);
 const drawerOpen = ref(false);
 const repoChoices = ref<
@@ -392,10 +451,13 @@ async function openAdd() {
   await nextTick();
   omni.value?.open();
 }
-/** omnibar 回车建草稿（表格无目标格，草稿落默认位）。 */
-async function submitAdd(title: string) {
+/** omnibar 回车建草稿；泳道维度激活时落入对应分组（写入泳道字段值）。 */
+async function submitAdd(title: string, groupId?: string) {
   if (!selectedId.value) return;
-  await store.addItem({ projectId: selectedId.value, kind: "draft", draftTitle: title });
+  const created = await store.addItem({ projectId: selectedId.value, kind: "draft", draftTitle: title });
+  if (created && groupId && swim.value) {
+    await store.setFieldValue(created.id, swim.value.id, groupId);
+  }
 }
 function openCreateDialog() {
   omni.value?.close();
@@ -417,15 +479,18 @@ function openDrawer() {
   void ensureRepoMenu();
   drawerOpen.value = true;
 }
-/** omnibar 点选 Issue → 以引用条目加入。 */
-async function onOmnibarIssue(payload: { repoId: string; number: string }) {
+/** omnibar 点选 Issue → 以引用条目加入；泳道维度激活时落入对应分组。 */
+async function onOmnibarIssue(payload: { repoId: string; number: string }, groupId?: string) {
   if (!selectedId.value) return;
-  await store.addItem({
+  const created = await store.addItem({
     projectId: selectedId.value,
     kind: "issue",
     repoId: payload.repoId,
     number: payload.number,
   });
+  if (created && groupId && swim.value) {
+    await store.setFieldValue(created.id, swim.value.id, groupId);
+  }
 }
 
 /** 行点击 = 打开 item 抽屉（平台形态）；就地编辑控件上的点击不触发。 */
@@ -440,7 +505,10 @@ function onRowClick(item: ProjectItem, event: MouseEvent) {
   <div class="tbl-wrap">
     <table
       class="tbl"
-      :style="{ width: `${60 + 650 + 200 * Math.max(0, columns.length - 1) + 44}px` }"
+      :class="{ 'tbl-fullwidth': swim }"
+      :style="swim
+        ? { width: '100%' }
+        : { width: `${60 + 650 + 200 * Math.max(0, columns.length - 1) + 44}px` }"
     >
       <!-- fixed 布局的列宽以 colgroup 为最高优先级（首行单元格声明在
        WebKit 的 width:max-content 表里会被内容反推覆盖，实测 66px 被撑成 200） -->
@@ -535,24 +603,60 @@ function onRowClick(item: ProjectItem, event: MouseEvent) {
         </tr>
       </thead>
       <tbody>
-        <tr
-          v-for="(item, idx) in rows"
-          :key="item.id"
-          :class="{ ghosty: item.ghost }"
-          @click="onRowClick(item, $event)"
-        >
-          <td class="td-num">
-            <span class="num-wrap">
-              <span class="num">{{ idx + 1 }}</span>
-              <ActionMenu
-                class="row-menu"
-                trigger-icon="ellipsis"
-                :title="t('project.actItemMenu')"
-                :items="rowMenuItems(item)"
-                @pick="onRowMenuPick(item, $event)"
-              />
-            </span>
-          </td>
+        <template v-for="g in renderGroups" :key="g.id">
+          <!-- 组头（平台 Group by 行）：折叠 ⌄ + 色点 + 名称 + 计数 + 汇总 + ⋯；
+               白底横贯全宽、无列竖线。折叠时组头是本组最后一个可见行，
+               12px 组间隙挂它的 border-bottom（见样式 .tbl-grouprow--collapsed） -->
+          <tr
+            v-if="g.name !== null"
+            class="tbl-grouprow"
+            :class="{ 'tbl-grouprow--collapsed': store.isLaneCollapsed(g.id) }"
+          >
+            <td :colspan="columns.length + 2">
+              <span class="grp-head">
+                <button
+                  type="button"
+                  class="grp-collapse"
+                  :title="store.isLaneCollapsed(g.id) ? t('project.expandLane') : t('project.collapseLane')"
+                  @click="store.toggleLaneCollapsed(g.id)"
+                >
+                  <EditorIcon :name="store.isLaneCollapsed(g.id) ? 'chevron' : 'o.chevron-down'" />
+                </button>
+                <span v-if="g.color" class="grp-dot" :style="{ background: g.color }"></span>
+                <span class="grp-name">{{ g.name }}</span>
+                <span class="grp-count">{{ g.items.length }}</span>
+                <span v-for="s in store.laneSums(g.id)" :key="s.label" class="grp-sum">
+                  {{ s.label }}: {{ s.value }}
+                </span>
+                <span class="th-spacer"></span>
+                <ActionMenu
+                  trigger-icon="ellipsis"
+                  :title="t('project.actLaneMenu')"
+                  :items="groupMenuItems()"
+                  @pick="onGroupPick(g.id)"
+                />
+              </span>
+            </td>
+          </tr>
+          <template v-if="!store.isLaneCollapsed(g.id)">
+            <tr
+              v-for="(item, j) in g.items"
+              :key="item.id"
+              :class="{ ghosty: item.ghost }"
+              @click="onRowClick(item, $event)"
+            >
+              <td class="td-num">
+                <span class="num-wrap">
+                  <span class="num">{{ g.start + j + 1 }}</span>
+                  <ActionMenu
+                    class="row-menu"
+                    trigger-icon="ellipsis"
+                    :title="t('project.actItemMenu')"
+                    :items="rowMenuItems(item)"
+                    @pick="onRowMenuPick(item, $event)"
+                  />
+                </span>
+              </td>
           <td
             v-for="col in columns"
             :key="col"
@@ -640,9 +744,34 @@ function onRowClick(item: ProjectItem, event: MouseEvent) {
             </template>
             <span v-else-if="cellText(col, item)" class="cell-text">{{ cellText(col, item) }}</span>
           </td>
-        </tr>
+          </tr>
+          <!-- 组内 Add item 行（平台：每组独立添加，落入该组；仅泳道分组模式，
+               扁平模式的添加行走 tfoot）。组间隙不挂在这行上——折叠组不渲染
+               添加行，间隙会随折叠消失（P1→P2 无间隙十轮未解的根因），
+               载体改为组头行的 border-top，见 .tbl-grouprow--gap -->
+          <tr v-if="swim" class="add-row" @click="addingGroup !== g.id && startGroupAdd(g.id)">
+            <td class="add-plus"><EditorIcon name="o.plus" /></td>
+            <td :colspan="columns.length + 1" class="add-cell">
+              <button v-if="addingGroup !== g.id" type="button" class="add-trigger">
+                <span>{{ t("project.addItemRow") }}</span>
+              </button>
+              <ProjectOmnibar
+                v-else
+                :ref="setOmni"
+                inline
+                @create-draft="(t) => submitAdd(t, g.id)"
+                @open-create-dialog="openCreateDialog"
+                @add-from-repo="openDrawer"
+                @create-issue="(p) => onOmnibarIssue(p, g.id)"
+                @close="addingGroup = null"
+              />
+            </td>
+          </tr>
+          </template>
+        </template>
       </tbody>
-      <tfoot>
+      <!-- 全宽 add 行仅扁平模式（泳道维度激活时改为每组独立添加） -->
+      <tfoot v-if="!swim">
         <!-- 底部 add 行（平台：+ 在行首、提示文案随行；点击展开 omnibar 输入条） -->
         <tr class="add-row" @click="!adding && openAdd()">
           <td class="add-plus"><EditorIcon name="o.plus" /></td>
@@ -688,17 +817,18 @@ function onRowClick(item: ProjectItem, event: MouseEvent) {
 .tbl-wrap {
   flex: 1;
   overflow: auto;
-  /* 顶部间距 = 平台实测「过滤条底 → 表头顶线」13pt；这段留在表外（表头自带顶线） */
-  padding: 12px 10px 10px;
+  /* 顶部不留间距（用户定案）：过滤框下边框与表头顶线贴合，两线间无空隙 */
+  padding: 0 10px 10px;
 }
 .tbl {
-  /* 平台实测：所有列固定宽（行号 66 + Title 650 + 其余 200），不随视口拉伸
-     （多余宽度留白、不足则本层横向滚动——平台 Size 列在同宽窗口同样被裁切）。
-     fixed 布局 + 表格显式总宽：WebKit 对 max-content 表会把富余宽度摊进首列
-     （实测 66px 被摊成 200），显式总宽（= 各列声明之和）后列宽严格生效 */
   table-layout: fixed;
   border-collapse: collapse;
   font-size: var(--font-lg);
+}
+/* 泳道分组模式（平台 Priority board 的 Table 形态）：表格撑满视口宽，
+   富余宽度自然摊入 Title 列（平台同款——分组表格没有右侧留白） */
+.tbl-fullwidth {
+  min-width: 100%;
 }
 /* 列头：平台实测灰字 12px 常规字重、**高 32px**（数据行 38，表头更瘦）、
    上下各有 1px 线界定表头带；⋯ 菜单右对齐列尾。
@@ -997,7 +1127,10 @@ tfoot td {
   color: var(--text);
 }
 .add-trigger {
-  display: inline-flex;
+  /* 块级（非 inline-flex）：inline 级会参与 td 行盒基线计算，把行高撑到
+     内容高 + 下伸部（实测 44.5 > 38），导致添加行与其他行不一致 */
+  display: flex;
+  width: fit-content;
   align-items: center;
   gap: 8px;
   padding: 4px 8px;
@@ -1020,5 +1153,78 @@ tfoot td {
   color: var(--text-dim);
   font-size: var(--font-md);
   padding: 24px 0;
+}
+/* 泳道分组（平台 Group by 行）：白底横贯全宽、无列竖线；
+   折叠 ⌄ + 色点 + 名称 + 计数胶囊 + 汇总 + ⋯ 隐藏 */
+.tbl-grouprow > td {
+  padding: 0;
+}
+.grp-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 40px;
+  padding: 0 10px 0 20px;
+  background: var(--bg-panel);
+}
+.grp-collapse {
+  display: inline-flex;
+  align-items: center;
+  border: none;
+  background: transparent;
+  color: var(--text-dim);
+  padding: 2px;
+  border-radius: 5px;
+  cursor: pointer;
+}
+.grp-collapse:hover {
+  color: var(--text);
+  background: var(--bg-hover);
+}
+.grp-dot {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+}
+.grp-name {
+  font-size: var(--font-base);
+  font-weight: 600;
+  color: var(--text);
+}
+.grp-count {
+  display: inline-flex;
+  align-items: center;
+  height: 18px;
+  padding: 2px 6px;
+  border-radius: 20px;
+  background: #818b981f;
+  font-size: var(--font-sm);
+  color: var(--text-dim);
+}
+.grp-sum {
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  padding: 0 6px;
+  border: 1px solid var(--border);
+  border-radius: 9999px;
+  font-size: var(--font-sm);
+  color: var(--text-dim);
+}
+/* 泳道分组的组间隙（平台每组 section 间 12px）：挂在每组「最后一个可见行」的
+   border-bottom 上——border-bottom 向下绘制，不会像 border-top 那样在 collapse
+   模型下向上叠进上一行的白盒（实测会啃掉 13px，添加行因此显矮）。
+   · 展开组：最后一行 = 组内添加行（tbody 才有 add-row，扁平模式添加行在 tfoot 不命中）
+   · 折叠组：最后一行 = 组头自身（--collapsed；这是 P1→P2 十轮无间隙的根因修复——
+     折叠组没有添加行，间隙载体必须落到组头上） */
+tbody tr.add-row > td,
+.tbl-grouprow--collapsed > td {
+  border-bottom: 12px solid var(--bg-app);
+}
+/* 全局 box-sizing: border-box 下 12px 灰隙计入行盒内部（会啃掉白区，实测添加行
+   只剩 31.5px）；显式补高 12px 使白区恒为 38，与其他行一致 */
+tbody tr.add-row > td {
+  height: 50px;
 }
 </style>
