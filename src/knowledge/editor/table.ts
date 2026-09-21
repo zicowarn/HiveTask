@@ -168,12 +168,9 @@ export class TableWidget extends WidgetType {
       });
       wrap.appendChild(btn);
     }
-    // 双击表格主体 = 同样直达网格编辑器（结构性编辑）
-    wrap.addEventListener("dblclick", (ev) => {
-      ev.preventDefault();
-      ev.stopPropagation();
-      this.options?.onEdit?.();
-    });
+    // 注：不再绑 dblclick → 网格编辑器。单元格直接编辑后，双击落在单元格上
+    // 会被系统当作两次选中/取词，且会在输入中途弹出对话框与写回竞态。
+    // 结构性编辑走悬停铅笔（明确意图），内容编辑直接点单元格。
     return wrap;
   }
 
