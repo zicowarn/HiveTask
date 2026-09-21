@@ -91,7 +91,6 @@ export const markdownKeymap: KeyBinding[] = [
   { key: "Alt-Mod-o", run: (view: EditorView) => runCommandByKey(view, "ol") },
   { key: "Alt-Mod-x", run: (view: EditorView) => runCommandByKey(view, "task") },
   { key: "Alt-Mod-b", run: (view: EditorView) => runCommandByKey(view, "formula") },
-  { key: "Alt-Mod-t", run: (view: EditorView) => runCommandByKey(view, "table") },
   ...Array.from({ length: 6 }, (_unused, index) => ({
     key: `Alt-Mod-${index + 1}`,
     run: (view: EditorView): boolean => prefixLine(view, `${"#".repeat(index + 1)} `),

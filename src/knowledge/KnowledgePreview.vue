@@ -43,6 +43,7 @@ import {
 import { ZoomController, type Size } from "./preview/zoom";
 import type { ZoomAction } from "./preview/registry";
 import { useKnowledgeStore } from "../stores/knowledge";
+import { tableEditor as tableEditorBus, closeTableEditor } from "./editor/table-editor-bus";
 import { openPathWithConfiguredApp, revealPath } from "./open-path";
 
 const props = defineProps<{ reloadTick?: number }>();
@@ -53,6 +54,7 @@ const props = defineProps<{ reloadTick?: number }>();
  */
 const MarkdownEditor = defineAsyncComponent(() => import("./editor/MarkdownEditor.vue"));
 const CodeEditor = defineAsyncComponent(() => import("./editor/CodeEditor.vue"));
+const TableEditor = defineAsyncComponent(() => import("./editor/TableEditor.vue"));
 /** 图片编辑画布：按需加载（绘图只在编辑态挂载）。 */
 const DrawCanvas = defineAsyncComponent(() => import("./draw/DrawCanvas.vue"));
 
@@ -69,6 +71,7 @@ const text = ref<KbText | null>(null);
 /** Markdown 编辑缓冲：CM6 的文档即源文本；改动先落这里，保存走 ⌘S（T7）。 */
 const mdDraft = ref("");
 const mdDirty = ref(false);
+const tableEditSession = computed(() => tableEditorBus.session);
 const codeEditorRef = ref<{
   setText: (value: string) => void;
   runAction: (action: string) => void;
@@ -210,6 +213,7 @@ function releaseImage(): void {
 }
 
 const editorRef = ref<{
+  openTableAtCursor: () => void;
   runCommand: (command: { kind: string; key: string }) => boolean;
   cursorOffset?: () => number;
   goToLine: (line: number) => void;
@@ -387,6 +391,12 @@ function jumpToLine(line: number): void {
 
 /** 面板头工具条：命令表 → 编辑器。 */
 function runEditorCommand(command: { kind: string; key: string }): void {
+  // 「表格」按钮 = 打开网格编辑器（光标在表内=编辑该表；不在=插入空表）——
+  // SoloMD 同语义；直接插一段模板文本再手动对齐竖线的旧做法弃用
+  if (command.key === "table") {
+    editorRef.value?.openTableAtCursor();
+    return;
+  }
   editorRef.value?.runCommand(command as never);
 }
 
@@ -1506,6 +1516,13 @@ function onImagePanEnd(): void {
         size="ui"
         @pick="onContextPick"
         @close="contextMenu = null"
+      />
+      <!-- 表格网格编辑器（SoloMD 移植）：bus 的 session 非空即显示 -->
+      <TableEditor
+        v-if="tableEditSession"
+        :source="tableEditSession.source"
+        @apply="(md: string) => tableEditSession?.apply(md)"
+        @close="closeTableEditor"
       />
       <!-- 卡片条件必须是 `unsupported` 本身：挂在 kind === 'other' 上会让"插件渲染成功"的
            文件也顶着一张"暂不支持"的卡片（曾经就是这样），语义完全反了 -->

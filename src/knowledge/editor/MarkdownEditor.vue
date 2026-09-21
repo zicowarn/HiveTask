@@ -20,6 +20,8 @@ import { mathAndDiagram } from "./math-diagram";
 import { wikilinkCompletion, wikilinkPreview } from "./wikilink";
 import { imageSupport, readDocContext, releaseImageCache } from "./image";
 import { markdownKeymap, runCommand } from "./commands";
+import { findTableSpan } from "./markdown-table";
+import { openTableEditor } from "./table-editor-bus";
 import {
   SearchCursor,
   SearchQuery,
@@ -107,6 +109,8 @@ function extensions() {
       { key: "Shift-F3", run: (view: EditorView) => stepMatch(view, true) },
       { key: "Mod-g", run: (view: EditorView) => stepMatch(view, false) },
       { key: "Shift-Mod-g", run: (view: EditorView) => stepMatch(view, true) },
+      // ⌥⌘T：表格网格编辑器（SoloMD 同款快捷键；光标在表内=编辑，不在=插入空表）
+      { key: "Alt-Mod-t", run: () => { openTableAtCursor(); return true; } },
       ...markdownKeymap,
       ...defaultKeymap,
       ...historyKeymap,
@@ -313,7 +317,60 @@ function cursorOf(state: EditorState): { line: number; col: number } {
   return { line: line.number, col: head - line.from + 1 };
 }
 
+/** 打开光标所在表格的网格编辑器（SoloMD Editor.vue:2530 同款：文档文本 + 行偏移算范围）。 */
+function openTableAtCursor(): void {
+  if (!view) return;
+  const source = view.state.doc.toString();
+  const lines = source.split("\n");
+  const caret = view.state.selection.main.head;
+  const starts: number[] = [];
+  let off = 0;
+  for (const line of lines) {
+    starts.push(off);
+    off += line.length + 1;
+  }
+  let caretLine = 0;
+  for (let i = 0; i < starts.length; i++) {
+    if (starts[i] <= caret) caretLine = i;
+    else break;
+  }
+  const span = findTableSpan(lines, caretLine);
+  if (!span) {
+    // 不在表内：把「插入空表」与「编辑表格」统一成一个动作（SoloMD 同语义）——
+    // 打开空表的网格编辑器，应用时插到光标处
+    openTableEditor({
+      source: "",
+      apply: (markdown: string) => {
+        const v = view!;
+        const pos = v.state.selection.main.head;
+        const needLeadingNl = pos > 0 && v.state.doc.lineAt(pos - 1).text !== "";
+        const insert = (needLeadingNl ? "\n\n" : "") + markdown + "\n";
+        v.dispatch({
+          changes: { from: pos, insert },
+          selection: { anchor: pos + insert.length },
+        });
+        v.focus();
+      },
+    });
+    return;
+  }
+  const from = starts[span.startLine];
+  const to = starts[span.endLine] + lines[span.endLine].length;
+  openTableEditor({
+    source: source.slice(from, to),
+    apply: (markdown: string) => {
+      const v = view!;
+      v.dispatch({
+        changes: { from, to, insert: markdown },
+        selection: { anchor: from + markdown.length },
+      });
+      v.focus();
+    },
+  });
+}
+
 defineExpose({
+  openTableAtCursor,
   getText: () => view?.state.doc.toString() ?? "",
   /** 大纲点击 → 跳到该行并聚焦。 */
   goToLine: (line: number) => {
