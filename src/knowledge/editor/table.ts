@@ -317,14 +317,20 @@ export const tableTheme = EditorView.baseTheme({
   ".cm-kb-table table": { borderCollapse: "collapse", width: "100%", fontSize: "var(--font-base)" },
   ".cm-kb-table th, .cm-kb-table td": {
     border: "1px solid var(--border)",
-    padding: "5px 10px",
+    padding: "0",
     textAlign: "left",
     verticalAlign: "top",
   },
   ".cm-kb-table th": { backgroundColor: "var(--bg-app)", fontWeight: "600" },
   // 可编辑单元格：聚焦 = 1px 内描边 + 极淡强调底（与网格对话框 .tbl__focus 同一口径）；
   // 去掉浏览器默认的系统蓝 outline（用户截图里那个粗框）
-  ".cm-kb-cell": { outline: "none", padding: "0", minHeight: "1em" },
+  ".cm-kb-cell": {
+    outline: "none",
+    padding: "5px 10px",
+    minHeight: "1em",
+    height: "100%",
+    boxSizing: "border-box",
+  },
   ".cm-kb-cell.cm-kb-cell--focus": {
     boxShadow: "inset 0 0 0 1px var(--accent)",
     backgroundColor: "var(--accent-soft)",
