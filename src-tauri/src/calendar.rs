@@ -3,7 +3,11 @@
 //!   跨度事件（DTEND/DURATION）按日展开，DTEND 为**排他端点**（RFC 5545），
 //!   上限 62 天/事件；RRULE v1 仍只取 DTSTART 首次（做半套 BY* 更危险）；
 //!   法定假日亦走订阅（内置 holiday-cn 层已于 2026-09-18 经用户定案移除）；
-//! - 农历日格副行：chinese-lunisolar-calendar（MIT），初一显示月名、其余日名。
+//! - 农历日格副行：chinese-lunisolar-calendar（MIT），初一显示月名、其余日名；
+//! - 日程（S4，app_010–012 `calendar_events`）：用户手建事件的唯一真源；
+//!   all_day 全天 / 有时刻（start_time 必填 HH:MM，end_time 可选）两种形态；
+//!   recur 重复（''/daily/weekly/monthly/yearly，按起始日锚定；v1 无单次例外）；
+//!   remind_at / reminded_at 供本地通知层（防重启重复通知）。
 //!
 //! 红线：订阅 URL 属准凭据——任何错误信息**不得包含完整 URL**（reqwest 的
 //! 错误 Display 会带 URL，必须 map_err 剥离）。
@@ -18,11 +22,17 @@ use crate::appdb;
 // ============ 农历日格副行 ============
 
 /// 农历标签：初一 → 月名（含「闰」前缀），其余 → 日名。简体变体。
+/// 附结构化农历月日（每年农历重复规则的匹配依据）。
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LunarLabel {
     pub date: String,
     pub text: String,
+    /// 农历月（1–12，闰月不叠加，leap 单独标记）。
+    pub month: u32,
+    /// 农历日（1–30）。
+    pub day: u32,
+    pub leap: bool,
 }
 
 /// 闭区间 [start, end] 的农历标签。范围上限 800 天（月视图导航足够）。
@@ -47,9 +57,13 @@ pub fn lunar_range(start: &str, end: &str) -> Result<Vec<LunarLabel>> {
         let month_text = format!("{:#}", lunisolar.to_lunar_month()).replace('臘', "腊").replace('閏', "闰");
         let day_text = format!("{:#}", lunisolar.to_lunar_day());
         let text = if day_text == "初一" { month_text } else { day_text };
+        let lmonth = lunisolar.to_lunar_month();
         out.push(LunarLabel {
             date: format!("{y:04}-{m:02}-{d:02}"),
             text,
+            month: u32::from(lmonth.to_u8()),
+            day: u32::from(lunisolar.to_lunar_day().to_u8()),
+            leap: lmonth.is_leap_month(),
         });
         s = next_day(s);
     }
@@ -94,6 +108,32 @@ fn parse_duration_days(value: &str) -> Option<u32> {
         }
     }
     Some(days).filter(|d| *d > 0)
+}
+
+/// 单日结构化农历（每年农历重复的锚点与匹配）。
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LunarYmd {
+    /// 农历月 1–12。
+    pub month: u32,
+    /// 农历日 1–30。
+    pub day: u32,
+    pub leap: bool,
+}
+
+/// 某公历日期对应的农历月/日（含闰月标记）。
+pub fn lunar_ymd(date: &str) -> Result<LunarYmd> {
+    let (y, m, d) = parse_ymd(date).ok_or_else(|| anyhow!("日期格式应为 YYYY-MM-DD"))?;
+    let solar = SolarDate::from_ymd(y as u16, m as u8, d as u8)
+        .map_err(|_| anyhow!("日期 {y:04}-{m:02}-{d:02} 超出农历支持范围（1901–2101）"))?;
+    let lunisolar = LunisolarDate::from_solar_date(solar)
+        .map_err(|_| anyhow!("农历转换失败：{y:04}-{m:02}-{d:02}"))?;
+    let lmonth = lunisolar.to_lunar_month();
+    Ok(LunarYmd {
+        month: u32::from(lmonth.to_u8()),
+        day: u32::from(lunisolar.to_lunar_day().to_u8()),
+        leap: lmonth.is_leap_month(),
+    })
 }
 
 /// YYYY-MM-DD → (y, m, d)；格式不符返回 None。
@@ -321,6 +361,379 @@ pub fn parse_ics(text: &str) -> Vec<IcsEvent> {
     }
     events.sort_by(|a, b| a.date.cmp(&b.date));
     events
+}
+
+// ============ 日程（calendar_events，app_010） ============
+
+/// 日程行（camelCase 对齐前端）。
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EventRow {
+    pub id: String,
+    pub title: String,
+    /// YYYY-MM-DD。
+    pub start_date: String,
+    /// NULL = 单日。
+    pub end_date: Option<String>,
+    /// true = 全天（忽略时刻字段）；false = 有时刻（start_time 必填）。
+    pub all_day: bool,
+    /// HH:MM（仅有时刻日程）。
+    pub start_time: Option<String>,
+    /// HH:MM 可选（仅有时刻日程）。
+    pub end_time: Option<String>,
+    /// "" = 不重复；daily / weekly / monthly / yearly（按起始日锚定）。
+    pub recur: String,
+    pub notes: Option<String>,
+    /// NULL = 不提醒；datetime-local 形态原样存。
+    pub remind_at: Option<String>,
+    /// 通知已发标记（RFC3339）；本地通知层回写。
+    pub reminded_at: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+fn validate_event(
+    title: &str,
+    start: &str,
+    end: Option<&str>,
+    all_day: bool,
+    start_time: Option<&str>,
+    end_time: Option<&str>,
+    recur: &str,
+) -> Result<()> {
+    match recur {
+        "" | "daily" | "monthly" | "yearly" | "lunar" => {}
+        "weekly" => {}
+        s if s.starts_with("weekly:") => {
+            let n: u32 = s["weekly:".len()..]
+                .parse()
+                .map_err(|_| anyhow!("未知重复规则: {s}"))?;
+            if !(1..=7).contains(&n) {
+                return Err(anyhow!("未知重复规则: {s}"));
+            }
+        }
+        other => return Err(anyhow!("未知重复规则: {other}")),
+    }
+    if title.trim().is_empty() {
+        return Err(anyhow!("标题不能为空"));
+    }
+    if parse_ymd(start).is_none() {
+        return Err(anyhow!("起始日期格式应为 YYYY-MM-DD"));
+    }
+    if let Some(e) = end {
+        if parse_ymd(e).is_none() {
+            return Err(anyhow!("结束日期格式应为 YYYY-MM-DD"));
+        }
+        if e < start {
+            return Err(anyhow!("结束日期不能早于起始日期"));
+        }
+    }
+    if !all_day {
+        let st = start_time
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .ok_or_else(|| anyhow!("有时刻日程需要开始时间"))?;
+        validate_hm(st)?;
+        let et = end_time.map(str::trim).filter(|s| !s.is_empty());
+        if let Some(et) = et {
+            validate_hm(et)?;
+            // 同日有时刻：结束须晚于开始（跨日由 end_date 表达，允许自然跨夜）
+            let same_day = end.map_or(true, |e| e == start);
+            if same_day {
+                let mins = |v: &str| -> u32 {
+                    let mut it = v.split(':');
+                    it.next().and_then(|h| h.parse().ok()).unwrap_or(0) * 60
+                        + it.next().and_then(|m| m.parse().ok()).unwrap_or(0)
+                };
+                if mins(et) <= mins(st) {
+                    return Err(anyhow!("同日日程的结束时刻需晚于开始时刻"));
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+/// HH:MM 校验（00:00–23:59）。
+fn validate_hm(v: &str) -> Result<()> {
+    let mut it = v.split(':');
+    let h: u32 = it.next().unwrap_or("").parse().map_err(|_| anyhow!("时刻格式应为 HH:MM"))?;
+    let m: u32 = it.next().unwrap_or("").parse().map_err(|_| anyhow!("时刻格式应为 HH:MM"))?;
+    if it.next().is_some() || h > 23 || m > 59 {
+        return Err(anyhow!("时刻格式应为 HH:MM"));
+    }
+    Ok(())
+}
+
+/// 时刻归一：全天 → 双 None；有时刻 → 剔空白、缺省结束 = 开始 + 1 小时。
+fn normalize_times(
+    all_day: bool,
+    start_time: Option<String>,
+    end_time: Option<String>,
+) -> (Option<String>, Option<String>) {
+    if all_day {
+        return (None, None);
+    }
+    let st = start_time.map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
+    let Some(st) = st else {
+        return (None, None); // 交由 validate_event 报「需要开始时间」
+    };
+    let et = end_time.map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
+    let et = match et {
+        Some(e) => Some(e),
+        None => {
+            // +1 小时（分钟进位）
+            let mut it = st.split(':');
+            let h: u32 = it.next().and_then(|v| v.parse().ok()).unwrap_or(0);
+            let m: u32 = it.next().and_then(|v| v.parse().ok()).unwrap_or(0);
+            let total = h * 60 + m + 60;
+            Some(format!("{:02}:{:02}", (total / 60) % 24, total % 60))
+        }
+    };
+    (Some(st), et)
+}
+
+fn clean_opt(v: Option<String>) -> Option<String> {
+    v.map(|s| s.trim().to_string()).filter(|s| !s.is_empty())
+}
+
+fn event_row_on(conn: &Connection, id: &str) -> Result<EventRow> {
+    conn.query_row(
+        "SELECT id, title, start_date, end_date, all_day, start_time, end_time, recur, notes, remind_at, reminded_at, created_at, updated_at \
+         FROM calendar_events WHERE id = ?1",
+        [id],
+        |row| {
+            Ok(EventRow {
+                id: row.get(0)?,
+                title: row.get(1)?,
+                start_date: row.get(2)?,
+                end_date: row.get(3)?,
+                all_day: row.get::<_, i64>(4)? != 0,
+                start_time: row.get(5)?,
+                end_time: row.get(6)?,
+                recur: row.get(7)?,
+                notes: row.get(8)?,
+                remind_at: row.get(9)?,
+                reminded_at: row.get(10)?,
+                created_at: row.get(11)?,
+                updated_at: row.get(12)?,
+            })
+        },
+    )
+    .optional()?
+    .ok_or_else(|| anyhow!("日程不存在"))
+}
+
+/// 全量日程（按起始日期升序；数量级是个人日程，不做分页）。
+pub fn event_list() -> Result<Vec<EventRow>> {
+    let conn = appdb::open()?;
+    event_list_on(&conn)
+}
+
+pub fn event_list_on(conn: &Connection) -> Result<Vec<EventRow>> {
+    let mut stmt = conn.prepare(
+        "SELECT id, title, start_date, end_date, all_day, start_time, end_time, recur, notes, remind_at, reminded_at, created_at, updated_at \
+         FROM calendar_events ORDER BY start_date, created_at, id",
+    )?;
+    let rows = stmt.query_map([], |row| {
+        Ok(EventRow {
+            id: row.get(0)?,
+            title: row.get(1)?,
+            start_date: row.get(2)?,
+            end_date: row.get(3)?,
+            all_day: row.get::<_, i64>(4)? != 0,
+            start_time: row.get(5)?,
+            end_time: row.get(6)?,
+            recur: row.get(7)?,
+            notes: row.get(8)?,
+            remind_at: row.get(9)?,
+            reminded_at: row.get(10)?,
+            created_at: row.get(11)?,
+            updated_at: row.get(12)?,
+        })
+    })?;
+    Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn event_create(
+    title: &str,
+    start_date: &str,
+    end_date: Option<String>,
+    all_day: bool,
+    start_time: Option<String>,
+    end_time: Option<String>,
+    notes: Option<String>,
+    remind_at: Option<String>,
+    recur: String,
+) -> Result<EventRow> {
+    let conn = appdb::open()?;
+    event_create_on(
+        &conn,
+        title,
+        start_date,
+        end_date,
+        all_day,
+        start_time,
+        end_time,
+        notes,
+        remind_at,
+        recur,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn event_create_on(
+    conn: &Connection,
+    title: &str,
+    start_date: &str,
+    end_date: Option<String>,
+    all_day: bool,
+    start_time: Option<String>,
+    end_time: Option<String>,
+    notes: Option<String>,
+    remind_at: Option<String>,
+    recur: String,
+) -> Result<EventRow> {
+    let title = title.trim();
+    let start_date = start_date.trim();
+    let end_date = clean_opt(end_date);
+    let recur = recur.trim().to_string();
+    let (start_time, end_time) = normalize_times(all_day, start_time, end_time);
+    validate_event(
+        title,
+        start_date,
+        end_date.as_deref(),
+        all_day,
+        start_time.as_deref(),
+        end_time.as_deref(),
+        &recur,
+    )?;
+    let id = appdb::uuid();
+    conn.execute(
+        "INSERT INTO calendar_events (id, title, start_date, end_date, all_day, start_time, end_time, recur, notes, remind_at, created_at, updated_at) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, datetime('now'), datetime('now'))",
+        rusqlite::params![
+            id,
+            title,
+            start_date,
+            end_date,
+            i64::from(all_day),
+            start_time,
+            end_time,
+            recur,
+            clean_opt(notes),
+            clean_opt(remind_at)
+        ],
+    )?;
+    event_row_on(conn, &id)
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn event_update(
+    id: &str,
+    title: &str,
+    start_date: &str,
+    end_date: Option<String>,
+    all_day: bool,
+    start_time: Option<String>,
+    end_time: Option<String>,
+    notes: Option<String>,
+    remind_at: Option<String>,
+    recur: String,
+) -> Result<EventRow> {
+    let conn = appdb::open()?;
+    event_update_on(
+        &conn,
+        id,
+        title,
+        start_date,
+        end_date,
+        all_day,
+        start_time,
+        end_time,
+        notes,
+        remind_at,
+        recur,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn event_update_on(
+    conn: &Connection,
+    id: &str,
+    title: &str,
+    start_date: &str,
+    end_date: Option<String>,
+    all_day: bool,
+    start_time: Option<String>,
+    end_time: Option<String>,
+    notes: Option<String>,
+    remind_at: Option<String>,
+    recur: String,
+) -> Result<EventRow> {
+    let title = title.trim();
+    let start_date = start_date.trim();
+    let end_date = clean_opt(end_date);
+    let recur = recur.trim().to_string();
+    let (start_time, end_time) = normalize_times(all_day, start_time, end_time);
+    validate_event(
+        title,
+        start_date,
+        end_date.as_deref(),
+        all_day,
+        start_time.as_deref(),
+        end_time.as_deref(),
+        &recur,
+    )?;
+    let changed = conn.execute(
+        "UPDATE calendar_events SET title = ?2, start_date = ?3, end_date = ?4, all_day = ?5, \
+         start_time = ?6, end_time = ?7, recur = ?8, notes = ?9, remind_at = ?10, updated_at = datetime('now') WHERE id = ?1",
+        rusqlite::params![
+            id,
+            title,
+            start_date,
+            end_date,
+            i64::from(all_day),
+            start_time,
+            end_time,
+            recur,
+            clean_opt(notes),
+            clean_opt(remind_at)
+        ],
+    )?;
+    if changed == 0 {
+        return Err(anyhow!("日程不存在"));
+    }
+    event_row_on(conn, id)
+}
+
+pub fn event_remove(id: &str) -> Result<()> {
+    let conn = appdb::open()?;
+    event_remove_on(&conn, id)
+}
+
+pub fn event_remove_on(conn: &Connection, id: &str) -> Result<()> {
+    conn.execute("DELETE FROM calendar_events WHERE id = ?1", [id])?;
+    Ok(())
+}
+
+/// 通知层回写「已发」标记（None = 清除，如改期后重置）。
+pub fn event_set_reminded(id: &str, reminded_at: Option<String>) -> Result<EventRow> {
+    let conn = appdb::open()?;
+    event_set_reminded_on(&conn, id, reminded_at)
+}
+
+pub fn event_set_reminded_on(
+    conn: &Connection,
+    id: &str,
+    reminded_at: Option<String>,
+) -> Result<EventRow> {
+    conn.execute(
+        "UPDATE calendar_events SET reminded_at = ?2 WHERE id = ?1",
+        rusqlite::params![id, clean_opt(reminded_at)],
+    )?;
+    event_row_on(conn, id)
 }
 
 // ============ 订阅 CRUD / 拉取 / 事件（calendar_feeds，app_008） ============
@@ -625,6 +1038,11 @@ mod tests {
         // 假日 ICS 中秋=09-25 → 三源一致推出 09-23=十三、09-22=十二
         assert_eq!(lunar_range("2026-09-23", "2026-09-23").unwrap()[0].text, "十三");
         assert_eq!(lunar_range("2026-09-22", "2026-09-22").unwrap()[0].text, "十二");
+        // 结构化农历（每年农历重复的匹配基础）
+        let ymd = lunar_ymd("2026-09-25").unwrap();
+        assert_eq!((ymd.month, ymd.day, ymd.leap), (8, 15, false));
+        let cny = lunar_ymd("2026-02-17").unwrap();
+        assert_eq!((cny.month, cny.day, cny.leap), (1, 1, false));
         // 2025 年有闰六月：窗口内应出现「闰」开头的月名（初一）或日名——月名必现
         let leap = lunar_range("2025-07-20", "2025-08-15").unwrap();
         assert!(
@@ -715,6 +1133,229 @@ mod tests {
             );
         }
         assert!(events.iter().any(|e| e.date == "2026-02-15" && e.title.contains("春节")));
+    }
+
+    #[test]
+    fn event_crud_validation_and_reminded_flag() {
+        let conn = Connection::open_in_memory().unwrap();
+        appdb::app_migrate(&conn).unwrap();
+
+        // 创建：仅必填（全天默认）
+        let single = event_create_on(&conn, "  发版日  ", "2026-10-15", None, true, None, None, None, None, "".into())
+            .unwrap();
+        assert_eq!(single.title, "发版日", "标题应去首尾空白");
+        assert_eq!(single.start_date, "2026-10-15");
+        assert_eq!(single.end_date, None);
+        assert!(single.all_day);
+        assert_eq!(single.start_time, None);
+        assert_eq!(single.reminded_at, None);
+        assert!(!single.created_at.is_empty());
+
+        // 创建：全天跨日 + 备注 + 提醒
+        let span = event_create_on(
+            &conn,
+            "季度会",
+            "2026-10-20",
+            Some("2026-10-21".into()),
+            true,
+            None,
+            None,
+            Some("  带午饭  ".into()),
+            Some("2026-10-20T09:00".into()),
+            "weekly".into(),
+        )
+        .unwrap();
+        assert_eq!(span.end_date.as_deref(), Some("2026-10-21"));
+        assert_eq!(span.recur, "weekly");
+        assert_eq!(span.notes.as_deref(), Some("带午饭"));
+        assert_eq!(span.remind_at.as_deref(), Some("2026-10-20T09:00"));
+
+        // 有时刻：开始缺省结束 +1 小时；字段归一
+        let timed = event_create_on(
+            &conn,
+            "周会",
+            "2026-10-22",
+            None,
+            false,
+            Some(" 09:30 ".into()),
+            None,
+            None,
+            None,
+            "".into(),
+        )
+        .unwrap();
+        assert!(!timed.all_day);
+        assert_eq!(timed.start_time.as_deref(), Some("09:30"));
+        assert_eq!(timed.end_time.as_deref(), Some("10:30"), "结束缺省 = 开始 +1h");
+
+        // 重复规则：weekly:N 与 lunar 合法；越界/未知拒绝
+        assert!(
+            event_create_on(
+                &conn,
+                "每周三例会",
+                "2026-10-22",
+                None,
+                false,
+                Some("09:30".into()),
+                None,
+                None,
+                None,
+                "weekly:3".into(),
+            )
+            .is_ok()
+        );
+        assert!(
+            event_create_on(
+                &conn,
+                "x",
+                "2026-10-22",
+                None,
+                false,
+                None,
+                None,
+                None,
+                None,
+                "weekly:9".into()
+            )
+            .is_err()
+        );
+        assert!(
+            event_create_on(
+                &conn,
+                "农历生日",
+                "2026-09-25",
+                None,
+                true,
+                None,
+                None,
+                None,
+                None,
+                "lunar".into()
+            )
+            .is_ok()
+        );
+        assert!(
+            event_create_on(
+                &conn,
+                "x",
+                "2026-10-22",
+                None,
+                true,
+                None,
+                None,
+                None,
+                None,
+                "fortnightly".into()
+            )
+            .is_err()
+        );
+
+        // 有时刻校验：缺开始时刻拒绝；坏时刻拒绝；结束早于开始拒绝
+        assert!(event_create_on(&conn, "x", "2026-10-22", None, false, None, None, None, None, "".into()).is_err());
+        assert!(event_create_on(&conn, "x", "2026-10-22", None, false, Some("25:00".into()), None, None, None, "".into()).is_err());
+        assert!(
+            event_create_on(
+                &conn,
+                "x",
+                "2026-10-22",
+                None,
+                false,
+                Some("15:00".into()),
+                Some("14:00".into()),
+                None,
+                None,
+                "".into()
+            )
+            .is_err()
+        );
+
+        // 列表：按起始日期升序（农历 09-25 最前；10-22 有时刻与每周三同日，按字段找）
+        let listed = event_list_on(&conn).unwrap();
+        assert_eq!(listed.len(), 5);
+        assert!(listed.windows(2).all(|w| w[0].start_date <= w[1].start_date));
+        assert_eq!(listed[0].start_date, "2026-09-25");
+        assert_eq!(listed[0].recur, "lunar");
+        assert!(listed[0].all_day);
+        assert!(listed.iter().any(|e| e.id == span.id && e.end_date.as_deref() == Some("2026-10-21")));
+        let timed = listed
+            .iter()
+            .find(|e| e.start_time.as_deref() == Some("09:30"))
+            .expect("有时刻日程应在列表中");
+        assert_eq!(timed.end_time.as_deref(), Some("10:30"), "结束缺省 = 开始 +1h");
+        assert!(listed.iter().any(|e| e.recur == "weekly:3"));
+
+        // 校验：空标题 / 坏日期 / 结束早于开始 / 坏结束
+        assert!(
+            event_create_on(&conn, " ", "2026-10-01", None, true, None, None, None, None, "".into()).is_err()
+        );
+        assert!(
+            event_create_on(&conn, "x", "10/01/2026", None, true, None, None, None, None, "".into()).is_err()
+        );
+        assert!(
+            event_create_on(
+                &conn,
+                "x",
+                "2026-10-02",
+                Some("2026-10-01".into()),
+                true,
+                None,
+                None,
+                None,
+                None,
+                "".into()
+            )
+            .is_err()
+        );
+        assert!(
+            event_create_on(
+                &conn,
+                "x",
+                "2026-10-01",
+                Some("明天".into()),
+                true,
+                None,
+                None,
+                None,
+                None,
+                "".into()
+            )
+            .is_err()
+        );
+
+        // 更新：改标题与日期；空串可选字段归一为 None
+        let updated = event_update_on(
+            &conn,
+            &single.id,
+            "发版日（改）",
+            "2026-10-16",
+            None,
+            true,
+            None,
+            None,
+            Some("   ".into()),
+            None,
+            "".into(),
+        )
+        .unwrap();
+        assert_eq!(updated.title, "发版日（改）");
+        assert_eq!(updated.start_date, "2026-10-16");
+        assert_eq!(updated.notes, None, "空白备注应归一为 None");
+        assert_eq!(updated.id, single.id);
+
+        // 不存在的 id
+        assert!(event_update_on(&conn, "nope", "x", "2026-10-01", None, true, None, None, None, None, "".into()).is_err());
+
+        // 提醒标记：写 → 清
+        let r = event_set_reminded_on(&conn, &span.id, Some("2026-10-20T09:00:30".into())).unwrap();
+        assert_eq!(r.reminded_at.as_deref(), Some("2026-10-20T09:00:30"));
+        let cleared = event_set_reminded_on(&conn, &span.id, None).unwrap();
+        assert_eq!(cleared.reminded_at, None);
+
+        // 删除（跨日那条）；剩其余四条
+        event_remove_on(&conn, &span.id).unwrap();
+        let rest = event_list_on(&conn).unwrap();
+        assert_eq!(rest.len(), 4);
+        assert!(rest.iter().all(|e| e.id != span.id));
     }
 
     #[test]

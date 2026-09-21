@@ -22,7 +22,8 @@ import KnowledgeFindBar from "./KnowledgeFindBar.vue";
 import KnowledgeConvertDialog from "./KnowledgeConvertDialog.vue";
 import DrawToolbar from "./draw/DrawToolbar.vue";
 import { drawSession, resetDrawSession } from "./draw/session";
-import { toBase64, editedFileName, editedRelPath } from "./editor/assets";
+import { toBase64, editedFileName, editedRelPath, drawnFileName, drawnRelPath } from "./editor/assets";
+import { setImageEditHandler, setImageEditTipProvider } from "./editor/image";
 import { activeOutlineIndex, type OutlineItem } from "./editor/outline";
 import { EDITOR_COMMAND_GROUPS } from "../components/markdown-tools";
 import { CONTEXT_MENU_GROUPS } from "./editor/commands";
@@ -82,7 +83,7 @@ const imageUrl = ref<string | null>(null);
 /** 没有内置渲染器时，用系统生成的预览图兜底（Quick Look；拿不到就不显示）。 */
 const systemPosterUrl = ref<string | null>(null);
 
-// ---- 图片编辑（T14）：编辑态嵌在预览面板里，头部工具条 = 绘图版「功能操作栏」----
+// ---- 图片编辑（T14/T14-P1）：编辑态嵌在预览面板里，头部工具条 = 绘图版「功能操作栏」----
 const imageEditing = ref(false);
 const imageSaving = ref(false);
 /** 保存时 mtime 不符（外部改过原图）→ 冲突条，与文本保存同一语法。 */
@@ -92,11 +93,17 @@ const editingRel = ref<string | null>(null);
 const editingRoot = ref<string | null>(null);
 /** 进入编辑时的原图 mtime（覆盖保存的守卫基准）。 */
 let imageMtime: number | null = null;
+/** 空白画布模式：不基于任何已有文件；保存 = 写入新文件 + 在发起时的文档光标处插引用。 */
+const drawingBlank = ref(false);
 const drawRef = ref<{
   zoom: (action: "in" | "out" | "fit") => void;
   undo: () => void;
   redo: () => void;
   exportBlob: () => Promise<Blob>;
+  applyCrop: () => void;
+  cancelCrop: () => void;
+  rotate90: (clockwise: boolean) => void;
+  flip: (axis: "h" | "v") => void;
 } | null>(null);
 
 /**
@@ -204,6 +211,7 @@ function releaseImage(): void {
 
 const editorRef = ref<{
   runCommand: (command: { kind: string; key: string }) => boolean;
+  cursorOffset?: () => number;
   goToLine: (line: number) => void;
   setFindQuery: (config: { search: string; replace: string; caseSensitive: boolean; regexp: boolean; wholeWord: boolean }) => void;
   clearFindQuery: () => void;
@@ -895,8 +903,28 @@ watch([rel, () => store.root], async ([nextRel, nextRoot], [prevRel]) => {
 });
 
 watch([rel, () => store.root, () => props.reloadTick], () => void load(), { immediate: true });
-onMounted(() => window.addEventListener("keydown", onKeydown));
+onMounted(() => {
+  window.addEventListener("keydown", onKeydown);
+  // 图片 widget 悬浮「编辑」的全局通道：预览面板是宿主（多面板不存在，单注册即可）
+  setImageEditHandler((_root, imageRel) => {
+    if (imageEditing.value) return;
+    store.openFile(imageRel);
+    // openFile 后 rel watcher 会触发 load()；等 imageUrl 就绪再进编辑
+    void nextTick(() => {
+      const timer = window.setInterval(() => {
+        if (store.selected === imageRel && imageUrl.value) {
+          window.clearInterval(timer);
+          void startImageEdit();
+        }
+      }, 60);
+      window.setTimeout(() => window.clearInterval(timer), 3000); // 兜底：3s 内没就绪就放弃
+    });
+  });
+  setImageEditTipProvider(() => t("kb.editImage"));
+});
 onBeforeUnmount(() => {
+  setImageEditHandler(null);
+  setImageEditTipProvider(null);
   releaseImage();
   releaseSystemPoster();
   previewInstance?.destroy?.();
@@ -932,7 +960,7 @@ function imageViewport(): Size {
   return { width: rect.width, height: rect.height };
 }
 
-// ---- 图片编辑：进入 / 退出 / 保存（P0 链路）----
+// ---- 图片编辑：进入 / 退出 / 保存（P0 链路）+ 空白画布（P1）----
 
 /** 进入编辑：记住原图 mtime（覆盖守卫基准），复位会话后挂载画布。 */
 async function startImageEdit(): Promise<void> {
@@ -947,10 +975,30 @@ async function startImageEdit(): Promise<void> {
   }
   editingRel.value = target;
   editingRoot.value = base;
+  drawingBlank.value = false;
   resetDrawSession(drawSession);
   imageConflict.value = false;
   imageEditing.value = true;
 }
+
+/** 空白画布（工具条「画图」/ widget 编辑的姊妹入口）：基于发起时的文档光标，保存即插入引用。 */
+function startBlankDraw(): void {
+  if (!store.root || !isTauri()) return;
+  blankInsertRel.value = rel.value;
+  blankInsertOffset.value = editorRef.value?.cursorOffset?.() ?? null;
+  editingRel.value = null;
+  editingRoot.value = store.root;
+  drawingBlank.value = true;
+  resetDrawSession(drawSession);
+  imageConflict.value = false;
+  imageEditing.value = true;
+}
+
+/** 空白画布的插入目标：发起时的文档与其光标偏移（保存成功后插 `![](assets/drawn-…)`）。 */
+const blankInsertRel = ref<string | null>(null);
+const blankInsertOffset = ref<number | null>(null);
+/** DrawCanvas 需要 src（img 路径不用，但 prop 必填）：1×1 透明占位。 */
+const blankSrc = "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7";
 
 /** 退出编辑（有未保存修改先确认——confirmAction，WKWebView 里 confirm() 是坏的）。 */
 async function cancelImageEdit(): Promise<void> {
@@ -963,17 +1011,24 @@ async function cancelImageEdit(): Promise<void> {
     if (!ok) return;
   }
   imageEditing.value = false;
+  drawingBlank.value = false;
 }
 
 /**
  * 保存编辑：
  * - **PNG → 覆盖原图**（带 mtime 守卫；外部改过 → 冲突条，不静默覆盖）；
- * - **非 PNG → 另存为新 PNG**（PNG 字节写进 jpg 容器是错的），原文件不动，打开新文件。
+ * - **非 PNG → 另存为新 PNG**（PNG 字节写进 jpg 容器是错的），原文件不动，打开新文件；
+ * - **空白画布 → 写入新 PNG** 到文档同级 `assets/`，并在发起时的文档光标处插入引用。
  */
 async function saveImageEdit(): Promise<void> {
   const base = store.root;
+  if (!base || !drawRef.value || imageSaving.value) return;
+  if (drawingBlank.value) {
+    await saveBlankDraw(base);
+    return;
+  }
   const target = rel.value;
-  if (!base || !target || !drawRef.value || imageSaving.value) return;
+  if (!target) return;
   imageSaving.value = true;
   try {
     const blob = await drawRef.value.exportBlob();
@@ -1006,6 +1061,46 @@ async function saveImageEdit(): Promise<void> {
     const message = String(e);
     if (message.includes("已被外部修改")) imageConflict.value = true;
     else error.value = message;
+  } finally {
+    imageSaving.value = false;
+  }
+}
+
+/** 空白画布保存：冲突加序号 → 写盘 → 切回文档并在光标处插入引用（文件树缓存失效）。 */
+async function saveBlankDraw(base: string): Promise<void> {
+  const docRel = blankInsertRel.value;
+  if (!docRel || !drawRef.value) return;
+  imageSaving.value = true;
+  try {
+    const blob = await drawRef.value.exportBlob();
+    const b64 = toBase64(new Uint8Array(await blob.arrayBuffer()));
+    const now = new Date();
+    let index = 0;
+    let savedRel = "";
+    for (;;) {
+      savedRel = drawnRelPath(docRel, drawnFileName(now, index));
+      const existing = await api.kbStat(base, savedRel).catch(() => null);
+      if (!existing?.exists || index > 20) break;
+      index += 1;
+    }
+    await api.kbWriteBytes(base, savedRel, b64);
+    const name = savedRel.split("/").pop() ?? savedRel;
+    imageEditing.value = false;
+    drawingBlank.value = false;
+    store.invalidateFileIndex();
+    // 回到发起时的文档（它本就开着：不落盘缓冲不丢），在其光标处插入引用
+    store.openFile(docRel);
+    await nextTick();
+    const markdown = `![${name}](assets/${name})`;
+    const at = blankInsertOffset.value;
+    const buffer = store.buffers[docRel];
+    if (buffer && at !== null && at <= buffer.text.length) {
+      const text = `${buffer.text.slice(0, at)}\n${markdown}\n${buffer.text.slice(at)}`;
+      store.setBuffer(docRel, { text, meta: buffer.meta, dirty: true });
+    }
+    pushToast({ kind: "success", message: t("kb.drawBlankSaved", { name }) }, 3000);
+  } catch (e) {
+    error.value = String(e);
   } finally {
     imageSaving.value = false;
   }
@@ -1121,10 +1216,10 @@ function onImagePanEnd(): void {
 
 <template>
   <section class="preview" :data-plugin="resolvedPluginId ?? ''" :data-kind="kind">
-    <header v-if="rel" class="preview-header">
+    <header v-if="rel || drawingBlank" class="preview-header">
       <div class="head-left">
-        <EditorIcon :name="kind === 'markdown' ? 'o.markdown' : kind === 'image' ? 'o.file-media' : 'o.file'" />
-        <span class="file-name">{{ name }}</span>
+        <EditorIcon :name="drawingBlank ? 'o.paintbrush' : kind === 'markdown' ? 'o.markdown' : kind === 'image' ? 'o.file-media' : 'o.file'" />
+        <span class="file-name">{{ drawingBlank ? t("md.draw") : name }}</span>
         <span v-if="text" class="meta">{{ humanSize(text.size) }}</span>
         <!-- 编码：**就在原来那个 chip 的位置**，但从"只读标识"变成可点控件
              （点开 = 改解读方式 / 转换另存为）。BOM 折进标签，不再单独占一格。 -->
@@ -1141,18 +1236,22 @@ function onImagePanEnd(): void {
         <span v-if="imageEditing && drawSession.dirty" class="meta dirty" :title="t('kb.unsavedTip')">●</span>
       </div>
       <MarkdownToolbar
-        v-if="kind === 'markdown'"
+        v-if="kind === 'markdown' && !imageEditing"
         class="head-toolbar"
         :groups="EDITOR_COMMAND_GROUPS"
         size="panel"
         @run="runEditorCommand"
       />
-      <!-- 图片编辑工具条：与 Markdown 工具条同一槽位、同一形态语法 -->
+      <!-- 图片编辑工具条：与 Markdown 工具条同一槽位、同一形态语法（空白画布也用） -->
       <DrawToolbar
-        v-if="imageEditing && kind === 'image'"
+        v-if="imageEditing && (kind === 'image' || drawingBlank)"
         class="head-toolbar"
         @undo="drawRef?.undo()"
         @redo="drawRef?.redo()"
+        @rotate="drawRef?.rotate90($event)"
+        @flip="drawRef?.flip($event)"
+        @crop-apply="drawRef?.applyCrop()"
+        @crop-cancel="drawRef?.cancelCrop()"
       />
       <div class="head-actions">
         <!-- 只在**确实有结构**时给入口：没有书签/标题的文档点开只会是个空面板 -->
@@ -1183,7 +1282,7 @@ function onImagePanEnd(): void {
           <EditorIcon name="o.search" />
         </button>
         <!-- 缩放：视图类预览（图片 / CAD / PDF / 3D…）由插件声明能力，面板统一出控件 -->
-        <div v-if="zoomSupported" class="zoom-group">
+        <div v-if="zoomSupported && !drawingBlank" class="zoom-group">
           <button class="icon-btn" :title="t('kb.zoomOut')" @click="onZoomAction('out')">
             <EditorIcon name="o.zoom-out" />
           </button>
@@ -1258,6 +1357,17 @@ function onImagePanEnd(): void {
            这里放行后由容器的 data-loading 属性显示加载态。 -->
       <p v-else-if="loading && kind !== 'other'" class="hint">{{ t("common.loading") }}</p>
       <p v-else-if="error" class="hint warn">{{ error }}</p>
+      <!-- 空白画布：不基于文件，保存 = 新文件 + 文档插引用；头部文件名/动作区切到画布套 -->
+      <DrawCanvas
+        v-else-if="drawingBlank && imageEditing"
+        ref="drawRef"
+        :key="`blank:${blankInsertRel ?? ''}:${blankInsertOffset ?? ''}`"
+        :src="blankSrc"
+        blank
+        class="draw-host"
+        @zoom="onDrawZoom"
+        @error="error = $event"
+      />
       <!-- 图片编辑画布：先于查看分支（同一时刻只存在一个） -->
       <DrawCanvas
         v-else-if="kind === 'image' && imageEditing && imageUrl"
@@ -1321,6 +1431,7 @@ function onImagePanEnd(): void {
             @outline="editorOutline = $event"
             @stats="store.setStats"
             @find="onEditorFindKey"
+        @draw="startBlankDraw"
             @contextmenu="openContextMenu"
           />
         </template>
@@ -1342,6 +1453,7 @@ function onImagePanEnd(): void {
         @outline="editorOutline = $event"
         @stats="store.setStats"
         @find="onEditorFindKey"
+        @draw="startBlankDraw"
         @contextmenu="openContextMenu"
       />
       <CodeEditor

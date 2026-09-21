@@ -11,7 +11,7 @@ use serde::Serialize;
 use std::path::PathBuf;
 
 const APP_IDENTIFIER: &str = "dev.zicowarn.hivetask";
-const CURRENT_APP_SCHEMA_VERSION: i64 = 9;
+const CURRENT_APP_SCHEMA_VERSION: i64 = 12;
 
 const APP_MIGRATION_001: &str = include_str!("migrations/app_001_registry.sql");
 const APP_MIGRATION_002: &str = include_str!("migrations/app_002_projects.sql");
@@ -22,6 +22,9 @@ const APP_MIGRATION_006: &str = include_str!("migrations/app_006_project_sync.sq
 const APP_MIGRATION_007: &str = include_str!("migrations/app_007_prefs.sql");
 const APP_MIGRATION_008: &str = include_str!("migrations/app_008_calendar.sql");
 const APP_MIGRATION_009: &str = include_str!("migrations/app_009_feed_color.sql");
+const APP_MIGRATION_010: &str = include_str!("migrations/app_010_calendar_events.sql");
+const APP_MIGRATION_011: &str = include_str!("migrations/app_011_event_times.sql");
+const APP_MIGRATION_012: &str = include_str!("migrations/app_012_event_recur.sql");
 
 pub fn app_data_dir() -> Option<PathBuf> {
     #[cfg(target_os = "macos")]
@@ -101,6 +104,15 @@ pub(crate) fn app_migrate(conn: &Connection) -> anyhow::Result<()> {
     }
     if version < 9 {
         conn.execute_batch(APP_MIGRATION_009).context("app 迁移 009 失败")?;
+    }
+    if version < 10 {
+        conn.execute_batch(APP_MIGRATION_010).context("app 迁移 010 失败")?;
+    }
+    if version < 11 {
+        conn.execute_batch(APP_MIGRATION_011).context("app 迁移 011 失败")?;
+    }
+    if version < 12 {
+        conn.execute_batch(APP_MIGRATION_012).context("app 迁移 012 失败")?;
     }
     conn.pragma_update(None, "user_version", CURRENT_APP_SCHEMA_VERSION)?;
     Ok(())

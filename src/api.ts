@@ -48,10 +48,47 @@ export interface CalendarFeedEvent {
   title: string;
 }
 
-/** 农历日格标签。 */
+/** 日程行（镜像 calendar.rs::EventRow，app_010 calendar_events）。 */
+export interface CalendarEventRow {
+  id: string;
+  title: string;
+  /** YYYY-MM-DD。 */
+  startDate: string;
+  /** null = 单日。 */
+  endDate: string | null;
+  /** true = 全天（忽略时刻字段）。 */
+  allDay: boolean;
+  /** HH:MM（有时刻日程必有）。 */
+  startTime: string | null;
+  /** HH:MM 可选。 */
+  endTime: string | null;
+  /** "" = 不重复；daily / weekly / monthly / yearly（按起始日锚定）。 */
+  recur: string;
+  notes: string | null;
+  /** null = 不提醒；datetime-local 形态。 */
+  remindAt: string | null;
+  /** 通知已发标记（通知层回写）。 */
+  remindedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** 农历日格标签（附结构化农历月日——每年农历重复的匹配依据）。 */
 export interface LunarLabel {
   date: string;
   text: string;
+  /** 农历月 1–12（闰月不叠加）。 */
+  month: number;
+  /** 农历日 1–30。 */
+  day: number;
+  leap: boolean;
+}
+
+/** 单日结构化农历。 */
+export interface LunarYmd {
+  month: number;
+  day: number;
+  leap: boolean;
 }
 
 /** 里程碑元数据（镜像 models.rs::MilestoneInfo，camelCase）。 */
@@ -194,6 +231,32 @@ export interface BranchReviewDiff {
 
 export const isTauri = (): boolean => "__TAURI_INTERNALS__" in window;
 
+/** 知识库图谱索引（镜像 src-tauri/src/kb_graph.rs）。 */
+export interface KbGraphNode {
+  /** 唯一 id = 库内相对路径。 */
+  id: string;
+  /** 首个 H1，缺省文件名去扩展名。 */
+  title: string;
+  /** 顶层目录（着色维度）；根下文件为 null。 */
+  folder: string | null;
+  /** 标签（frontmatter `tags:` + 行内 `#tag`，去重排序）——筛选维度。 */
+  tags: string[];
+}
+
+export interface KbGraphLink {
+  source: string;
+  target: string;
+}
+
+export interface KbGraphIndex {
+  nodes: KbGraphNode[];
+  links: KbGraphLink[];
+  /** 有引用但无唯一对应文件（未建或同名歧义）。 */
+  unresolved: string[];
+  /** md 文件数超上限，图为局部。 */
+  truncated: boolean;
+}
+
 // ---- 知识库（文件系统层，镜像 src-tauri/src/kb.rs）----
 
 /** 一条搜索命中（1 基行/列；列按**字符**计，中文场景不能用字节偏移）。 */
@@ -278,6 +341,12 @@ export const api = {
   /** 遍历整根拿全部文件（⌘P 快速打开）——一次 IPC，比前端逐层拉快得多。 */
   kbWalk: (root: string, showIgnored = false, limit?: number) =>
     invoke<string[]>("kb_walk", { root, showIgnored, limit }),
+  /** 图谱索引：一次 IPC 拿全图 {nodes, links, unresolved}（派生数据，不落盘）。 */
+  kbGraphIndex: (root: string) => invoke<KbGraphIndex>("kb_graph_index", { root }),
+  /** 图谱记忆布局（app.db prefs，键按 kb 根指纹；JSON `{rel: [x, y]}`）。 */
+  kbGraphLayoutGet: (root: string) => invoke<string | null>("kb_graph_layout_get", { root }),
+  kbGraphLayoutSet: (root: string, layoutJson: string) =>
+    invoke<void>("kb_graph_layout_set", { root, layoutJson }),
   /** 启动知识库根的改动监听（2s 轮询；换根时重复调用即替换旧 watcher）。 */
   kbWatchStart: (root: string) => invoke<void>("kb_watch_start", { root }),
   /** 停止改动监听（切走知识库工作区时调用）。 */
@@ -303,9 +372,10 @@ export const api = {
     eol: string;
     expectedMtimeMs: number | null;
   }) => invoke<number>("kb_write_text", args),
-  /** 写入二进制（粘贴/拖放插图）：base64 传参，父目录自动创建。 */
-  kbWriteBytes: (root: string, rel: string, base64: string) =>
-    invoke<KbEntry>("kb_write_bytes", { root, rel, base64 }),
+  /** 写入二进制（粘贴/拖放插图、图片编辑回写）：base64 传参，父目录自动创建。
+   *  `expectedMtimeMs` 不符（外部改动）→ 报错，与 kbWriteText 同一守卫。 */
+  kbWriteBytes: (root: string, rel: string, base64: string, expectedMtimeMs?: number | null) =>
+    invoke<KbEntry>("kb_write_bytes", { root, rel, base64, expectedMtimeMs: expectedMtimeMs ?? null }),
   /** 重命名（同根内；目标已存在则报错，不覆盖）。 */
   kbRename: (root: string, from: string, to: string) =>
     invoke<KbEntry>("kb_rename", { root, from, to }),
@@ -418,6 +488,58 @@ export const api = {
   calendarFeedEvents: () => invoke<CalendarFeedEvent[]>("calendar_feed_events"),
   calendarLunarRange: (start: string, end: string) =>
     invoke<LunarLabel[]>("calendar_lunar_range", { start, end }),
+  calendarLunarYmd: (date: string) => invoke<LunarYmd>("calendar_lunar_ymd", { date }),
+  // ---- 日历 S4：日程（app.db 主库；本地通知层用 remindAt/remindedAt）----
+  calendarEventList: () => invoke<CalendarEventRow[]>("calendar_event_list"),
+  calendarEventCreate: (
+    title: string,
+    startDate: string,
+    endDate?: string | null,
+    allDay?: boolean,
+    startTime?: string | null,
+    endTime?: string | null,
+    notes?: string | null,
+    remindAt?: string | null,
+    recur?: string,
+  ) =>
+    invoke<CalendarEventRow>("calendar_event_create", {
+      title,
+      startDate,
+      endDate: endDate ?? null,
+      allDay: allDay ?? true,
+      startTime: startTime ?? null,
+      endTime: endTime ?? null,
+      notes: notes ?? null,
+      remindAt: remindAt ?? null,
+      recur: recur ?? "",
+    }),
+  calendarEventUpdate: (
+    id: string,
+    title: string,
+    startDate: string,
+    endDate?: string | null,
+    allDay?: boolean,
+    startTime?: string | null,
+    endTime?: string | null,
+    notes?: string | null,
+    remindAt?: string | null,
+    recur?: string,
+  ) =>
+    invoke<CalendarEventRow>("calendar_event_update", {
+      id,
+      title,
+      startDate,
+      endDate: endDate ?? null,
+      allDay: allDay ?? true,
+      startTime: startTime ?? null,
+      endTime: endTime ?? null,
+      notes: notes ?? null,
+      remindAt: remindAt ?? null,
+      recur: recur ?? "",
+    }),
+  calendarEventRemove: (id: string) => invoke<void>("calendar_event_remove", { id }),
+  calendarEventSetReminded: (id: string, remindedAt: string | null) =>
+    invoke<CalendarEventRow>("calendar_event_set_reminded", { id, remindedAt }),
   ptySpawn: (args: {
     id: string;
     cwd?: string;

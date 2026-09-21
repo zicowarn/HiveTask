@@ -12,7 +12,7 @@
  * Reachability is tracked passively (gh roundtrip outcomes); clicking the
  * cell runs one user-initiated probe.
  */
-import { computed, nextTick, ref } from "vue";
+import { computed, nextTick, onMounted, ref, watch } from "vue";
 import { storeToRefs } from "pinia";
 import { useRepoStore } from "../stores/repo";
 import { useIssuesStore } from "../stores/issues";
@@ -27,6 +27,9 @@ import { platformName } from "../panels/platform-label";
 import { APP_VERSION } from "../app-info";
 import { shortOrigin } from "../origin";
 import EditorIcon from "../components/EditorIcon.vue";
+import { useCalendarStore } from "../stores/calendar";
+import { api, isTauri, type LunarYmd } from "../api";
+import { dateKey, occursOn } from "../panels/calendar-events";
 
 const props = defineProps<{ workspace: string }>();
 
@@ -35,6 +38,56 @@ const issues = useIssuesStore();
 const pulls = usePullsStore();
 const projectsStore = useProjectsStore();
 const knowledge = useKnowledgeStore();
+/** 今日日程格（S4）：只数手建日程（"今天要做什么"）；为 0 隐藏；点击跳日历面板。
+ *  数据走共享 calendar store——日历面板增删改后本格即时联动。 */
+const calendar = useCalendarStore();
+const todayYmd = ref<LunarYmd | null>(null);
+const lunarAnchorYmd = ref<Map<string, LunarYmd>>(new Map());
+const todayCount = computed(() => {
+  const today = dateKey(new Date());
+  let n = 0;
+  for (const e of calendar.events) {
+    if (e.recur === "lunar") {
+      // 每年农历：锚点农历月日 === 今天的农历月日
+      const a = lunarAnchorYmd.value.get(e.id);
+      const t = todayYmd.value;
+      if (a && t && a.month === t.month && a.day === t.day && a.leap === t.leap) n++;
+      continue;
+    }
+    if (occursOn(e.startDate, e.endDate, e.recur, today)) n++;
+  }
+  return n;
+});
+onMounted(() => {
+  void calendar.ensureEvents();
+  if (isTauri()) {
+    api
+      .calendarLunarYmd(dateKey(new Date()))
+      .then((y) => {
+        todayYmd.value = y;
+      })
+      .catch(() => {});
+  }
+});
+watch(
+  () => calendar.events,
+  async (rows) => {
+    if (!isTauri()) return;
+    for (const e of rows.filter((x) => x.recur === "lunar")) {
+      if (lunarAnchorYmd.value.has(e.id)) continue;
+      try {
+        lunarAnchorYmd.value.set(e.id, await api.calendarLunarYmd(e.startDate));
+      } catch {
+        // 离线/超范围：诚实不计
+      }
+    }
+  },
+  { deep: true, immediate: true },
+);
+function gotoCalendar() {
+  projectsStore.navRequest = { workspace: "tools", panel: "calendar" };
+}
+
 /** 状态栏点 ⟳ = 刷新项目数据（与面板头部刷新按钮同一入口）。 */
 async function refreshProject() {
   await projectsStore.syncSelected();
@@ -379,6 +432,14 @@ async function probe() {
         ● gh
       </span>
       <button
+        v-if="todayCount > 0"
+        class="status-cell today-cell"
+        :title="t('statusbar.todayEvents', { n: todayCount })"
+        @click="gotoCalendar"
+      >
+        <EditorIcon name="o.calendar" /> {{ todayCount }}
+      </button>
+      <button
         class="status-cell lang-cell"
         :title="t('lang.switch')"
         @click="cycleLocale()"
@@ -391,6 +452,11 @@ async function probe() {
 </template>
 
 <style scoped>
+.today-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
 .statusbar {
   flex: none;
   display: flex;

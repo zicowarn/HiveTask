@@ -429,13 +429,13 @@ function openItemInWorkspace(item: ProjectItem) {
   min-height: 0;
 }
 /* 顶栏：筛选条 + ⚙视图（项目选择在头部切换对话框）。
-   底部不留 padding（用户定案）：过滤框下边框与下方视图的顶线贴合 */
+   筛选框上下间隙对称（8/8）；其下边框即为与下方视图的分界线，视图侧不再画顶线 */
 .pj-topbar {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 8px 10px 0;
-  border-bottom: 1px solid var(--border);
+  padding: 8px 10px 8px;
+  border-bottom: none;
 }
 .pj-view {
   display: flex;

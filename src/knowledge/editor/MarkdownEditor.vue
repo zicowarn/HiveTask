@@ -17,6 +17,7 @@ import { markdown } from "@codemirror/lang-markdown";
 import { GFM } from "@lezer/markdown";
 import { livePreview as livePreviewExtension } from "./live-preview";
 import { mathAndDiagram } from "./math-diagram";
+import { wikilinkCompletion, wikilinkPreview } from "./wikilink";
 import { imageSupport, readDocContext, releaseImageCache } from "./image";
 import { markdownKeymap, runCommand } from "./commands";
 import {
@@ -61,6 +62,8 @@ const emit = defineEmits<{
   find: [];
   /** 光标行列（1 基）——状态栏显示；失焦/卸载时传 null。 */
   cursor: [value: { line: number; col: number } | null];
+  /** 工具条「画图」：请宿主打开空白画布（保存后由宿主在光标处插入引用）。 */
+  draw: [];
 }>();
 
 /** 缩进宽度（空格数）：与状态栏显示同源，改这里就两边一起变。 */
@@ -81,7 +84,7 @@ function docContext() {
 
 /** 实时渲染装饰组（源码模式为空）。 */
 function richExtensions() {
-  return props.livePreview ? [livePreviewExtension, mathAndDiagram()] : [];
+  return props.livePreview ? [livePreviewExtension, mathAndDiagram(), wikilinkPreview()] : [];
 }
 
 function extensions() {
@@ -91,6 +94,8 @@ function extensions() {
     darkThemeCompartment.of(EditorView.darkTheme.of(isDarkTheme())),
     // GFM：表格 / 待办 / 删除线 / 自动链接——与 GitHub 一致（`markdown()` 默认只开 CommonMark）
     markdown({ extensions: [GFM] }),
+    // [[wikilink]] 补全（两种模式都装；数据源 = 文件清单缓存）
+    wikilinkCompletion(),
     richCompartment.of(richExtensions()),
     // 查找：只取状态与匹配高亮；界面由我们自己的查找条渲染（CM6 默认面板是英文裸控件）
     search(),
@@ -348,8 +353,18 @@ defineExpose({
   },
   focus: () => view?.focus(),
   indentWidth: INDENT_WIDTH,
-  /** 供面板头工具条与右键菜单调用（同一份命令表）。 */
-  runCommand: (command: MarkdownCommand) => (view ? runCommand(view, command) : false),
+  /** 供面板头工具条与右键菜单调用（同一份命令表）。
+   *  「画图」不是文本命令：转给宿主打开空白画布（保存后宿主在光标处插入引用）。 */
+  runCommand: (command: MarkdownCommand) => {
+    if (!view) return false;
+    if (command.key === "draw") {
+      emit("draw");
+      return true;
+    }
+    return runCommand(view, command);
+  },
+  /** 当前光标在文档中的偏移（宿主插入引用用）。 */
+  cursorOffset: () => (view ? view.state.selection.main.head : 0),
 });
 </script>
 

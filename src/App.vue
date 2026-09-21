@@ -108,8 +108,13 @@ watch(
   async (nav) => {
     if (!nav) return;
     projectsStore.navRequest = null;
-    if (nav.workspace === "projects") {
-      switchWorkspace("projects");
+    if (!nav.repoId) {
+      // 无仓库上下文：切工作区；带 panel 时把首叶切成该面板（如状态栏今日格 → 日历）
+      switchWorkspace(nav.workspace);
+      if (nav.panel) {
+        const leafId = workbench.firstLeafId(nav.workspace);
+        if (leafId) workbench.setLeafPanel(leafId, nav.panel);
+      }
       return;
     }
     if (nav.repoId) {

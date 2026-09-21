@@ -341,6 +341,18 @@ async function onRowMenuPick(item: ProjectItem, value: string) {
 // ---- Add item 行（共享 omnibar + Create dialog + 抽屉）----
 const omni = ref<InstanceType<typeof ProjectOmnibar> | null>(null);
 const omniOpen = ref(false);
+/** 泳道分组模式下正在添加的组（每组独立 Add item 行，落入该组；
+ *  共享底行仅扁平模式渲染）。 */
+const addingGroup = ref<string | null>(null);
+const groupOmni = ref<InstanceType<typeof ProjectOmnibar> | null>(null);
+function setGroupOmni(el: unknown) {
+  groupOmni.value = el as InstanceType<typeof ProjectOmnibar> | null;
+}
+async function startGroupAdd(gid: string) {
+  addingGroup.value = gid;
+  await nextTick();
+  groupOmni.value?.open();
+}
 const createOpen = ref(false);
 const drawerOpen = ref(false);
 const repoChoices = ref<
@@ -387,12 +399,16 @@ async function openAdd() {
   await nextTick();
   omni.value?.open();
 }
-async function submitAdd(title: string) {
+async function submitAdd(title: string, groupId?: string) {
   if (!selectedId.value) return;
-  await store.addItem({ projectId: selectedId.value, kind: "draft", draftTitle: title });
+  const created = await store.addItem({ projectId: selectedId.value, kind: "draft", draftTitle: title });
+  if (created && groupId && store.swimlaneField) {
+    await store.setFieldValue(created.id, store.swimlaneField.id, groupId);
+  }
 }
 function openCreateDialog() {
   omni.value?.close();
+  groupOmni.value?.close();
   omniOpen.value = false;
   void ensureRepoMenu();
   createOpen.value = true;
@@ -408,18 +424,23 @@ async function onIssueCreated(payload: { number: string; repoId: string }) {
 }
 function openDrawer() {
   omni.value?.close();
+  groupOmni.value?.close();
   omniOpen.value = false;
   void ensureRepoMenu();
   drawerOpen.value = true;
 }
-async function onOmnibarIssue(payload: { repoId: string; number: string }) {
+/** omnibar 点选 Issue → 以引用条目加入；泳道维度激活时落入对应分组。 */
+async function onOmnibarIssue(payload: { repoId: string; number: string }, groupId?: string) {
   if (!selectedId.value) return;
-  await store.addItem({
+  const created = await store.addItem({
     projectId: selectedId.value,
     kind: "issue",
     repoId: payload.repoId,
     number: payload.number,
   });
+  if (created && groupId && store.swimlaneField) {
+    await store.setFieldValue(created.id, store.swimlaneField.id, groupId);
+  }
 }
 
 // ---- 初始滚动：今天入画（平台同款；字段加载完成后再滚）。
@@ -550,7 +571,10 @@ function onMarkersClick() {
           ></div>
         </div>
         <!-- 泳道维度（如优先级）激活：按选项分组渲染，组间 12px 灰底间隙、
-             组头带折叠/计数/汇总（与 Table 分组同机制） -->
+             组头带折叠/计数/汇总（与 Table 分组同机制）。
+             整个条目区包一层 relative（rm-lanes）：今日红线以其为参照，
+             恰好止于内容底（不越过收口线/灰带——红线过长曾被要求修正） -->
+        <div class="rm-lanes">
         <template v-for="(g, gi) in roadmapGroups" :key="g.id">
           <div v-if="swimGrouped" class="rm-grouprow" :class="{ gap: gi > 0 }">
             <div class="rm-grouphead" :style="{ width: fieldW + 'px' }">
@@ -660,9 +684,32 @@ function onMarkersClick() {
             </span>
           </div>
           </div>
+          <!-- 组内 Add item 行（平台：每组独立添加，落入该组；折叠组不渲染，
+               与 Table 分组同机制；共享底行仅扁平模式保留） -->
+          <div
+            v-if="swimGrouped && !store.isLaneCollapsed(g.id)"
+            class="rm-addrow"
+            :style="{ width: fieldW + 'px' }"
+            @click="addingGroup !== g.id && startGroupAdd(g.id)"
+          >
+            <button v-if="addingGroup !== g.id" type="button" class="rm-additem">
+              <EditorIcon name="o.plus" />
+              <span>{{ t("project.addItemRow") }}</span>
+            </button>
+            <ProjectOmnibar
+              v-else
+              :ref="setGroupOmni"
+              inline
+              @create-draft="(t) => submitAdd(t, g.id)"
+              @open-create-dialog="openCreateDialog"
+              @add-from-repo="openDrawer"
+              @create-issue="(p) => onOmnibarIssue(p, g.id)"
+              @close="addingGroup = null"
+            />
+          </div>
           </template>
-        <!-- 字段列底部 Add item 行（吸附左；共享 omnibar） -->
-        <div class="rm-addrow" :style="{ width: fieldW + 'px' }">
+        <!-- 字段列底部 Add item 行（吸附左；共享 omnibar）——仅扁平模式 -->
+        <div v-if="!swimGrouped" class="rm-addrow" :style="{ width: fieldW + 'px' }">
           <button v-if="!omniOpen" type="button" class="rm-additem" @click="openAdd">
             <EditorIcon name="o.plus" />
             <span>{{ t("project.addItemRow") }}</span>
@@ -677,6 +724,14 @@ function onMarkersClick() {
             @create-issue="onOmnibarIssue"
             @close="omniOpen = false"
           />
+        </div>
+        <!-- 今日红线：表头红点的垂直延续，止于条目区底（不越过收口线/灰带）。
+             以 rm-lanes（relative）为参照；z1 高于灰底网格、低于条目行（z2） -->
+        <div
+          v-if="todayIndex >= 0"
+          class="rm-todayline"
+          :style="{ left: fieldW + (todayIndex - kDays) * dayWidth + dayWidth / 2 - 0.5 + 'px' }"
+        ></div>
         </div>
         <!-- 字段列收尾条：右边框与白底延伸到窗口底（平台同款） -->
         <!-- 表格收口线：Add item 行下的整行宽 border（平台同款），之后灰带铺到底 -->
@@ -840,7 +895,7 @@ function onMarkersClick() {
   font-size: var(--font-sm);
   color: var(--text-dim);
 }
-/* 今日：日号红色加粗 + 红点（平台形态，时间轴内无红线） */
+/* 今日：日号红色 + 数字下方红点 + 红线垂直贯穿时间轴（平台形态） */
 .rm-day.today {
   color: var(--danger);
   font-weight: 600;
@@ -854,6 +909,23 @@ function onMarkersClick() {
   margin-left: -3px;
   border-radius: 50%;
   background: var(--danger);
+}
+/* 条目区容器：relative 供今日红线参照——红线 top:0→bottom:0 恰好从表头红点
+   到最后一行/添加行底，不越过收口线与灰带（红线过长曾被要求修正）。
+   flex:none：禁收缩，防容器过矮时压扁行（flex-shrink 教训） */
+.rm-lanes {
+  position: relative;
+  flex: none;
+}
+/* 今日红线：半透明红 1px；上接表头红点，下到条目区底。
+   层序：灰底网格 z0 < 本线 z1 < 条目行 z2（红线从卡片背后穿过，平台同款） */
+.rm-todayline {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  z-index: 1;
+  background: color-mix(in srgb, var(--danger) 30%, transparent);
 }
 /* 网格背景层：整个时间轴区统一灰底（--bg-app = #f6f8fa 平台实测同源），
    每 7 天一条周线；行下方直到窗口底同样铺满 */
@@ -878,9 +950,11 @@ function onMarkersClick() {
   width: 1px;
   background: var(--border);
 }
-/* 条目行：40px；字段格吸附左、有行线；时间轴无行线 */
+/* 条目行：40px；字段格吸附左、有行线；时间轴无行线。
+   z2：高于今日红线（z1）——红线从卡片背后穿过 */
 .rm-row {
   position: relative;
+  z-index: 2;
   display: flex;
   height: 40px;
 }

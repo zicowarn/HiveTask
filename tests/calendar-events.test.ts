@@ -4,7 +4,15 @@
  * 字段逐 (条目×字段) 成事件、标题组装四条规则。
  */
 import { describe, expect, it } from "vitest";
-import { buildCalendarEvents, dateKey, heatBucket, localDateOf } from "../src/panels/calendar-events";
+import {
+  buildCalendarEvents,
+  dateKey,
+  eventsOnDate,
+  expandOccurrences,
+  heatBucket,
+  localDateOf,
+  occursOn,
+} from "../src/panels/calendar-events";
 import type { ProjectField, ProjectItem } from "../src/api";
 import type { Issue, Pull } from "../src/types";
 
@@ -86,6 +94,73 @@ describe("dateKey", () => {
     expect(dateKey(new Date(2026, 2, 5))).toBe("2026-03-05");
     expect(dateKey(new Date(2026, 11, 31, 23, 59))).toBe("2026-12-31");
     expect(dateKey(new Date(2026, 0, 1))).toBe("2026-01-01");
+  });
+});
+
+describe("eventsOnDate（状态栏今日格口径：只数手建日程）", () => {
+  const ev = (startDate: string, endDate: string | null = null) =>
+    ({ id: `${startDate}-${endDate}`, startDate, endDate }) as never;
+
+  it("单日命中当天；跨日覆盖窗口内每一天；窗口外不命中", () => {
+    const rows = [ev("2026-09-18"), ev("2026-09-20", "2026-09-22"), ev("2026-09-10")];
+    expect(eventsOnDate(rows, "2026-09-18").length).toBe(1);
+    expect(eventsOnDate(rows, "2026-09-20").length).toBe(1, );
+    expect(eventsOnDate(rows, "2026-09-21").length).toBe(1);
+    expect(eventsOnDate(rows, "2026-09-22").length).toBe(1);
+    expect(eventsOnDate(rows, "2026-09-23").length).toBe(0);
+    expect(eventsOnDate(rows, "2026-09-19").length).toBe(0);
+  });
+
+  it("同一天多条全数计入", () => {
+    const rows = [ev("2026-09-18"), ev("2026-09-18"), ev("2026-09-17", "2026-09-19")];
+    expect(eventsOnDate(rows, "2026-09-18").length).toBe(3);
+  });
+});
+
+describe("occursOn / expandOccurrences（重复日程）", () => {
+  const MON = "2026-01-05"; // 周一
+
+  it("daily：起始日起每天；起始日前不发生", () => {
+    expect(occursOn(MON, null, "daily", MON)).toBe(true);
+    expect(occursOn(MON, null, "daily", "2026-03-01")).toBe(true);
+    expect(occursOn(MON, null, "daily", "2026-01-04")).toBe(false);
+  });
+
+  it("weekly：同星期命中；跨度随发生日平移", () => {
+    expect(occursOn(MON, null, "weekly", "2026-01-12")).toBe(true);
+    expect(occursOn(MON, null, "weekly", "2026-01-13")).toBe(false);
+    // 跨度 1-05..1-07（周一锚 + 2 天）→ 下周同窗 1-12..1-14 均命中，周四不命中
+    expect(occursOn(MON, "2026-01-07", "weekly", "2026-01-12")).toBe(true);
+    expect(occursOn(MON, "2026-01-07", "weekly", "2026-01-13")).toBe(true);
+    expect(occursOn(MON, "2026-01-07", "weekly", "2026-01-14")).toBe(true);
+    expect(occursOn(MON, "2026-01-07", "weekly", "2026-01-15")).toBe(false);
+  });
+
+  it("monthly：同日命中；短月自然跳过（1-31）", () => {
+    expect(occursOn("2026-01-31", null, "monthly", "2026-03-31")).toBe(true);
+    expect(occursOn("2026-01-31", null, "monthly", "2026-02-28")).toBe(false);
+    expect(occursOn("2026-01-31", null, "monthly", "2026-04-30")).toBe(false);
+  });
+
+  it("yearly：同月日命中；平年自动跳过 2-29", () => {
+    expect(occursOn("2024-02-29", null, "yearly", "2028-02-29")).toBe(true);
+    expect(occursOn("2024-02-29", null, "yearly", "2026-02-28")).toBe(false);
+    expect(occursOn("2024-02-29", null, "yearly", "2025-02-29")).toBe(false);
+  });
+
+  it("expandOccurrences：周重复展开为可视区间内的全部发生日", () => {
+    expect(expandOccurrences(MON, null, "weekly", "2026-01-01", "2026-01-31")).toEqual([
+      "2026-01-05",
+      "2026-01-12",
+      "2026-01-19",
+      "2026-01-26",
+    ]);
+  });
+
+  it("expandOccurrences：不重复且起始在区间前——返回起始日（渲染端 fc end 补跨度）", () => {
+    expect(expandOccurrences("2025-12-30", "2026-01-02", "", "2026-01-01", "2026-01-31")).toEqual([
+      "2025-12-30",
+    ]);
   });
 });
 

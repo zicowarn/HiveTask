@@ -17,6 +17,7 @@
     "gate": "bash scripts/gate.sh"
   },
   "dependencies": {
+    "@codemirror/autocomplete": "^6.20.3",
     "@codemirror/commands": "^6.11.1",
     "@codemirror/lang-cpp": "^6.0.3",
     "@codemirror/lang-css": "^6.3.1",
@@ -51,6 +52,7 @@
     "@xterm/xterm": "^6.0.0",
     "docx-preview": "^0.4.0",
     "dompurify": "^3.4.15",
+    "force-graph": "^1.51.4",
     "hls.js": "^1.7.3",
     "jszip": "^3.10.2",
     "katex": "^0.18.7",

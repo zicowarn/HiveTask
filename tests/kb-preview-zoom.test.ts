@@ -16,20 +16,20 @@ import {
 } from "../src/knowledge/preview/zoom";
 
 describe("适应窗口", () => {
-  it("四周留 10%：可用区 = 视口的 80%", () => {
-    // 1000×1000 的视口 → 可用 800×800；内容 1600×800 → 取较小的 0.5
-    expect(fitScale({ width: 1600, height: 800 }, { width: 1000, height: 1000 })).toBeCloseTo(0.5, 6);
-    expect(FIT_MARGIN).toBeCloseTo(0.1, 6);
+  it("四周留 5%（2026-09-19 口径，由 10% 收紧）：可用区 = 视口的 90%", () => {
+    // 1000×1000 的视口 → 可用 900×900（每边 5%）；内容 1600×800 → 取较小的 0.5625
+    expect(fitScale({ width: 1600, height: 800 }, { width: 1000, height: 1000 })).toBeCloseTo(0.5625, 6);
+    expect(FIT_MARGIN).toBeCloseTo(0.05, 6);
   });
 
   it("高度受限时按高度算（竖图不会溢出）", () => {
-    // 视口 1000×500 → 可用 800×400；内容 400×800 → min(2, 0.5) = 0.5
-    expect(fitScale({ width: 400, height: 800 }, { width: 1000, height: 500 })).toBeCloseTo(0.5, 6);
+    // 视口 1000×500 → 可用 900×450；内容 400×800 → min(2.25, 0.5625) = 0.5625
+    expect(fitScale({ width: 400, height: 800 }, { width: 1000, height: 500 })).toBeCloseTo(0.5625, 6);
   });
 
   it("小图也按比例放大铺满可用区（与 Preview.app / 浏览器图片视图一致）", () => {
-    // 视口 1000×800 → 可用 800×640；内容 100×100 → 高度先受限：min(8, 6.4) = 6.4
-    expect(fitScale({ width: 100, height: 100 }, { width: 1000, height: 800 })).toBeCloseTo(6.4, 6);
+    // 视口 1000×800 → 可用 900×720；内容 100×100 → 高度先受限：min(9, 7.2) = 7.2
+    expect(fitScale({ width: 100, height: 100 }, { width: 1000, height: 800 })).toBeCloseTo(7.2, 6);
   });
 
   it("尺寸还没量出来（0）时返回 1，不产生 0/Infinity", () => {
@@ -109,7 +109,7 @@ describe("ZoomController：百分比以「适应窗口」为 100%", () => {
     // 竖版内容放进宽视口：绝对比例只有 0.4 左右，但用户看到的必须是 100%
     const { controller, applied, reported } = make({ width: 600, height: 1200 }, { width: 1000, height: 600 });
     controller.fit();
-    expect(applied.at(-1)).toBeCloseTo(0.4, 6);
+    expect(applied.at(-1)).toBeCloseTo(0.45, 6); // 可用高 540 / 1200
     expect(reported.at(-1)).toMatchObject({ percent: 100, fit: true, mode: "page" });
     expect(controller.scale).toBeCloseTo(1, 6);
   });
@@ -118,7 +118,7 @@ describe("ZoomController：百分比以「适应窗口」为 100%", () => {
     const { controller, applied, reported } = make({ width: 600, height: 1200 }, { width: 1000, height: 600 });
     controller.fit();
     controller.step("in");
-    expect(applied.at(-1)).toBeCloseTo(0.4 * 1.25, 6);
+    expect(applied.at(-1)).toBeCloseTo(0.45 * 1.25, 6);
     expect(reported.at(-1)).toMatchObject({ percent: 125, fit: false, mode: null });
   });
 
@@ -143,10 +143,10 @@ describe("ZoomController：百分比以「适应窗口」为 100%", () => {
     const content = { width: 600, height: 1200 };
     const { controller, applied } = make(content, viewport);
     controller.fit();
-    expect(applied.at(-1)).toBeCloseTo(0.4, 6);
+    expect(applied.at(-1)).toBeCloseTo(0.45, 6);
     viewport.width = 2000; // 只有宽度变了：适应仍按高度受限 → 比例不变
     controller.refit();
-    expect(applied.at(-1)).toBeCloseTo(0.4, 6);
+    expect(applied.at(-1)).toBeCloseTo(0.45, 6);
     controller.step("in");
     const zoomed = applied.at(-1)!;
     viewport.height = 1200; // 高度翻倍 → 适应比例翻倍，相对比例不变
@@ -166,8 +166,8 @@ describe("文档类基准：适应宽度 = 100%（宽面板里打开就能读）
       apply: (scale) => void applied.push(scale),
     });
     controller.fit();
-    // 适应宽度：可用宽 960 → 1.6（页面横向铺满，竖向滚动）
-    expect(applied.at(-1)).toBeCloseTo(960 / 600, 6);
+    // 适应宽度：可用宽 1080（= 1200×0.9）→ 1.8（页面横向铺满，竖向滚动）
+    expect(applied.at(-1)).toBeCloseTo(1080 / 600, 6);
     expect(controller.scale).toBeCloseTo(1, 6);
     expect(controller.fitMode).toBe("width");
   });
@@ -181,8 +181,8 @@ describe("文档类基准：适应宽度 = 100%（宽面板里打开就能读）
     });
     controller.fit(); // 适应宽度 = 100%
     const pageRelative = controller.relativeFor("page");
-    // 适应页面受高度限制：可用高 560 / 1200 = 0.467；相对 1.6 → 0.29
-    expect(pageRelative).toBeCloseTo(560 / 1200 / (960 / 600), 4);
+    // 适应页面受高度限制：可用高 630 / 1200 = 0.525；相对 1.8 → 0.29
+    expect(pageRelative).toBeCloseTo(630 / 1200 / (1080 / 600), 4);
     controller.fit("page");
     expect(controller.scale).toBeCloseTo(pageRelative, 6);
     expect(controller.fitMode).toBe("page");

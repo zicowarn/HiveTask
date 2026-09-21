@@ -110,14 +110,47 @@ export class ImageWidget extends WidgetType {
         .then((url) => {
           if (token > loadSeq) return; // 已被后续渲染取代
           img.src = url;
+          attachEditButton(wrap, ctx, this.src);
         })
         .catch(showError);
     }
     return wrap;
   }
+  /** 悬浮「编辑」按钮要收点击与 hover——不能再吞掉全部事件（曾因此定 true）；
+   *  按钮内部已 stopPropagation，widget 其余区域的事件交 CM6 正常处理。 */
   ignoreEvent(): boolean {
-    return true;
+    return false;
   }
+}
+
+/** 悬浮「编辑」按钮：hover 图片时右上角浮现，点击经全局通道交给预览面板（解耦编辑器 ↔ 预览）。 */
+function attachEditButton(wrap: HTMLElement, ctx: DocContext, src: string): void {
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "cm-kb-image-edit";
+  btn.title = editTipProvider?.() ?? "编辑图片";
+  // CM6 不得把这个点击当光标定位/选区（widget 内的 mousedown 会走 posAtCoords）
+  btn.addEventListener("mousedown", (event) => event.stopPropagation());
+  btn.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    editRequestHandler?.(ctx.root, resolveImageRel(ctx.rel, src));
+  });
+  wrap.appendChild(btn);
+  wrap.classList.add("has-edit"); // hover 显隐走 CSS（.cm-kb-image.has-edit:hover .cm-kb-image-edit）
+}
+
+/** 「编辑图片」请求通道：预览面板挂载时注册，卸载时注销（多实例安全）。 */
+let editRequestHandler: ((root: string, rel: string) => void) | null = null;
+
+export function setImageEditHandler(handler: ((root: string, rel: string) => void) | null): void {
+  editRequestHandler = handler;
+}
+
+let editTipProvider: (() => string) | null = null;
+
+export function setImageEditTipProvider(provider: (() => string) | null): void {
+  editTipProvider = provider;
 }
 
 function cursorTouches(state: EditorState, from: number, to: number): boolean {
@@ -145,7 +178,7 @@ export function imageItems(state: EditorState): { from: number; to: number; deco
 }
 
 export const imageTheme = EditorView.baseTheme({
-  ".cm-kb-image": { display: "inline-block", verticalAlign: "top", maxWidth: "100%" },
+  ".cm-kb-image": { display: "inline-block", verticalAlign: "top", maxWidth: "100%", position: "relative" },
   ".cm-kb-image img": { maxWidth: "100%", height: "auto", borderRadius: "4px", verticalAlign: "top" },
   ".cm-kb-image-error": {
     display: "inline-block",
@@ -155,6 +188,28 @@ export const imageTheme = EditorView.baseTheme({
     color: "var(--text-dim)",
     fontSize: "var(--font-sm)",
   },
+  // 悬浮「编辑」按钮：默认透明，hover 图片时浮现（纯 CSS 显隐，无全局监听）
+  ".cm-kb-image .cm-kb-image-edit": {
+    position: "absolute",
+    top: "6px",
+    right: "6px",
+    width: "24px",
+    height: "24px",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    border: "1px solid var(--border)",
+    borderRadius: "6px",
+    background: "var(--bg-panel)",
+    color: "var(--text)",
+    fontSize: "var(--font-md)",
+    cursor: "pointer",
+    opacity: "0",
+    transition: "opacity .12s linear",
+    zIndex: "3",
+  },
+  ".cm-kb-image.has-edit:hover .cm-kb-image-edit": { opacity: "1" },
+  ".cm-kb-image .cm-kb-image-edit:hover": { borderColor: "var(--accent)", color: "var(--accent)" },
 });
 
 export function imageSupport(ctx: DocContext | null): Extension {

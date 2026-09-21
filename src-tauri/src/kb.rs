@@ -631,7 +631,7 @@ fn is_binary(bytes: &[u8]) -> bool {
 }
 
 /// 解码：BOM 优先 → 严格 UTF-8 → chardetng 探测（覆盖 GBK/GB18030/BIG5/日韩）。
-fn decode_bytes(bytes: &[u8]) -> (String, &'static encoding_rs::Encoding, bool) {
+pub(crate) fn decode_bytes(bytes: &[u8]) -> (String, &'static encoding_rs::Encoding, bool) {
     use encoding_rs::{UTF_16BE, UTF_16LE, UTF_8};
     if let Some(rest) = bytes.strip_prefix(&[0xEF, 0xBB, 0xBF]) {
         let (text, _, _) = UTF_8.decode(rest);
@@ -1237,18 +1237,47 @@ mod kb_tests {
         let root_str = root.to_string_lossy().to_string();
 
         // 父目录不存在 → 自动创建（粘贴插图写 assets/ 的情形）
-        let entry = write_bytes_in(&root_str, "assets/img/a.bin", &encode(&[1u8, 2, 3, 254])).unwrap();
+        let entry = write_bytes_in(&root_str, "assets/img/a.bin", &encode(&[1u8, 2, 3, 254]), None).unwrap();
         assert_eq!(entry.rel, "assets/img/a.bin");
         assert_eq!(entry.size, 4);
         assert_eq!(std::fs::read(root.join("assets/img/a.bin")).unwrap(), vec![1u8, 2, 3, 254]);
 
         // 覆盖写：内容替换
-        write_bytes_in(&root_str, "assets/img/a.bin", &encode(&[9u8])).unwrap();
+        write_bytes_in(&root_str, "assets/img/a.bin", &encode(&[9u8]), None).unwrap();
         assert_eq!(std::fs::read(root.join("assets/img/a.bin")).unwrap(), vec![9u8]);
 
         // 越界仍被拒
-        assert!(write_bytes_in(&root_str, "../escape.bin", &encode(&[1u8])).is_err());
-        assert!(write_bytes_in(&root_str, "/tmp/escape.bin", &encode(&[1u8])).is_err());
+        assert!(write_bytes_in(&root_str, "../escape.bin", &encode(&[1u8]), None).is_err());
+        assert!(write_bytes_in(&root_str, "/tmp/escape.bin", &encode(&[1u8]), None).is_err());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn write_bytes_mtime_guard_rejects_stale_overwrite() {
+        use base64_support::encode;
+        let root = temp_root("bytes-guard");
+        let root_str = root.to_string_lossy().to_string();
+
+        write_bytes_in(&root_str, "assets/shot.png", &encode(&[1u8]), None).unwrap();
+        let mtime = mtime_ms(&std::fs::metadata(root.join("assets/shot.png")).unwrap());
+
+        // mtime 相符 → 放行
+        write_bytes_in(&root_str, "assets/shot.png", &encode(&[2u8]), Some(mtime)).unwrap();
+        assert_eq!(std::fs::read(root.join("assets/shot.png")).unwrap(), vec![2u8]);
+
+        // mtime 不符（外部已改）→ 拒绝，且内容不被覆盖
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        std::fs::write(root.join("assets/shot.png"), [7u8; 4]).unwrap();
+        let err = match write_bytes_in(&root_str, "assets/shot.png", &encode(&[3u8]), Some(mtime)) {
+            Err(e) => e.to_string(),
+            Ok(_) => panic!("过期 mtime 的覆盖应当被拒绝"),
+        };
+        assert!(err.contains("已被外部修改"), "实际：{err}");
+        assert_eq!(std::fs::read(root.join("assets/shot.png")).unwrap(), vec![7u8; 4]);
+
+        // 显式不校验（用户已确认覆盖 / 新文件）→ 放行
+        write_bytes_in(&root_str, "assets/shot.png", &encode(&[4u8]), None).unwrap();
+        assert_eq!(std::fs::read(root.join("assets/shot.png")).unwrap(), vec![4u8]);
         let _ = std::fs::remove_dir_all(&root);
     }
 
@@ -1534,19 +1563,34 @@ fn decode_base64(input: &str) -> Result<Vec<u8>> {
     Ok(out)
 }
 
-/// 写入二进制文件（粘贴/拖放插图用）：父目录不存在则创建，写法与文本一致（临时文件 + rename）。
+/// 写入二进制文件（粘贴/拖放插图、图片编辑回写用）：父目录不存在则创建，
+/// 写法与文本一致（临时文件 + rename）。`expected_mtime_ms` 不符（外部改动）→
+/// 拒绝覆盖，与 `kb_write_text` 同一守卫——否则编辑器保存会冲掉外部程序刚改过的图。
+/// 文件不存在时跳过校验（新建文件本就没有"外部改动"可言）。
 #[tauri::command]
-pub fn kb_write_bytes(root: String, rel: String, base64: String) -> Result<Entry, String> {
-    write_bytes_in(&root, &rel, &base64).map_err(|e| e.to_string())
+pub fn kb_write_bytes(
+    root: String,
+    rel: String,
+    base64: String,
+    expected_mtime_ms: Option<i64>,
+) -> Result<Entry, String> {
+    write_bytes_in(&root, &rel, &base64, expected_mtime_ms).map_err(|e| e.to_string())
 }
 
-pub fn write_bytes_in(root: &str, rel: &str, base64: &str) -> Result<Entry> {
+pub fn write_bytes_in(root: &str, rel: &str, base64: &str, expected_mtime_ms: Option<i64>) -> Result<Entry> {
     let root_abs = root_path(root)?;
     let normalized = normalize_rel(rel)?;
     if normalized.is_empty() {
         bail!("路径不能为空");
     }
     let abs = resolve_in_root(&root_abs, &normalized)?;
+    if let Ok(meta) = std::fs::metadata(&abs) {
+        if let Some(expected) = expected_mtime_ms {
+            if mtime_ms(&meta) != expected {
+                bail!("文件已被外部修改，请重新打开后再编辑");
+            }
+        }
+    }
     let bytes = decode_base64(base64)?;
     let dir = abs.parent().ok_or_else(|| anyhow!("无效路径"))?;
     if !dir.exists() {

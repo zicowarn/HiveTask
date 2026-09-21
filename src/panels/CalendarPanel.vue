@@ -26,11 +26,23 @@ import { useIssuesStore } from "../stores/issues";
 import { usePullsStore } from "../stores/pulls";
 import { useProjectsStore } from "../stores/projects";
 import { useSettingsStore } from "../stores/settings";
+import { useCalendarStore } from "../stores/calendar";
+import CalendarEventDialog from "./CalendarEventDialog.vue";
 import { useI18n } from "../i18n";
 import { api, isTauri } from "../api";
-import type { CalendarFeed, CalendarFeedEvent } from "../api";
+import type { CalendarEventRow, CalendarFeed, CalendarFeedEvent, LunarYmd } from "../api";
 import { openExternalUrl } from "../open-url";
-import { buildCalendarEvents, dateKey, heatBucket, type CalendarEventKind } from "./calendar-events";
+import {
+  addDaysLocal,
+  buildCalendarEvents,
+  dateKey,
+  expandOccurrences,
+  heatBucket,
+  type CalendarEventKind,
+} from "./calendar-events";
+import type { DateSelectArg } from "@fullcalendar/core";
+import type { EventDropArg } from "@fullcalendar/core";
+import type { DateClickArg } from "@fullcalendar/interaction";
 
 defineProps<{ leafId?: string; panelType?: string }>();
 
@@ -40,18 +52,20 @@ const issues = useIssuesStore();
 const pulls = usePullsStore();
 const projects = useProjectsStore();
 const settings = useSettingsStore();
+const calendar = useCalendarStore();
 const { t, locale } = useI18n();
 
 // ---- 图层开关（DropdownMenu multiple：保持展开连续勾选） ----
 
 const PROJECTION_LAYERS: CalendarEventKind[] = ["milestone", "issue", "pull", "project"];
-const visibleLayers = ref<string[]>([...PROJECTION_LAYERS]);
+const visibleLayers = ref<string[]>([...PROJECTION_LAYERS, "event"]);
 
 const layerOptions = computed(() => [
   { value: "milestone", label: t("calendar.layer.milestones"), color: "var(--accent)" },
   { value: "issue", label: t("calendar.layer.issues"), color: "var(--success)" },
   { value: "pull", label: t("calendar.layer.pulls"), color: "var(--merged)" },
   { value: "project", label: t("calendar.layer.projects"), color: "var(--text-dim)" },
+  { value: "event", label: t("calendar.layer.events"), color: "var(--danger)" },
   ...feeds.value.map((f) => ({
     value: `feed:${f.id}`,
     label: f.name,
@@ -67,8 +81,21 @@ let appLoaded = false;
 let autoSyncStarted = false;
 /** 订阅过期阈值：超 6 小时在面板打开时后台重拉（离线诚实跳过）。 */
 const STALE_MS = 6 * 3600 * 1000;
-/** 解析器版本：升版时强制全量重同步一次（旧缓存是旧口径解析的）。 */
-const PARSER_VERSION = "2";
+// 可视区间（datesSet 维护）：重复日程按它展开
+  const visibleRange = ref<{ from: string; to: string }>({
+    from: dateKey(new Date()),
+    to: dateKey(new Date()),
+  });
+  // 日程新建/编辑对话框（create 预填日期；edit 携带行）
+  const dialogOpen = ref(false);
+  /** 双击检测：单击不弹窗（防误触），同日 500ms 内两击才创建。 */
+  let lastClick = { date: "", at: 0 };
+  const creatingDate = ref<string | null>(null);
+  const creatingEnd = ref<string | null>(null);
+  const editing = ref<CalendarEventRow | null>(null);
+
+  /** 解析器版本：升版时强制全量重同步一次（旧缓存是旧口径解析的）。 */
+  const PARSER_VERSION = "2";
 const PARSER_FLAG_KEY = "hivetask.feedParserVersion";
 
 function reconcileLayers(): void {
@@ -139,6 +166,10 @@ async function ensureAppData(): Promise<void> {
 }
 
 // ---- 农历副行（应用级；预取今天 ±370 天，超出再补拉） ----
+  /** 结构化农历（每年农历重复的匹配）：date → {month, day, leap}。 */
+  const lunarYmdMap = ref<Map<string, LunarYmd>>(new Map());
+  /** 每年农历日程的锚点：eventId → 起始日的农历月日。 */
+  const lunarAnchor = ref<Map<string, LunarYmd>>(new Map());
 
 const lunarMap = ref<Map<string, string>>(new Map());
 let lunarCoverFrom: string | null = null;
@@ -177,12 +208,23 @@ interface FcEvent {
   id: string;
   title: string;
   start: string;
-  extendedProps: { url: string | null };
+  end?: string;
+  allDay?: boolean;
+  extendedProps: { url: string | null; localId?: string };
   classNames: string[];
+  startEditable?: boolean;
   backgroundColor?: string;
   borderColor?: string;
   textColor?: string;
 }
+
+/** 各图层事件色（月视图实底 / 列表视图色点同源）。 */
+const KIND_BORDER: Record<CalendarEventKind, string> = {
+  milestone: "var(--accent)",
+  issue: "var(--success)",
+  pull: "var(--merged)",
+  project: "var(--text-dim)",
+};
 
 const calendarEvents = computed<FcEvent[]>(() => {
   const projections: FcEvent[] = buildCalendarEvents({
@@ -199,9 +241,66 @@ const calendarEvents = computed<FcEvent[]>(() => {
       start: e.date,
       extendedProps: { url: e.url },
       classNames: [`ev-${e.kind}`],
+      borderColor: KIND_BORDER[e.kind],
     }));
 
   const extras: FcEvent[] = [];
+  // 本地日程（C 类图层：用户手建，红 = 我的事）。重复日程按可视区间展开
+  // 发生日；fc 全天 end 为排他端点（结束日 +1），timed 用 ISO 时刻。
+  if (visibleLayers.value.includes("event")) {
+    const { from, to } = visibleRange.value;
+    for (const e of calendar.events) {
+      const delta = e.endDate
+        ? Math.round((new Date(e.endDate).getTime() - new Date(e.startDate).getTime()) / 86400e3)
+        : 0;
+      // 每年农历：锚点农历月日逐一比对可视区间各日
+      const occs =
+        e.recur === "lunar"
+          ? (() => {
+              const anchor = lunarAnchor.value.get(e.id);
+              if (!anchor) return [];
+              const out: string[] = [];
+              let cur = from;
+              let guard = 0;
+              while (cur <= to && guard < 400) {
+                guard++;
+                const y = lunarYmdMap.value.get(cur);
+                if (
+                  y &&
+                  y.month === anchor.month &&
+                  y.day === anchor.day &&
+                  y.leap === anchor.leap
+                ) {
+                  out.push(cur);
+                }
+                cur = addDaysLocal(cur, 1);
+              }
+              return out;
+            })()
+          : expandOccurrences(e.startDate, e.endDate, e.recur, from, to);
+      for (const occ of occs) {
+        const occEnd = delta > 0 ? addDaysLocal(occ, delta) : occ;
+        extras.push({
+          id: `event:${e.id}:${occ}`,
+          title: e.title,
+          allDay: e.allDay,
+          start: e.allDay ? occ : `${occ}T${e.startTime ?? "00:00"}:00`,
+          end: e.allDay
+            ? e.endDate
+              ? addDaysLocal(occEnd, 1)
+              : undefined
+            : e.endDate
+              ? `${occEnd}T${e.endTime ?? "23:59"}:00`
+              : e.startTime
+                ? `${occ}T${e.startTime}:00`
+                : undefined,
+          extendedProps: { url: null, localId: e.id },
+          classNames: ["ev-event"],
+          startEditable: !e.recur, // 重复日程拖拽 = 改系列锚点，v1 禁拖（revert）
+        });
+      }
+    }
+  }
   const feedColor = new Map(feeds.value.map((f) => [f.id, f.color]));
   for (const f of feedEvents.value) {
     if (visibleLayers.value.includes(`feed:${f.feedId}`)) {
@@ -213,7 +312,7 @@ const calendarEvents = computed<FcEvent[]>(() => {
         extendedProps: { url: null },
         classNames: color ? [] : ["ev-feed"],
         backgroundColor: color ?? undefined,
-        borderColor: color ?? undefined,
+        borderColor: color ?? "var(--accent)",
         textColor: color ? "#fff" : undefined,
       });
     }
@@ -221,10 +320,29 @@ const calendarEvents = computed<FcEvent[]>(() => {
   return [...projections, ...extras];
 });
 
+/** 事件条单击不动作（防误触，与日期格双击同一手势语言）；双击才执行：
+ *  本地日程 → 编辑对话框；带线上链接的 chip → 开浏览器。 */
+let lastEventClick = { id: "", at: 0 };
 function onEventClick(info: EventClickArg): void {
+  const key = info.event.id;
+  const now = Date.now();
+  const isDouble = lastEventClick.id === key && now - lastEventClick.at < 500;
+  lastEventClick = { id: key, at: now };
+  if (!isDouble) return;
+
   const url = info.event.extendedProps?.url as string | undefined;
-  if (url) openExternalUrl(url);
-  // 本地 Issue / 项目日期 / 假日 / 订阅无线上页：诚实不跳
+  if (url) {
+    openExternalUrl(url);
+    return;
+  }
+  const localId = info.event.extendedProps?.localId as string | undefined;
+  if (localId) {
+    const row = calendar.events.find((e) => e.id === localId);
+    if (row) {
+      editing.value = row;
+      dialogOpen.value = true;
+    }
+  }
 }
 
 const options = computed<CalendarOptions>(() => ({
@@ -238,7 +356,63 @@ const options = computed<CalendarOptions>(() => ({
   events: calendarEvents.value,
   eventClick: onEventClick,
   datesSet: (arg: DatesSetArg) => {
+    visibleRange.value = { from: dateKey(arg.start), to: dateKey(arg.end) };
     void ensureLunar(arg.start, arg.end);
+  },
+  // 双击日期 → 新建日程（单击不动作，防误触）；拖选区间 → 预填起止（fc end 为排他，转含端）
+  dateClick: (arg: DateClickArg) => {
+    const now = Date.now();
+    if (lastClick.date === arg.dateStr && now - lastClick.at < 500) {
+      lastClick = { date: "", at: 0 };
+      creatingDate.value = arg.dateStr;
+      creatingEnd.value = null;
+      editing.value = null;
+      dialogOpen.value = true;
+    } else {
+      lastClick = { date: arg.dateStr, at: now };
+    }
+  },
+  editable: true,
+  eventDrop: (arg: EventDropArg) => {
+    const localId = arg.event.extendedProps?.localId as string | undefined;
+    const row = localId ? calendar.events.find((e) => e.id === localId) : undefined;
+    if (!row || row.recur) {
+      arg.revert(); // 重复日程拖拽 = 改系列锚点，v1 不做
+      return;
+    }
+    const newStart = dateKey(arg.event.start ?? new Date(row.startDate));
+    const delta = Math.round(
+      (new Date(newStart).getTime() - new Date(row.startDate).getTime()) / 86400e3,
+    );
+    const newEnd = row.endDate
+      ? addDaysLocal(row.endDate, delta)
+      : null;
+    void calendar
+      .update(
+        row.id,
+        row.title,
+        newStart,
+        newEnd,
+        row.allDay,
+        row.startTime,
+        row.endTime,
+        row.notes,
+        row.remindAt,
+        row.recur,
+      )
+      .catch(() => {
+        // 失败回滚拖拽位置
+      });
+  },
+  selectable: true,
+  select: (arg: DateSelectArg) => {
+    // selectable 开启时单击也会触发「零长度 select」（start=end）——那是一次点击
+    // 不是拖选：忽略，创建走双击门槛。拖选必须真跨 ≥2 天才建。
+    if (arg.end.getTime() - arg.start.getTime() <= 86400e3) return;
+    creatingDate.value = dateKey(arg.start);
+    creatingEnd.value = dateKey(new Date(arg.end.getTime() - 86400e3));
+    editing.value = null;
+    dialogOpen.value = true;
   },
   // 日格挂载：提交热力 data-heat(-level)（::after 渲染）+ 农历副行（追加 span）
   dayCellDidMount: (arg: DayCellMountArg) => {
@@ -289,7 +463,25 @@ watch(
   },
 );
 
+// 每年农历日程：解析起始日农历锚点（缺失即取，取完重挂载）
+async function ensureLunarAnchors(): Promise<void> {
+  if (!isTauri()) return;
+  let fetched = false;
+  for (const e of calendar.events.filter((x) => x.recur === "lunar")) {
+    if (lunarAnchor.value.has(e.id)) continue;
+    try {
+      lunarAnchor.value.set(e.id, await api.calendarLunarYmd(e.startDate));
+      fetched = true;
+    } catch {
+      lunarAnchor.value.set(e.id, { month: 0, day: 0, leap: false });
+    }
+  }
+  if (fetched) calKey.value += 1;
+}
+watch(() => calendar.events, () => void ensureLunarAnchors(), { deep: true });
+
 onMounted(() => {
+  void calendar.ensureEvents();
   void ensureAppData();
   const now = new Date();
   void ensureLunar(new Date(now.getTime() - 370 * 86400e3), new Date(now.getTime() + 370 * 86400e3));
@@ -312,6 +504,13 @@ onMounted(() => {
       <p v-if="!current" class="cal-hint">{{ t("calendar.noRepo") }}</p>
       <FullCalendar v-else :key="calKey" :options="options" />
     </div>
+    <CalendarEventDialog
+      v-if="dialogOpen"
+      :mode="editing ? 'edit' : 'create'"
+      :date="creatingDate"
+      :event="editing"
+      @close="dialogOpen = false"
+    />
   </PanelShell>
 </template>
 
@@ -418,6 +617,12 @@ onMounted(() => {
 .calendar-wrap :deep(.fc .fc-button-group > .fc-button:last-child) {
   border-radius: 0 6px 6px 0;
 }
+/* 双击创建会触发原生文字选择——月网格禁选字（列表视图保留可复制） */
+.calendar-wrap :deep(.fc-daygrid),
+.calendar-wrap :deep(.fc-col-header) {
+  user-select: none;
+  -webkit-user-select: none;
+}
 /* 今日强调（用户反馈「今日不明显」）：底色 accent-soft + 日号反色药丸 */
 .calendar-wrap :deep(.fc .fc-day-today .fc-daygrid-day-number) {
   background: var(--accent);
@@ -439,34 +644,47 @@ onMounted(() => {
   color: var(--text);
   font-size: var(--font-md);
 }
-.calendar-wrap :deep(.fc .fc-list-event-dot) {
-  border-color: var(--accent);
+/* 列表视图（listMonth 作用域）：行 = 色点 + 时间 + 标题——实底条是月视图
+   语言，列表里压迫且无悬停反馈；色点颜色 = 事件 borderColor（图层色/订阅色） */
+.calendar-wrap :deep(.fc .fc-listMonth-view .fc-list-event) {
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  padding: 4px 10px;
+  cursor: pointer;
+}
+.calendar-wrap :deep(.fc .fc-listMonth-view .fc-list-event:hover) {
+  background: var(--bg-hover);
 }
 .calendar-wrap :deep(.fc-event) {
   cursor: default;
   font-size: var(--font-xs);
   line-height: 1.3;
 }
-.calendar-wrap :deep(.fc-event.ev-milestone) {
+.calendar-wrap :deep(.fc .fc-dayGridMonth-view .fc-event.ev-milestone) {
   background: var(--accent);
 }
-.calendar-wrap :deep(.fc-event.ev-issue) {
+.calendar-wrap :deep(.fc .fc-dayGridMonth-view .fc-event.ev-issue) {
   background: var(--success);
 }
-.calendar-wrap :deep(.fc-event.ev-pull) {
+.calendar-wrap :deep(.fc .fc-dayGridMonth-view .fc-event.ev-pull) {
   background: var(--merged);
 }
 /* 项目日期字段：中性灰（非平台状态色，避免误导为远端实体） */
-.calendar-wrap :deep(.fc-event.ev-project) {
+.calendar-wrap :deep(.fc .fc-dayGridMonth-view .fc-event.ev-project) {
   background: var(--bg-selected);
   border: 1px solid var(--border);
   color: var(--text);
 }
-.calendar-wrap :deep(.fc-event.ev-project .fc-event-title) {
+.calendar-wrap :deep(.fc .fc-dayGridMonth-view .fc-event.ev-project .fc-event-title) {
   color: var(--text);
 }
+/* 本地日程（用户手建）：红实底——我的事，最强视觉 */
+.calendar-wrap :deep(.fc .fc-dayGridMonth-view .fc-event.ev-event) {
+  background: var(--danger);
+}
 /* ICS 订阅：accent + 虚线描边（与里程碑实线蓝区分） */
-.calendar-wrap :deep(.fc-event.ev-feed) {
+.calendar-wrap :deep(.fc .fc-dayGridMonth-view .fc-event.ev-feed) {
   background: var(--accent);
   border: 1px dashed var(--bg-panel);
 }

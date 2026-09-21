@@ -7,7 +7,7 @@
  *  - 项目日期字段值（app.db，经 projects store 已加载的 fields/items）
  */
 
-import type { MilestoneInfo, ProjectField, ProjectItem } from "../api";
+import type { CalendarEventRow, MilestoneInfo, ProjectField, ProjectItem } from "../api";
 import type { Issue, Pull } from "../types";
 
 export type CalendarEventKind = "milestone" | "issue" | "pull" | "project";
@@ -39,6 +39,107 @@ export function dateKey(d: Date): string {
   const m = `${d.getMonth() + 1}`.padStart(2, "0");
   const day = `${d.getDate()}`.padStart(2, "0");
   return `${d.getFullYear()}-${m}-${day}`;
+}
+
+/** 解析 YYYY-MM-DD 为本地 Date；非法返回 null（避免 UTC 解析漂移）。 */
+function parseLocal(s: string): Date | null {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s);
+  if (!m) return null;
+  const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
+/** 本地日期 +n 天。 */
+export function addDaysLocal(s: string, n: number): string {
+  const d = parseLocal(s);
+  if (!d) return s;
+  return dateKey(new Date(d.getFullYear(), d.getMonth(), d.getDate() + n));
+}
+
+/**
+ * 重复日程是否在指定日期发生（按起始日锚定：weekly 同星期、monthly 同日、
+ * yearly 同月日；短月/平年自然跳过）。跨度（end-start）随发生日平移；
+ * 不重复 = 仅原跨度命中。
+ */
+export function occursOn(
+  startDate: string,
+  endDate: string | null,
+  recur: string,
+  date: string,
+): boolean {
+  const s = parseLocal(startDate);
+  const t = parseLocal(date);
+  if (!s || !t || t < s) return false;
+  const delta = endDate ? Math.round((parseLocal(endDate)!.getTime() - s.getTime()) / 86400e3) : 0;
+  const hit = (occ: Date): boolean =>
+    t.getTime() >= occ.getTime() && t.getTime() <= occ.getTime() + delta * 86400e3;
+  /** 发生日 = t 往回最多 delta 天内满足锚定谓词且 ≥ 起始日的日期。 */
+  const hitBy = (pred: (o: Date) => boolean): boolean => {
+    for (let k = 0; k <= delta; k++) {
+      const occ = new Date(t.getFullYear(), t.getMonth(), t.getDate() - k);
+      if (occ < s) break;
+      if (pred(occ)) return true;
+    }
+    return false;
+  };
+  switch (recur) {
+    case "daily":
+      return true;
+    case "weekly": {
+      // weekly:N（ISO：1=周一…7=周日）；无后缀锚定起始日星期
+      const m = /^weekly:(\d)$/.exec(recur);
+      if (m) {
+        const iso = Number(m[1]) % 7; // ISO 7(周日) → getDay 0
+        return hitBy((o) => o.getDay() === iso);
+      }
+      return hitBy((o) => o.getDay() === s.getDay());
+    }
+    case "monthly":
+      return hitBy((o) => o.getDate() === s.getDate());
+    case "yearly":
+      return hitBy((o) => o.getMonth() === s.getMonth() && o.getDate() === s.getDate());
+    case "lunar":
+      return false; // 农历锚定需农历数据，调用方经 matcher 处理
+    default:
+      return hit(s);
+  }
+}
+
+/**
+ * 展开可视区间 [from, to] 内的发生起始日（升序）。不重复规则若跨度与区间
+ * 相交，返回 [startDate]（渲染端用 fc end 补跨度）。
+ */
+export function expandOccurrences(
+  startDate: string,
+  endDate: string | null,
+  recur: string,
+  from: string,
+  to: string,
+): string[] {
+  if (recur === "") {
+    const overlaps = (endDate ?? startDate) >= from && startDate <= to;
+    return overlaps ? [startDate] : [];
+  }
+  const out: string[] = [];
+  let cursor = startDate > from ? startDate : from;
+  const toD = parseLocal(to);
+  const toIncl = toD ? dateKey(new Date(toD.getFullYear(), toD.getMonth(), toD.getDate() + 1)) : to;
+  let guard = 0;
+  while (cursor <= toIncl && guard < 400) {
+    guard++;
+    if (occursOn(startDate, endDate, recur, cursor)) out.push(cursor);
+    cursor = addDaysLocal(cursor, 1);
+  }
+  return out;
+}
+
+/**
+ * 覆盖指定日期的日程（含跨日与重复展开判定）。
+ * 状态栏「今日日程」与日历面板共用的口径——只数手建日程（"今天要做什么"），
+ * 订阅/节气/农历/热力等"今天是什么日子"不计入。
+ */
+export function eventsOnDate(rows: CalendarEventRow[], date: string): CalendarEventRow[] {
+  return rows.filter((e) => occursOn(e.startDate, e.endDate, e.recur, date));
 }
 
 /** 提交热力强度档（GitHub 贡献图口径）：0 无 / 1 低 / 2 中 / 3 高 / 4 峰值。 */

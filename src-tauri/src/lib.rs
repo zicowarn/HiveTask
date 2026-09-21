@@ -10,6 +10,7 @@ mod gitea;
 mod git;
 mod journal;
 mod kb;
+mod kb_graph;
 mod kb_watch;
 mod openwith_apps;
 mod local;
@@ -1236,6 +1237,9 @@ pub fn run() {
             kb::kb_pick_root,
             kb::kb_list_dir,
             kb::kb_walk,
+            kb_graph::kb_graph_index,
+            kb_graph::kb_graph_layout_get,
+            kb_graph::kb_graph_layout_set,
             kb::kb_search,
             kb::kb_stat,
             kb_watch::kb_watch_start,

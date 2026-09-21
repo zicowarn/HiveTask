@@ -40,6 +40,7 @@ export const MARKDOWN_COMMANDS: MarkdownCommand[] = [
   { key: "ol", kind: "line", icon: "o.md-list-ordered", labelKey: "md.ol", shortcut: "⌥⌘O", token: "1. " },
   { key: "task", kind: "line", icon: "o.md-tasklist", labelKey: "md.task", shortcut: "⌥⌘X", token: "- [ ] " },
   { key: "image", kind: "wrap", icon: "o.md-image", labelKey: "md.image", prefix: "![", suffix: "](url)", placeholder: "alt" },
+  { key: "draw", kind: "action", icon: "o.paintbrush", labelKey: "md.draw" },
   { key: "table", kind: "insert", icon: "o.layout-table", labelKey: "md.table", text: "| 列一 | 列二 |\n| --- | --- |\n|  |  |\n" },
   { key: "formula", kind: "insert", icon: "o.formula", labelKey: "md.formula", shortcut: "⌥⌘B", text: "$$\n$1\n$$\n" },
   { key: "toc", kind: "insert", icon: "o.list-ordered", labelKey: "md.toc", text: "- 目录\n$1" },
@@ -53,16 +54,14 @@ export const COMMAND_GROUPS: string[][] = [
   ["ul", "ol", "task"],
   ["image", "table", "formula", "toc"],
   ["undo"],
-];
-
-/** Issue/评论编辑器用的键序（与既有 12 键完全一致，保证形态不变）。 */
+];/** Issue/评论编辑器用的键序（与既有 12 键完全一致，保证形态不变）。 */
 export const ISSUE_TOOLBAR_KEYS = ["h", "b", "i", "quote", "code", "link", "ul", "ol", "task", "image", "mention", "undo"];
 
 /** 知识库编辑器用的分组（去掉 @提及，加入表格/公式/目录）。 */
 export const EDITOR_COMMAND_GROUPS: string[][] = [
   ["h", "b", "i", "quote", "code", "link"],
   ["ul", "ol", "task"],
-  ["image", "table", "formula", "toc"],
+  ["image", "draw", "table", "formula", "toc"],
   ["undo"],
 ];
 

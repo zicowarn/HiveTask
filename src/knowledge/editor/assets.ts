@@ -50,13 +50,39 @@ export function extensionFor(file: File): string {
   return byType[file.type] ?? fromName ?? "png";
 }
 
-function toBase64(bytes: Uint8Array): string {
+/** 分块 base64（参数过长会栈溢出）。图片编辑的保存链路复用同一编码。 */
+export function toBase64(bytes: Uint8Array): string {
   let binary = "";
   const chunk = 0x8000; // 分块避免参数过多
   for (let i = 0; i < bytes.length; i += chunk) {
     binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
   }
   return btoa(binary);
+}
+
+/** 编辑另存的文件名：`edited-YYYYMMDD-HHMMSS.png`（冲突加序号）。一律 PNG：编辑输出不回写非 PNG 容器。 */
+export function editedFileName(now: Date, index: number): string {
+  const pad = (n: number) => String(n).padStart(2, "0");
+  const stamp = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
+  return `edited-${stamp}${index > 0 ? `-${index}` : ""}.png`;
+}
+
+/** 编辑另存的落点：与原图同目录（原图通常已在 assets/ 里，不另开 assets 层）。 */
+export function editedRelPath(origRel: string, name: string): string {
+  const dir = origRel.includes("/") ? origRel.slice(0, origRel.lastIndexOf("/")) : "";
+  return dir ? `${dir}/${name}` : name;
+}
+
+/** 空白画布保存的文件名：`drawn-YYYYMMDD-HHMMSS.png`（与"编辑已有图"的 edited- 区分来源）。 */
+export function drawnFileName(now: Date, index: number): string {
+  const pad = (n: number) => String(n).padStart(2, "0");
+  const stamp = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
+  return `drawn-${stamp}${index > 0 ? `-${index}` : ""}.png`;
+}
+
+/** 空白画布的落点：当前文档同级的 assets/（与粘贴插图同一落点规则，引用不依赖文档深度）。 */
+export function drawnRelPath(docRel: string, name: string): string {
+  return assetRelPath(docRel, name);
 }
 
 export interface SavedImage {

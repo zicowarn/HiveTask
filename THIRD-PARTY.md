@@ -37,9 +37,11 @@ HiveTask 自身以 **AGPL-3.0-only** 发布（见 `LICENSE`）。下列许可均
 |---|---|---|
 | `vue`、`pinia` | MIT | 前端框架与状态管理 |
 | `@codemirror/{state,view,language,commands,lang-markdown}`、`@lezer/highlight` | MIT | 知识库的 Markdown 编辑器（live preview） |
+| `@codemirror/autocomplete` | MIT | 编辑器 `[[wikilink]]` 笔记名补全（6.20.3；WKWebView 扫描零命中，2026-09-19） |
 | `katex` | MIT（代码）+ SIL OFL 1.1（字体，见上） | 公式排版 |
 | `mermaid` | MIT | 图表渲染（本地渲染，无远程服务） |
 | `markdown-it` | MIT | Issue / PR 正文的 Markdown 渲染 |
+| `force-graph` | MIT | 知识库图谱面板的力导向画布（2D canvas + d3-force）；WKWebView 扫描：1.51.4 本体 + 14 个传递依赖（d3-force-3d / kapsule / lodash-es 等）对 `Iterator.prototype` / `Promise.withResolvers` 等六项零命中（2026-09-18） |
 | `@xterm/xterm`、`@xterm/addon-fit` | MIT | 集成终端 |
 | `@fullcalendar/{core,vue3,daygrid,list,interaction}`（**锁 6.1.21**） | MIT（core 内含私有 preact 依赖） | 日历面板（工具类目）：月/列表视图 + 拖拽；WKWebView 六项扫描零命中，样式由包内 JS 注入 |
 | `@web-git-graph/{web,protocol}` | MIT | Git 历史泳道图 |

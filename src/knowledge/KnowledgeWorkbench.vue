@@ -167,7 +167,7 @@ const createRequest = ref<{ kind: "file" | "dir"; parent?: string } | null>(null
           <p class="kb-welcome-note">{{ t("kb.welcomeNote") }}</p>
           <button class="text-btn primary" @click="store.openSwitch()">{{ t("kb.pickRoot") }}</button>
         </div>
-        <KnowledgePreview v-else ref="previewRef" :reload-tick="reloadTick" @reveal-in-tree="revealInTree" />
+        <KnowledgePreview v-else ref="previewRef" :reload-tick="reloadTick" />
       </template>
     </SplitPane>
 

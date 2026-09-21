@@ -100,20 +100,32 @@
 
 ### 5.3 代码结构（建议目录）
 
+> **✅ P1 增量已落地（2026-09-19）**：§8 的 P1 清单全部完成——图片 widget 悬浮「编辑」、
+> 工具条「画图」新建空白画布（`drawn-*` 文件 + 光标处插引用）、油漆桶（扫描线洪水填充，容差 48）、
+> 裁剪（两段式：框选 → 应用/取消）、旋转 ±90°/翻转（撤销栈扩展 `cropFrom` 尺寸字段）。
+> 台账详见 TASK.md T14 节。
+>
+> **⚠️ 形态修订（2026-09-17 用户口径，随 T14-D 轮实施生效）**：宿主形态由「全窗模态 DrawDialog」
+> 改为**预览面板内嵌编辑态**——点预览头「编辑图片」→ 头部出现绘图工具条（与 Markdown 编辑器
+> 头部功能操作栏同一槽位、同一形态语法），预览体换成画布；保存/取消在头部动作区。
+> 理由：① 用户指定「部分操作参考 Markdown 编辑器的头部功能操作栏」；② 与 Markdown 编辑
+> 共用「头部工具条 + 内容区」的既有语法，不新增第三套外壳；③ 编辑锁期间 load() 早退，
+> 面板内状态生命周期天然清晰。三个入口中 P0 落地**预览头**一处；图片 widget 悬浮编辑与
+> 「画图」新建空白画布命令留待下一增量。
+
 ```
 src/knowledge/draw/
-  DrawDialog.vue      宿主外壳：全窗模态 + 顶栏（工具条 / 撤销重做 / 保存取消）+ 脏检查
-  CanvasBoard.vue     画布交互：指针事件、缩放/平移、工具调度、光标
-  tools.ts            工具定义与状态机（纯函数优先 → 可单测）
-  render.ts           绘制原语：画笔/橡皮/直线/箭头/矩形/椭圆/文字/马赛克
-  history.ts          撤销栈（脏矩形 patch + 步数与尺寸上限）
-  transform.ts        坐标换算（屏幕 ↔ 画布，含 zoom/pan）
-  io.ts               打开（kbReadBytes → createImageBitmap）/ 保存（toBlob → kbWriteBytes）
-  palette.ts          调色板与笔宽档位
+  DrawToolbar.vue     工具条（面板头形态：22px 钮 / 竖线分组 / DropdownMenu / Octicon+自绘图标）
+  DrawCanvas.vue      画布（三层：work 真相 / overlay 预览 / visible 合成；指针交互；文字 DOM 浮层）
+  session.ts          会话状态单例（工具/颜色/笔宽/字号/undo/redo/dirty）+ 工具表与预设
+  geometry.ts         纯几何：坐标换算 / 矩形规整 / 箭头头部 / 脏矩形（Vitest 直测）
+  history.ts          撤销栈：脏矩形 patch + 字节预算淘汰（不存全画布快照）
 ```
 
-- **纯逻辑**（`transform` / `history` / `palette` / `tools` 的状态迁移）走 Vitest，与仓库既有测试风格一致；渲染部分靠实机截图。
-- 宿主形态：**全窗模态浮层**，不是 `SideDrawer`（默认 480px，太窄），也**不新增工作台面板类型**（绘图是任务型操作：打开→画→保存/取消，不是常驻视图；不新增面板类型可避免动 `panel-types.ts` 与布局持久化）。→ 属 §9 需标注的"桌面发挥"。
+- 与原计划的差异：`tools.ts`/`render.ts`/`io.ts` 合并进 `DrawCanvas.vue`（工具状态机与
+  渲染原语强耦合于 canvas 上下文，拆文件反而要传一串 context；纯逻辑已抽到 geometry/history）；
+  `palette.ts` 并入 `session.ts`；`transform.ts` 即 `geometry.ts`；`io.ts` 的打开/保存走宿主
+  （KnowledgePreview 既有 load/save 链路），不另设一层。
 
 ---
 
