@@ -131,7 +131,7 @@ function cursorIn(state: EditorState, from: number, to: number): boolean {
 /**
  * 公式与 Mermaid 的折叠渲染。作为 ViewPlugin 的 decorations 提供者接进编辑器。
  */
-export function mathAndDiagramDecorations(state: EditorState): DecorationSet {
+export function mathAndDiagramDecorations(state: EditorState, onTableEdit?: () => void): DecorationSet {
   const doc = state.doc;
   const items: DecorationItem[] = [];
   const tree = fullSyntaxTree(state);
@@ -212,7 +212,7 @@ export function mathAndDiagramDecorations(state: EditorState): DecorationSet {
     }
   }
 
-  items.push(...tableItems(state));
+  items.push(...tableItems(state, onTableEdit));
   // 块级装饰必须排在非块级之前（同位置时）
   items.sort((a, b) => a.from - b.from || Number(b.deco.spec?.block ?? false) - Number(a.deco.spec?.block ?? false));
   return Decoration.set(
@@ -236,11 +236,11 @@ export const mathAndDiagramTheme = EditorView.baseTheme({
   ".cm-mermaid-error": { color: "var(--danger)", fontFamily: "var(--kb-mono)", fontSize: "var(--font-sm)" },
 });
 
-/** 需要它时把它放进编辑器扩展列表（与 live-preview 并列）。 */
-export function mathAndDiagram(): Extension {
+/** 需要它时把它放进编辑器扩展列表（与 live-preview 并列）。`onTableEdit`：渲染态表格的编辑入口。 */
+export function mathAndDiagram(onTableEdit?: () => void): Extension {
   return [
     // 跨行替换（表格 / 围栏 / 块级公式）必须由 state facet 提供，故整组放这里
-    EditorView.decorations.compute(["doc", "selection"], (state) => mathAndDiagramDecorations(state)),
+    EditorView.decorations.compute(["doc", "selection"], (state) => mathAndDiagramDecorations(state, onTableEdit)),
     mathAndDiagramTheme,
     tableTheme,
   ];

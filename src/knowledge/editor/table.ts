@@ -16,6 +16,7 @@ import { Decoration, EditorView, WidgetType } from "@codemirror/view";
 import type { EditorState } from "@codemirror/state";
 import MarkdownIt from "markdown-it";
 import type { RenderItem } from "./live-render";
+import { t } from "../../i18n";
 
 const md = new MarkdownIt({ html: false, linkify: true });
 
@@ -96,7 +97,11 @@ export function renderTableHtml(table: ParsedTable): string {
 }
 
 export class TableWidget extends WidgetType {
-  constructor(readonly source: string) {
+  constructor(
+    readonly source: string,
+    /** 双击/按钮 → 打开网格编辑器（由宿主注入；widget 不 import bus，避免循环依赖）。 */
+    private readonly onEdit?: () => void,
+  ) {
     super();
   }
   eq(other: TableWidget): boolean {
@@ -107,10 +112,34 @@ export class TableWidget extends WidgetType {
     wrap.className = "cm-kb-table";
     const parsed = parseTable(this.source);
     wrap.innerHTML = parsed ? renderTableHtml(parsed) : "";
+    // 悬停浮现的「编辑」按钮：渲染态直达网格编辑器（不必先点进源码再按 ⌥⌘T）。
+    // mousedown preventDefault：阻止 CM6 把这次点击当光标操作。
+    if (this.onEdit) {
+      const btn = document.createElement("button");
+      btn.className = "cm-kb-table-edit";
+      btn.type = "button";
+      btn.title = t("tableEditor.heading");
+      btn.setAttribute("aria-label", t("tableEditor.heading"));
+      btn.innerHTML =
+        '<svg viewBox="0 0 16 16" width="12" height="12" fill="currentColor"><path d="M11.013 1.427a1.75 1.75 0 0 1 2.474 0l1.086 1.086a1.75 1.75 0 0 1 0 2.474l-8.61 8.61c-.21.21-.47.364-.756.445l-3.251.93a.25.25 0 0 1-.304-.304l.92-3.25a1.873 1.873 0 0 1 .446-.759Zm.85 1.507a.25.25 0 0 0-.354 0L10.811 3.75l1.439 1.44 1.263-1.263a.25.25 0 0 0 0-.354Zm-1.698 2.265L3.725 10.13a.376.376 0 0 0-.09.187l-.38 1.927 1.927-.38c.07-.015.136-.046.187-.09Z"/></svg>';
+      btn.addEventListener("mousedown", (ev) => ev.preventDefault());
+      btn.addEventListener("click", (ev) => {
+        ev.preventDefault();
+        ev.stopPropagation();
+        this.onEdit?.();
+      });
+      wrap.appendChild(btn);
+    }
+    // 双击表格主体 = 同样直达编辑器（发现的自然性：双击是"编辑"的通用直觉）
+    wrap.addEventListener("dblclick", (ev) => {
+      ev.preventDefault();
+      ev.stopPropagation();
+      this.onEdit?.();
+    });
     return wrap;
   }
   ignoreEvent(): boolean {
-    return true;
+    return true; // 单击不进光标（保持"渲染态整块"）；编辑走按钮/双击
   }
 }
 
@@ -123,7 +152,7 @@ function cursorTouches(state: EditorState, from: number, to: number): boolean {
  * 并且只能由 state facet（`EditorView.decorations`）提供——ViewPlugin 提供会抛
  * `Decorations that replace line breaks may not be specified via plugins`。
  */
-export function tableItems(state: EditorState): RenderItem[] {
+export function tableItems(state: EditorState, onEdit?: () => void): RenderItem[] {
   const items: RenderItem[] = [];
   fullSyntaxTree(state).iterate({
     enter: (node: SyntaxNodeRef) => {
@@ -136,7 +165,7 @@ export function tableItems(state: EditorState): RenderItem[] {
       items.push({
         from: first.from,
         to: last.to,
-        deco: Decoration.replace({ block: true, widget: new TableWidget(source) }),
+        deco: Decoration.replace({ block: true, widget: new TableWidget(source, onEdit) }),
       });
     },
   });
@@ -144,7 +173,7 @@ export function tableItems(state: EditorState): RenderItem[] {
 }
 
 export const tableTheme = EditorView.baseTheme({
-  ".cm-kb-table": { display: "block", padding: "6px 0", overflowX: "auto" },
+  ".cm-kb-table": { display: "block", padding: "6px 0", overflowX: "auto", position: "relative" },
   ".cm-kb-table table": { borderCollapse: "collapse", width: "100%", fontSize: "var(--font-base)" },
   ".cm-kb-table th, .cm-kb-table td": {
     border: "1px solid var(--border)",
@@ -161,4 +190,24 @@ export const tableTheme = EditorView.baseTheme({
     borderRadius: "3px",
   },
   ".cm-kb-table a": { color: "var(--accent)" },
+  // 悬停浮现的「编辑」按钮：右上角小铅笔
+  ".cm-kb-table-edit": {
+    position: "absolute",
+    top: "4px",
+    right: "4px",
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    width: "22px",
+    height: "22px",
+    border: "1px solid var(--border)",
+    borderRadius: "5px",
+    background: "var(--bg-panel)",
+    color: "var(--text-dim)",
+    cursor: "pointer",
+    opacity: "0",
+    transition: "opacity 0.12s",
+  },
+  ".cm-kb-table:hover .cm-kb-table-edit": { opacity: "1" },
+  ".cm-kb-table-edit:hover": { color: "var(--accent)", borderColor: "var(--accent)" },
 });

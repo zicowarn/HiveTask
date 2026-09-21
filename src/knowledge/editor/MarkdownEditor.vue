@@ -86,7 +86,7 @@ function docContext() {
 
 /** 实时渲染装饰组（源码模式为空）。 */
 function richExtensions() {
-  return props.livePreview ? [livePreviewExtension, mathAndDiagram(), wikilinkPreview()] : [];
+  return props.livePreview ? [livePreviewExtension, mathAndDiagram(() => openTableAtCursor()), wikilinkPreview()] : [];
 }
 
 function extensions() {
@@ -205,7 +205,11 @@ watch(
 watch(
   () => props.livePreview,
   (value) => {
-    view?.dispatch({ effects: richCompartment.reconfigure(value ? [livePreviewExtension, mathAndDiagram()] : []) });
+    view?.dispatch({
+      effects: richCompartment.reconfigure(
+        value ? [livePreviewExtension, mathAndDiagram(() => openTableAtCursor()), wikilinkPreview()] : [],
+      ),
+    });
   },
 );
 
