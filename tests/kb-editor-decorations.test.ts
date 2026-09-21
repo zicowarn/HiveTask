@@ -177,10 +177,13 @@ describe("表格 widget", () => {
     expect(table!.widget).toHaveProperty("source");
   });
 
-  it("光标进入表格 → 回到源码", async () => {
+  it("光标进入表格 → 表格保持渲染态（2026-09-19 用户新口径：不再塌回源码）", async () => {
     const { TableWidget } = await import("../src/knowledge/editor/table");
-    const decos = collect(mathAndDiagramDecorations(stateAt(doc, 3)));
-    expect(decos.some((d) => d.widget instanceof TableWidget)).toBe(false);
+    const decos = collect(mathAndDiagramDecorations(stateAt(doc, doc.indexOf("| 甲 |"))));
+    expect(
+      decos.some((d) => d.widget instanceof TableWidget),
+      "光标在表内仍应有渲染 widget",
+    ).toBe(true);
   });
 });
 

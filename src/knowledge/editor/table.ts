@@ -98,9 +98,6 @@ export function renderTableHtml(table: ParsedTable): string {
 }
 
 export class TableWidget extends WidgetType {
-  /** 编辑会话：正在直接编辑渲染单元格时，抑制装饰重建（否则输入中表格会被重画）。 */
-  static editing: { from: number; to: number; widget: TableWidget } | null = null;
-
   constructor(
     readonly source: string,
     private readonly options?: {
@@ -198,11 +195,6 @@ export class TableWidget extends WidgetType {
       },
       { capture: true },
     );
-    const claimSession = (): void => {
-      TableWidget.editing = { from: range.from, to: range.to, widget: this };
-    };
-    cell.addEventListener("mousedown", claimSession, { capture: true });
-    cell.addEventListener("focus", claimSession);
     let timer: number | null = null;
     const flush = (): void => {
       if (timer !== null) {
@@ -212,7 +204,6 @@ export class TableWidget extends WidgetType {
       this.writeBack(range, cell);
     };
     cell.addEventListener("input", () => {
-      TableWidget.editing = { from: range.from, to: range.to, widget: this };
       if (timer !== null) window.clearTimeout(timer);
       timer = window.setTimeout(flush, 600);
     });
@@ -242,7 +233,6 @@ export class TableWidget extends WidgetType {
     const parsed = parseGrid(this.source);
     const model: TableModel = { header, aligns: parsed?.aligns ?? [], rows };
     const markdown = serializeTable(model);
-    TableWidget.editing = null;
     window.dispatchEvent(
       new CustomEvent("kb:table-writeback", { detail: { ...range, markdown } }),
     );
@@ -252,10 +242,6 @@ export class TableWidget extends WidgetType {
     // 可编辑模式下必须放行事件（contenteditable 单元格要接收点击/键盘）
     return !this.options?.range;
   }
-}
-
-function cursorTouches(state: EditorState, from: number, to: number): boolean {
-  return state.selection.ranges.some((r) => r.from <= to && r.to >= from);
 }
 
 /**
@@ -269,11 +255,9 @@ export function tableItems(state: EditorState, onEdit?: () => void): RenderItem[
   fullSyntaxTree(state).iterate({
     enter: (node: SyntaxNodeRef) => {
       if (node.name !== "Table") return;
-      // 单元格直接编辑期间保持渲染态：编辑会话覆盖该表时，selection 变化
-      // （光标被挪进范围）不应把表格塌回源码——那正是用户报的"点两下变源码"。
-      const session = TableWidget.editing;
-      if (session && session.from === node.from && session.to === node.to) return;
-      if (!session && cursorTouches(state, node.from, node.to)) return;
+      // 表格**永远保持渲染态**——单元格本身可编辑（muya 口径），不存在"塌回源码"
+      // 这个中间态。源码编辑走源码模式（livePreview 关）或网格对话框（铅笔）。
+      // （旧规则"光标进范围即撤销 widget"已删：它是"点两下变源码"的直接根源。）
       const source = state.doc.sliceString(node.from, node.to);
       if (!parseTable(source)) return;
       const first = state.doc.lineAt(node.from);
