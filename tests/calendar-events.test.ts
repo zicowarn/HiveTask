@@ -10,6 +10,7 @@ import {
   eventsOnDate,
   expandOccurrences,
   heatBucket,
+  layerPrio,
   localDateOf,
   occursOn,
 } from "../src/panels/calendar-events";
@@ -241,5 +242,24 @@ describe("buildCalendarEvents", () => {
     expect(
       buildCalendarEvents({ milestones: [], issues: [], pulls: [], projectFields: [], projectItems: [] }),
     ).toEqual([]);
+  });
+});
+
+describe("layerPrio（折叠优先级：日程/订阅节气假日 > 投影）", () => {
+  it("手建日程最低值（格高不足时最先保留）", () => {
+    expect(layerPrio("event:e1:2026-09-24")).toBeLessThan(layerPrio("feed:f1:d:t"));
+    expect(layerPrio("event:e1:2026-09-24")).toBeLessThan(layerPrio("issue:15956"));
+  });
+
+  it("订阅（节气/假日）压过投影类", () => {
+    expect(layerPrio("feed:f1:d:t")).toBeLessThan(layerPrio("issue:15956"));
+    expect(layerPrio("feed:f1:d:t")).toBeLessThan(layerPrio("pull:3"));
+    expect(layerPrio("feed:f1:d:t")).toBeLessThan(layerPrio("project:1:2"));
+    expect(layerPrio("feed:f1:d:t")).toBeLessThan(layerPrio("milestone:7"));
+  });
+
+  it("同层返回 0 差——回退 fc 默认链（start/-duration/allDay/title）", () => {
+    expect(layerPrio("event:a") - layerPrio("event:b")).toBe(0);
+    expect(layerPrio("issue:1") - layerPrio("pull:2")).toBe(0);
   });
 });

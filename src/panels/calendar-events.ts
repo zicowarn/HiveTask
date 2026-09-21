@@ -151,6 +151,18 @@ export function heatBucket(count: number): number {
   return 4;
 }
 
+/**
+ * 图层折叠优先级（用户定案「日程、节气和假日优先位于顶部」）：格高不足触发
+ * fc dayMaxEvents 折叠时，按此值升序保留（小者先显示），投影类（里程碑/议题/
+ * PR/项目日期）让位进「+N 更多」。同层回退 fc 默认排序（start/-duration/allDay/title）。
+ * 判定按事件 id 前缀：`event:` 手建日程、`feed:` ICS 订阅，其余皆投影。
+ */
+export function layerPrio(eventId: string): number {
+  if (eventId.startsWith("event:")) return 0;
+  if (eventId.startsWith("feed:")) return 1;
+  return 2;
+}
+
 export interface CalendarEventInput {
   milestones: MilestoneInfo[];
   issues: Issue[];

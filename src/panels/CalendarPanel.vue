@@ -38,10 +38,12 @@ import {
   dateKey,
   expandOccurrences,
   heatBucket,
+  layerPrio,
   type CalendarEventKind,
 } from "./calendar-events";
 import type { DateSelectArg } from "@fullcalendar/core";
 import type { EventDropArg } from "@fullcalendar/core";
+import type { EventApi } from "@fullcalendar/core";
 import type { DateClickArg } from "@fullcalendar/interaction";
 
 defineProps<{ leafId?: string; panelType?: string }>();
@@ -354,6 +356,16 @@ const options = computed<CalendarOptions>(() => ({
   firstDay: 1,
   dayMaxEvents: true,
   events: calendarEvents.value,
+  // 折叠/展示优先级：日程、节气/假日压过投影类（用户定案），同层回退 fc 默认链
+  //（'start,-duration,allDay,title'——与 fc 内置默认一致，函数后须显式补上）。
+  // 类型债：fc 运行时 parseFieldSpecs 接受「函数 + 字段串」数组，但类型窄化为 string。
+  eventOrder: [
+    (a: EventApi, b: EventApi) => layerPrio(a.id) - layerPrio(b.id),
+    "start",
+    "-duration",
+    "allDay",
+    "title",
+  ] as unknown as string,
   eventClick: onEventClick,
   datesSet: (arg: DatesSetArg) => {
     visibleRange.value = { from: dateKey(arg.start), to: dateKey(arg.end) };
@@ -556,6 +568,8 @@ onMounted(() => {
   --fc-today-bg-color: var(--accent-soft);
   --fc-neutral-bg-color: var(--bg-app);
   --fc-event-border-color: transparent;
+  --fc-more-link-bg-color: transparent;
+  --fc-more-link-text-color: var(--text-dim);
   color: var(--text);
   font-size: var(--font-md);
   flex: 1;
@@ -685,6 +699,73 @@ onMounted(() => {
 }
 /* ICS 订阅：accent + 虚线描边（与里程碑实线蓝区分） */
 .calendar-wrap :deep(.fc .fc-dayGridMonth-view .fc-event.ev-feed) {
+  background: var(--accent);
+  border: 1px dashed var(--bg-panel);
+}
+
+/* ---- 「+N 更多」折叠链与当日 popover（dayMaxEvents 溢出面）----
+   fc 的 popover 底色吃 --fc-page-bg-color，而月网格把它置成 transparent
+   —— 不收口 popover 就是全透明底叠在日格上。形态对齐菜单规范：
+   --bg-panel 纯色底 + 浅投影 + --border 描边，无渐变；暗色随 token 自动。 */
+.calendar-wrap :deep(.fc .fc-more-link) {
+  font-size: var(--font-xs);
+  color: var(--text-dim);
+  padding: 1px 4px;
+  border-radius: 4px;
+}
+.calendar-wrap :deep(.fc .fc-more-link:hover) {
+  color: var(--text);
+  background: var(--bg-hover);
+  text-decoration: none;
+}
+.calendar-wrap :deep(.fc .fc-more-popover) {
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
+  min-width: 200px;
+  max-width: 300px;
+}
+.calendar-wrap :deep(.fc .fc-more-popover .fc-popover-header) {
+  background: var(--bg-chip);
+  border-bottom: 1px solid var(--border);
+  border-radius: 8px 8px 0 0;
+  font-size: var(--font-sm);
+  color: var(--text-dim);
+}
+.calendar-wrap :deep(.fc .fc-more-popover .fc-popover-close) {
+  color: var(--text-dim);
+  font-size: var(--font-base);
+}
+.calendar-wrap :deep(.fc .fc-more-popover .fc-popover-close:hover) {
+  color: var(--text);
+  opacity: 1;
+}
+.calendar-wrap :deep(.fc .fc-more-popover .fc-popover-body) {
+  max-height: 240px;
+  overflow: auto;
+  padding: 4px;
+}
+/* popover 内事件 chip：与月视图同款配色（ popover 挂载点不在 .fc-dayGridMonth-view 内，
+   现有视图限定规则不命中，此处补一段同源选择）。 */
+.calendar-wrap :deep(.fc .fc-more-popover .fc-event.ev-milestone) {
+  background: var(--accent);
+}
+.calendar-wrap :deep(.fc .fc-more-popover .fc-event.ev-issue) {
+  background: var(--success);
+}
+.calendar-wrap :deep(.fc .fc-more-popover .fc-event.ev-pull) {
+  background: var(--merged);
+}
+.calendar-wrap :deep(.fc .fc-more-popover .fc-event.ev-project) {
+  background: var(--bg-selected);
+  border: 1px solid var(--border);
+  color: var(--text);
+}
+.calendar-wrap :deep(.fc .fc-more-popover .fc-event.ev-event) {
+  background: var(--danger);
+}
+.calendar-wrap :deep(.fc .fc-more-popover .fc-event.ev-feed) {
   background: var(--accent);
   border: 1px dashed var(--bg-panel);
 }
