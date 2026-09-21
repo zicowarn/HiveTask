@@ -282,7 +282,7 @@ export function tableItems(state: EditorState, onEdit?: () => void): RenderItem[
 }
 
 export const tableTheme = EditorView.baseTheme({
-  ".cm-kb-table": { display: "block", padding: "6px 0", overflowX: "auto", position: "relative" },
+  ".cm-kb-table": { display: "block", padding: "26px 0 6px", overflowX: "auto", position: "relative" },
   ".cm-kb-table table": { borderCollapse: "collapse", width: "100%", fontSize: "var(--font-base)" },
   ".cm-kb-table th, .cm-kb-table td": {
     border: "1px solid var(--border)",
@@ -302,10 +302,9 @@ export const tableTheme = EditorView.baseTheme({
   // 悬停浮现的「编辑」按钮：右上角小铅笔
   ".cm-kb-table-edit": {
     position: "absolute",
-    /* icon 整体在表格上方：底边贴 <table> 顶边（wrap 有 6px 顶 padding，用 top:0 起），
-       右缘与 <table> 右缘对齐（wrap 无右 padding，right:0 即表格右缘） */
-    top: "6px",
-    transform: "translateY(-100%)",
+    /* icon 在 wrap 的顶部 padding 带内：底边贴 <table> 顶边、右缘与 <table> 右缘对齐。
+       （不用 translateY(-100%)——那会把按钮推出 wrap，被上一行内容遮盖/裁剪。） */
+    top: "4px",
     right: "0",
     display: "inline-flex",
     alignItems: "center",
