@@ -37,15 +37,22 @@ describe("Roadmap 表头", () => {
     expect(days.length).toBeGreaterThan(0);
     expect([...months].map((m) => m.textContent.trim()).join(",")).toMatch(/2026/);
     expect(days[0].textContent.trim()).not.toBe("");
-    // 表格收口线：Add item 行下的整行宽 border 必须渲染在 addrow 之后、灰带之前
+    // 表格收口结构：条目区容器（rm-lanes）包住 addrow 与今日红线（红线止于
+    // 内容底，不越过收口线——红线过长曾被要求修正）；收口线在容器之后、灰带之前
+    const lanes = host.querySelector(".rm-lanes");
     const addrow = host.querySelector(".rm-addrow");
     const tableend = host.querySelector(".rm-tableend");
     const filler = host.querySelector(".rm-filler");
+    expect(lanes).toBeTruthy();
     expect(addrow).toBeTruthy();
     expect(tableend).toBeTruthy();
     expect(filler).toBeTruthy();
-    expect(addrow!.nextElementSibling).toBe(tableend);
+    expect(lanes!.contains(addrow!)).toBe(true);
     expect(tableend!.nextElementSibling).toBe(filler);
+    expect(lanes!.nextElementSibling).toBe(tableend);
+    // 今日红线在条目区容器内（有今日时渲染，撑满容器高）
+    const line = host.querySelector(".rm-todayline");
+    if (line) expect(lanes!.contains(line)).toBe(true);
     app.unmount();
     host.remove();
   });
