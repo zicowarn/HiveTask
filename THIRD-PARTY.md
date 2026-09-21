@@ -44,6 +44,7 @@ HiveTask 自身以 **AGPL-3.0-only** 发布（见 `LICENSE`）。下列许可均
 | `force-graph` | MIT | 知识库图谱面板的力导向画布（2D canvas + d3-force）；WKWebView 扫描：1.51.4 本体 + 14 个传递依赖（d3-force-3d / kapsule / lodash-es 等）对 `Iterator.prototype` / `Promise.withResolvers` 等六项零命中（2026-09-18） |
 | `@xterm/xterm`、`@xterm/addon-fit` | MIT | 集成终端 |
 | `@fullcalendar/{core,vue3,daygrid,list,interaction}`（**锁 6.1.21**） | MIT（core 内含私有 preact 依赖） | 日历面板（工具类目）：月/列表视图 + 拖拽；WKWebView 六项扫描零命中，样式由包内 JS 注入 |
+| `jordium-gantt-vue3`（**1.14.1**） | MIT | 甘特图 Editor（项目类目）：WBS 层级 + 依赖连线 + 进度 + 里程碑 + 拖拽改期（**2026-09-21 用户拍板引入**，选型与实测对比见知识库《架构设计-项目甘特图》§6）；WKWebView 六项扫描：本体 dist + 运行时依赖（`jspdf` 4 / `html-to-image` / `date-fns` 4；`dompurify` 复用既有）全部零命中；主题经 `--gantt-*` 变量族映射到本仓库 token（`GanttPanel.vue` 非 scoped 样式块） |
 | `@web-git-graph/{web,protocol}` | MIT | Git 历史泳道图 |
 | `@tauri-apps/api`、`@tauri-apps/plugin-{dialog,opener,store}` | MIT OR Apache-2.0 | 桌面壳能力 |
 | `pdfjs-dist` | Apache-2.0 | PDF 预览（cmaps / 标准字体 / wasm 全本地，见 `docs/kb-preview-formats.md` §2） |

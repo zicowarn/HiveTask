@@ -618,6 +618,18 @@ fn issue_relations(repo_path: String, number: String) -> Result<models::IssueRel
         .map_err(|e| e.to_string())
 }
 
+/// 批量关系（甘特整板装载）：编号 → 关系；不可见解不出现在结果里。
+#[tauri::command]
+fn issue_relations_batch(
+    repo_path: String,
+    numbers: Vec<String>,
+) -> Result<std::collections::HashMap<String, models::IssueRelations>, String> {
+    let repo = resolve(&repo_path)?;
+    source::source_for_ref(repo.platform.as_deref(), &repo.host)
+        .fetch_issue_relations_batch(&repo, &numbers)
+        .map_err(|e| e.to_string())
+}
+
 /// 远端分支名清单（PR 创建表单 head/base 候选；本地 = 本地分支）。
 #[tauri::command]
 fn remote_branch_list(repo_path: String) -> Result<Vec<String>, String> {
@@ -1291,6 +1303,7 @@ pub fn run() {
             remote_branch_list,
             milestone_list,
             issue_relations,
+            issue_relations_batch,
             label_list,
             assignee_list,
             create_label,

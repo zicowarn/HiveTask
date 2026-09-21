@@ -717,6 +717,9 @@ export const api = {
   /** Issue 关系（依赖/父子/子 Issue）；无能力的来源返回全空。 */
   issueRelations: (repoPath: string, number: string) =>
     invoke<IssueRelations>("issue_relations", { repoPath, number }),
+  /** 批量关系（甘特整板装载）：编号 → 关系；不可见解不出现在结果里。 */
+  issueRelationsBatch: (repoPath: string, numbers: string[]) =>
+    invoke<Record<string, IssueRelations>>("issue_relations_batch", { repoPath, numbers }),
   labelList: (repoPath: string) => invoke<LabelInfo[]>("label_list", { repoPath }),
   createLabel: (repoPath: string, name: string, color: string) =>
     invoke<LabelInfo>("create_label", { repoPath, name, color }),

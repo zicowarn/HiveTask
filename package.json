@@ -54,6 +54,7 @@
     "dompurify": "^3.4.15",
     "force-graph": "^1.51.4",
     "hls.js": "^1.7.3",
+    "jordium-gantt-vue3": "1.14.1",
     "jszip": "^3.10.2",
     "katex": "^0.18.7",
     "leaflet": "^1.9.4",

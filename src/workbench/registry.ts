@@ -14,6 +14,7 @@ import IssueDetailPanel from "../panels/IssueDetailPanel.vue";
 import PullListPanel from "../panels/PullListPanel.vue";
 import PullDetailPanel from "../panels/PullDetailPanel.vue";
 import ProjectPanel from "../panels/ProjectPanel.vue";
+import GanttPanel from "../panels/GanttPanel.vue";
 import SettingsPanel from "../panels/SettingsPanel.vue";
 import GitHistoryPanel from "../panels/GitHistoryPanel.vue";
 import TerminalPanel from "../panels/TerminalPanel.vue";
@@ -71,6 +72,7 @@ registerPanel("project.board", ProjectPanel, [
 ]);
 registerPanel("knowledge.workbench", KnowledgeWorkbench);
 registerPanel("knowledge.graph", KnowledgeGraphPanel);
+registerPanel("project.gantt", GanttPanel);
 registerPanel("git.history", GitHistoryPanel);
 registerPanel("terminal", TerminalPanel);
 registerPanel("calendar", CalendarPanel);

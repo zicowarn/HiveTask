@@ -208,6 +208,13 @@ impl Source for GhSource {
     fn fetch_issue_relations(&self, repo: &RepoRef, number: &str) -> Result<crate::models::IssueRelations> {
         fetch_issue_relations(&format!("{}/{}", repo.owner, repo.repo), number)
     }
+    fn fetch_issue_relations_batch(
+        &self,
+        repo: &RepoRef,
+        numbers: &[String],
+    ) -> Result<std::collections::HashMap<String, crate::models::IssueRelations>> {
+        fetch_issue_relations_batch(&format!("{}/{}", repo.owner, repo.repo), numbers)
+    }
 }
 
 /// 过滤器的 gh 方言（恰好与前端口径一致）。
@@ -327,6 +334,70 @@ pub fn fetch_issue_relations(slug: &str, number: &str) -> Result<crate::models::
         return Err(anyhow!("仓库或 Issue 不可见（关系数据拉取失败）"));
     }
     Ok(parse_relations_value(issue))
+}
+
+/// 容忍「部分失败」的 gh 调用：批量关系查询里某个编号不可见时，GraphQL 返回
+/// data + errors 且 gh 以非 0 退出码结束（stderr 一行 NOT_FOUND）——只要 stdout
+/// 可解析就照常返回，缺失编号在结果里缺键（前端跳过，不造假）。
+fn run_gh_tolerant(args: &[&str]) -> Result<String> {
+    let gh = find_gh().ok_or_else(|| {
+        anyhow!("找不到 gh CLI，请先安装并执行 `gh auth login`（macOS: brew install gh）")
+    })?;
+    log::debug!("gh {:?}", args);
+    let output = Command::new(gh)
+        .args(args)
+        .output()
+        .with_context(|| "启动 gh 失败")?;
+    let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
+    if !output.status.success() && stdout.trim().is_empty() {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        log::debug!("gh 退出码 {:?}: {stderr}", output.status.code());
+        return Err(anyhow!("gh 退出码 {:?}: {stderr}", output.status.code()));
+    }
+    Ok(stdout)
+}
+
+/// 批量关系拉取（甘特整板装载）：单次 GraphQL 用别名逐条取关系，分片
+/// 50 条/查询（node 预算与超时留余量）。只接受数字编号（GitHub 路径）；
+/// 不可见的编号不出现在结果里（前端缺键即跳过，不造假）。
+pub fn fetch_issue_relations_batch(
+    slug: &str,
+    numbers: &[String],
+) -> Result<std::collections::HashMap<String, crate::models::IssueRelations>> {
+    let (owner, repo) = slug
+        .split_once('/')
+        .ok_or_else(|| anyhow!("仓库 slug 形态异常: {slug}"))?;
+    let nums: Vec<u64> = numbers.iter().filter_map(|n| n.parse().ok()).collect();
+    let mut out = std::collections::HashMap::new();
+    for chunk in nums.chunks(50) {
+        let fields = chunk
+            .iter()
+            .enumerate()
+            .map(|(i, n)| {
+                format!(
+                    "i{i}: issue(number:{n}){{ \
+                     blockedBy(first:20){{ nodes{{ number title state }} }} \
+                     blocking(first:20){{ nodes{{ number title state }} }} \
+                     parent{{ number title state }} \
+                     subIssues(first:20){{ nodes{{ number title state }} }} \
+                     subIssuesSummary{{ total completed }} }}"
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(" ");
+        let query = format!("query{{ repository(owner:\"{owner}\",name:\"{repo}\"){{ {fields} }} }}");
+        let stdout = run_gh_tolerant(&["api", "graphql", "-f", &format!("query={query}")])?;
+        let v: Value =
+            serde_json::from_str(&stdout).context("解析 gh api graphql（批量关系）输出失败")?;
+        let repo_node = &v["data"]["repository"];
+        for (i, n) in chunk.iter().enumerate() {
+            let node = &repo_node[format!("i{i}")];
+            if !node.is_null() {
+                out.insert(n.to_string(), parse_relations_value(node));
+            }
+        }
+    }
+    Ok(out)
 }
 
 fn parse_relations_value(issue: &Value) -> crate::models::IssueRelations {
@@ -1338,6 +1409,20 @@ pub fn git_origin(repo: &Path) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// 真实网络端到端（`cargo test -- --ignored` 手动跑）：批量查询打 cli/cli，
+    /// 含一个不存在的编号——验证「部分失败仍返回、缺键不造假」的容忍路径。
+    #[test]
+    #[ignore]
+    fn relations_batch_live_smoke() {
+        let out = fetch_issue_relations_batch(
+            "cli/cli",
+            &["14479".to_string(), "99999999".to_string()],
+        )
+        .expect("批量关系拉取应容忍部分失败");
+        assert!(out.contains_key("14479"), "存在的编号应在结果里");
+        assert!(!out.contains_key("99999999"), "不存在的编号不应造假");
+    }
 
     /// 关系解析（GraphQL 输出形状）：四类齐全 → 全量映射，state 取原样。
     #[test]

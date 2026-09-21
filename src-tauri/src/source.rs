@@ -181,6 +181,19 @@ pub trait Source: Send + Sync {
     /// Gitea 的 blocks = 本条阻塞他人 → 映射为 blocking，blockedBy 另拉）；
     /// Gitee / 本地皆无 → 返回空（诚实缺席，前端不造假数据）。
     fn fetch_issue_relations(&self, repo: &RepoRef, number: &str) -> Result<crate::models::IssueRelations>;
+    /// 批量关系拉取（甘特一次装载整板条目）：默认逐条调单条方法——
+    /// GitHub 覆盖为单次 GraphQL 别名查询（避免 N 次 gh 进程）。
+    fn fetch_issue_relations_batch(
+        &self,
+        repo: &RepoRef,
+        numbers: &[String],
+    ) -> Result<std::collections::HashMap<String, crate::models::IssueRelations>> {
+        let mut out = std::collections::HashMap::new();
+        for n in numbers {
+            out.insert(n.clone(), self.fetch_issue_relations(repo, n)?);
+        }
+        Ok(out)
+    }
 }
 
 /// JSON 编号字段 → 文本口径：字符串直取（Gitee v5 issue "IKCTH7"），
