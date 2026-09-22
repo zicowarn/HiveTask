@@ -6,7 +6,16 @@
 import { defineStore } from "pinia";
 import { translateError } from "../gh-errors";
 import { computed, ref, watch } from "vue";
-import { api, type BoundRepo, type FieldOption, type MilestoneInfo, type Project, type ProjectField, type ProjectItem } from "../api";
+import {
+  api,
+  type BoundRepo,
+  type FieldOption,
+  type Resource,
+  type MilestoneInfo,
+  type Project,
+  type ProjectField,
+  type ProjectItem,
+} from "../api";
 import { isTauri } from "../api";
 import { pushToast } from "../toast";
 import { useI18n } from "../i18n";
@@ -901,6 +910,97 @@ export const useProjectsStore = defineStore("projects", () => {
   /** itemId → 被依赖条目 id 列表（投影合并平台镜像 ∪ 本地真源用）。 */
   const localDeps = ref<Record<string, string[]>>({});
 
+  /** 资源目录（跨项目共享）与项目内分配（§5-bis）。 */
+  const resourceCatalog = ref<Resource[]>([]);
+  /** itemId → 分配行（资源 id + 占用比例）。 */
+  const itemResources = ref<Record<string, { resourceId: string; allocation: number }[]>>({});
+
+  async function loadResources() {
+    if (!isTauri()) {
+      resourceCatalog.value = [];
+      return;
+    }
+    try {
+      resourceCatalog.value = await api.resourceList();
+    } catch {
+      resourceCatalog.value = [];
+    }
+    if (!selectedId.value) {
+      itemResources.value = {};
+      return;
+    }
+    try {
+      const rows = await api.itemResourceList(selectedId.value);
+      const map: Record<string, { resourceId: string; allocation: number }[]> = {};
+      for (const r of rows) {
+        (map[r.itemId] ??= []).push({ resourceId: r.resourceId, allocation: r.allocation });
+      }
+      itemResources.value = map;
+    } catch {
+      itemResources.value = {};
+    }
+  }
+
+  async function setItemResource(itemId: string, resourceId: string, allocation: number) {
+    if (!selectedId.value) return;
+    await api.itemResourceSet(selectedId.value, itemId, resourceId, allocation);
+    await loadResources();
+  }
+
+  async function removeItemResource(itemId: string, resourceId: string) {
+    if (!selectedId.value) return;
+    await api.itemResourceRemove(selectedId.value, itemId, resourceId);
+    await loadResources();
+  }
+
+  async function upsertResource(resource: Resource) {
+    await api.resourceUpsert(resource);
+    await loadResources();
+  }
+
+  /** 平台负责人 → 资源目录镜像（幂等）。 */
+  async function syncResourceAssignees(origin: string, logins: string[]) {
+    if (!logins.length) return;
+    await api.resourceSyncAssignees(origin, logins);
+    await loadResources();
+  }
+
+  /** 父子（结构扩展泳道）：itemId → 上级 itemId。随项目装载。 */
+  const localParents = ref<Record<string, string>>({});
+
+  async function loadParents() {
+    if (!isTauri() || !selectedId.value) {
+      localParents.value = {};
+      return;
+    }
+    try {
+      const rows = await api.projectParentList(selectedId.value);
+      const map: Record<string, string> = {};
+      for (const p of rows) map[p.itemId] = p.parentId;
+      localParents.value = map;
+    } catch {
+      localParents.value = {};
+    }
+  }
+
+  async function setItemParent(itemId: string, parentId: string) {
+    if (!selectedId.value) return;
+    await api.projectParentSet(selectedId.value, itemId, parentId);
+    await loadParents();
+  }
+
+  async function clearItemParent(itemId: string) {
+    if (!selectedId.value) return;
+    await api.projectParentClear(selectedId.value, itemId);
+    await loadParents();
+  }
+
+  async function syncPlatformParents(origin: string, edges: { itemId: string; dependsOn: string }[]) {
+    if (!selectedId.value) return;
+    await api.projectParentSyncPlatform(selectedId.value, origin, edges);
+    await loadParents();
+  }
+
   async function loadDeps() {
     if (!isTauri() || !selectedId.value) {
       localDeps.value = {};
@@ -930,6 +1030,22 @@ export const useProjectsStore = defineStore("projects", () => {
     await loadDeps();
   }
 
+  /** 平台镜像整组同步（origin = 'gh'/'gitea'，按仓库来源定）：
+   *  G1 拉取成功后调用——离线时甘特仍可读依赖（持久化镜像）。 */
+  async function syncPlatformDeps(origin: string, edges: { itemId: string; dependsOn: string }[]) {
+    if (!selectedId.value) return;
+    await api.projectDepSyncPlatform(selectedId.value, origin, edges);
+    await loadDeps();
+  }
+
+  /** 从项目移除条目（引用行删除；平台 Issue 本体不受影响——语义 =
+   *  「从甘特/看板移除」，非关闭平台 Issue）。 */
+  async function removeItemAndDeps(itemId: string) {
+    if (!selectedId.value) return;
+    await api.projectItemRemove(itemId);
+    await loadSelected();
+  }
+
   async function loadSelected() {
     if (!isTauri() || !selectedId.value) {
       fields.value = [];
@@ -946,6 +1062,8 @@ export const useProjectsStore = defineStore("projects", () => {
       ]);
       expandCatalogue();
       void loadDeps();
+      void loadParents();
+      void loadResources();
     } catch (e) {
       error.value = translateError(String(e));
     }
@@ -1149,8 +1267,21 @@ export const useProjectsStore = defineStore("projects", () => {
     roadmapMilestoneMeta,
     loadRoadmapMilestones,
     localDeps,
+    localParents,
+    resourceCatalog,
+    itemResources,
+    loadResources,
+    setItemResource,
+    removeItemResource,
+    upsertResource,
+    syncResourceAssignees,
+    setItemParent,
+    clearItemParent,
+    syncPlatformParents,
     addItemDep,
     removeItemDep,
+    syncPlatformDeps,
+    removeItemAndDeps,
     setFieldSort,
     addFieldFilter,
     toggleField,

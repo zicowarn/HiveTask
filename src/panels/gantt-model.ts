@@ -22,9 +22,21 @@ export interface GanttTask {
   /** 条目已闭合（issue CLOSED）：进度按 100 记——状态是完成的权威语义，
    *  子 Issue 摘要只是过程度量。 */
   closed?: boolean;
+  /** 进度字段（Number）显式值：配置后优先于派生（抽屉里改进度写它）。 */
+  progressOverride?: number | null;
   relations: IssueRelations | null;
   /** 容器真源依赖（app.db project_item_deps，origin=NULL）：被依赖条目 id。 */
   localDeps?: string[];
+  /** 容器真源上级（app.db project_item_parents，origin=NULL）：优先级高于平台
+   *  镜像——上层是我们排的计划（§3 结构扩展泳道）。 */
+  localParent?: string | null;
+  /** 资源 = 负责人（平台 assignees 镜像 / journal 负责人；草稿未分配为空）。 */
+  assignees?: string[];
+  /** 实际起止与工时（项目字段，甘特计划面 §5）。 */
+  actualStart?: string | null;
+  actualEnd?: string | null;
+  estimatedHours?: number | null;
+  actualHours?: number | null;
 }
 
 export interface GanttNode {
@@ -40,8 +52,19 @@ export interface GanttNode {
   /** 进度 0–100（子 Issue 摘要；无数据 null = 不画进度）。 */
   progress: number | null;
   childCount: number;
-  /** 被本任务依赖的任务 id（平台 blockedBy 命中板内条目）。 */
+  /** 被本任务依赖的任务 id（平台镜像 ∪ 容器真源，命中板内条目）。 */
   dependsOn: string[];
+  /** 上级条目 id（本地真源优先，其次平台镜像）；null = 顶层。 */
+  parentId: string | null;
+  /** 资源 = 负责人（甘特计划面 §5）。 */
+  assignees: string[];
+  actualStart: string | null;
+  actualEnd: string | null;
+  estimatedHours: number | null;
+  actualHours: number | null;
+  /** 依赖违规：后继开始早于某前驱结束（甘特计划面 §6 调度语义第一步）。
+   *  值 = 违规的前驱条目 id 列表。 */
+  violations: string[];
 }
 
 /** 建树中间态（children 只在 buildGanttTree 内部用，扁平行不带）。 */
@@ -60,6 +83,7 @@ export function buildGanttTree(tasks: GanttTask[]): GanttNode[] {
   for (const t of tasks) {
     if (t.repoId && t.number) byKey.set(`${t.repoId}::${t.number}`, t);
   }
+  const taskById0 = new Map(tasks.map((t) => [t.id, t]));
   const parentOf = new Map<string, string>(); // childId → parentId
   const childrenOf = new Map<string, string[]>();
   const link = (childId: string, parentId: string) => {
@@ -70,7 +94,15 @@ export function buildGanttTree(tasks: GanttTask[]): GanttNode[] {
     arr.push(childId);
     childrenOf.set(parentId, arr);
   };
+  // 上级优先级：容器真源（我们排的计划）> 平台镜像（sub-issues）
   for (const t of tasks) {
+    if (t.localParent) {
+      const up = taskById0.get(t.localParent);
+      if (up) link(t.id, up.id);
+    }
+  }
+  for (const t of tasks) {
+    if (parentOf.has(t.id)) continue; // 本地已定上级，平台镜像不覆盖
     if (!t.repoId || !t.number) continue;
     const parent = t.relations?.parent;
     if (parent) {
@@ -109,12 +141,12 @@ export function buildGanttTree(tasks: GanttTask[]): GanttNode[] {
       t.start ?? (childStarts.length ? childStarts.reduce((a, b) => (a < b ? a : b)) : null);
     const end = t.end ?? (childEnds.length ? childEnds.reduce((a, b) => (a > b ? a : b)) : null);
     const summary = t.relations?.subSummary;
-    const progress = t.closed
-      ? 100
-      : summary && summary.total > 0
+    // 优先级：显式进度字段 > 闭合(100) > 子 Issue 摘要 > 无
+    const progress =
+      t.progressOverride ?? (t.closed ? 100 : summary && summary.total > 0
         ? Math.round((summary.completed / summary.total) * 100)
-        : null;
-    return {
+        : null);
+    const self = {
       id: t.id,
       depth,
       repoId: t.repoId,
@@ -125,8 +157,25 @@ export function buildGanttTree(tasks: GanttTask[]): GanttNode[] {
       progress,
       childCount: kids.length,
       dependsOn: depsOf(t),
+      parentId: parentOf.get(t.id) ?? null,
+      assignees: t.assignees ?? [],
+      actualStart: t.actualStart ? day(t.actualStart) : null,
+      actualEnd: t.actualEnd ? day(t.actualEnd) : null,
+      estimatedHours: t.estimatedHours ?? null,
+      actualHours: t.actualHours ?? null,
+      violations: [] as string[],
       children: kids,
     };
+    // 依赖违规（调度语义第一步）：后继开始早于前驱结束（FS：前驱未完不得开工）。
+    // node 的 start/end 已规范化为 YYYY-MM-DD，直接字符串比较。
+    for (const depId of self.dependsOn) {
+      const dep = taskById.get(depId);
+      if (!dep) continue;
+      const depEnd = dep.end ? day(dep.end) : null; // 规范化（原始值可能带时间）
+      const myStart = self.start;
+      if (depEnd && myStart && myStart < depEnd) self.violations.push(depId);
+    }
+    return self;
   };
 
   const roots: GanttTree[] = [];
@@ -227,4 +276,38 @@ export function arrowPath(
   const laneY = toY + 14;
   const d = `M ${fromX} ${fromY} H ${fromX + gap} V ${laneY} H ${tipX - gap} V ${tipY} H ${tipX - 1}`;
   return { d, tipX, tipY };
+}
+
+/**
+ * 工具条折叠判定（纯函数，便于测试）：内在宽度 > 可用宽 → 折叠；
+ * 折叠后需回到「所需宽 + 迟滞」之上才展回（避免边界抖动）。
+ * 返回 null = 维持现状。
+ */
+export function foldToolbarDecision(
+  collapsed: boolean,
+  intrinsicWidth: number,
+  availableWidth: number,
+  slack = 24,
+): boolean | null {
+  if (!collapsed) return intrinsicWidth > availableWidth ? true : null;
+  return availableWidth >= intrinsicWidth + slack ? false : null;
+}
+
+/** 任务编辑面板的保存负载（表单收集 → 父面板按写路由落库）。 */
+export interface TaskFormPayload {
+  title: string;
+  body?: string;
+  assignees: string[];
+  plannedStart: string | null;
+  plannedEnd: string | null;
+  actualStart: string | null;
+  actualEnd: string | null;
+  estHours: number | null;
+  actualHours: number | null;
+  progress: number | null;
+  predecessorIds: string[];
+  /** 上级条目 id（null = 置空/顶层）——本地结构泳道。 */
+  parentId: string | null;
+  /** 资源分配（§5-bis）：资源 id + 占用比例（20–100）。 */
+  resources: { resourceId: string; allocation: number }[];
 }

@@ -206,6 +206,53 @@ export interface ItemDep {
   origin: string | null;
 }
 
+/** 资源目录条目（《架构设计-甘特计划面》§5-bis，照 jordium Resource 形状）。
+ *  origin NULL = 本地自定义；'gh'/'gitea' = 平台负责人派生镜像。 */
+export interface Resource {
+  id: string;
+  name: string;
+  title?: string | null;
+  /** Human | Device | Others | 自定义 */
+  type: string;
+  department?: string | null;
+  /** 每日标准工时（小时）；null = 全局默认 */
+  capacity?: number | null;
+  color?: string | null;
+  origin: string | null;
+}
+
+/** 分配：条目占用资源 allocation%（20–100，照 jordium 抽屉口径 clamp）。 */
+export interface ItemResource {
+  itemId: string;
+  resourceId: string;
+  allocation: number;
+  origin: string | null;
+}
+
+/** 资源级工作日历例外（请假 / 设备停机）。 */
+export interface ResourceException {
+  id: string;
+  resourceId: string | null;
+  name: string | null;
+  startAt: string;
+  endAt: string;
+  /** true = 额外计工时（加班/补班）；false = 不计工时（请假/停机） */
+  working: boolean;
+}
+
+/** 父子边（结构扩展泳道）：itemId 的上级 = parentId。origin NULL = 容器真源。 */
+export interface ItemParent {
+  itemId: string;
+  parentId: string;
+  origin: string | null;
+}
+
+/** 镜像同步输入边。 */
+export interface ItemDepInput {
+  itemId: string;
+  dependsOn: string;
+}
+
 export interface BoundRepo {
   repoId: string;
   label: string;
@@ -570,6 +617,8 @@ export const api = {
   calendarEventRemove: (id: string) => invoke<void>("calendar_event_remove", { id }),
   calendarEventSetReminded: (id: string, remindedAt: string | null) =>
     invoke<CalendarEventRow>("calendar_event_set_reminded", { id, remindedAt }),
+  // 系统日历「导出出」：全部手建日程 → .ics 文件；返回条数。
+  calendarExportIcs: (path: string) => invoke<number>("calendar_export_ics", { path }),
   ptySpawn: (args: {
     id: string;
     cwd?: string;
@@ -680,6 +729,36 @@ export const api = {
     invoke<void>("project_dep_add", { projectId, itemId, dependsOn }),
   projectDepRemove: (projectId: string, itemId: string, dependsOn: string) =>
     invoke<void>("project_dep_remove", { projectId, itemId, dependsOn }),
+  /** 平台镜像行整组同步（甘特计划面 §4：离线可读）；真源行不触碰。 */
+  projectDepSyncPlatform: (projectId: string, origin: string, edges: ItemDepInput[]) =>
+    invoke<void>("project_dep_sync_platform", { projectId, origin, edges }),
+  /** 父子（结构扩展泳道，§3）：上级任务 = app.db 本地真源（容器是我们排的计划）。
+   *  set 的环检测与归属校验在 Rust 侧权威执行。 */
+  projectParentList: (projectId: string) =>
+    invoke<ItemParent[]>("project_parent_list", { projectId }),
+  projectParentSet: (projectId: string, itemId: string, parentId: string) =>
+    invoke<void>("project_parent_set", { projectId, itemId, parentId }),
+  projectParentClear: (projectId: string, itemId: string) =>
+    invoke<void>("project_parent_clear", { projectId, itemId }),
+  projectParentSyncPlatform: (projectId: string, origin: string, edges: ItemDepInput[]) =>
+    invoke<void>("project_parent_sync_platform", { projectId, origin, edges }),
+  /** 资源目录（跨项目共享；§5-bis）与分配、资源级日历例外。 */
+  resourceList: () => invoke<Resource[]>("resource_list"),
+  resourceUpsert: (resource: Resource) => invoke<void>("resource_upsert", { resource }),
+  resourceRemove: (resourceId: string) => invoke<void>("resource_remove", { resourceId }),
+  /** 平台负责人 → 资源目录镜像（幂等；本地同名优先不覆盖）。 */
+  resourceSyncAssignees: (origin: string, logins: string[]) =>
+    invoke<number>("resource_sync_assignees", { origin, logins }),
+  itemResourceList: (projectId: string) => invoke<ItemResource[]>("item_resource_list", { projectId }),
+  itemResourceSet: (projectId: string, itemId: string, resourceId: string, allocation: number) =>
+    invoke<void>("item_resource_set", { projectId, itemId, resourceId, allocation }),
+  itemResourceRemove: (projectId: string, itemId: string, resourceId: string) =>
+    invoke<void>("item_resource_remove", { projectId, itemId, resourceId }),
+  resourceExceptionList: (resourceId: string) =>
+    invoke<ResourceException[]>("resource_exception_list", { resourceId }),
+  resourceExceptionUpsert: (exception: ResourceException) =>
+    invoke<void>("resource_exception_upsert", { exception }),
+  resourceExceptionRemove: (id: string) => invoke<void>("resource_exception_remove", { id }),
   /** 线上仓库清单（按接入凭据拉取，用于「刷新从线上查找」）。 */
   /** 拉取线上 Projects 条目落本地看板；返回 [imported, skipped]。 */
   projectSyncItems: (projectId: string) =>
@@ -735,6 +814,12 @@ export const api = {
   /** 批量关系（甘特整板装载）：编号 → 关系；不可见解不出现在结果里。 */
   issueRelationsBatch: (repoPath: string, numbers: string[]) =>
     invoke<Record<string, IssueRelations>>("issue_relations_batch", { repoPath, numbers }),
+  /** 平台依赖写（G3-b）：让 blocked 依赖 blocker（FS）。两端须同仓库；
+   *  Gitee 无端点（平台拒绝），容器形态走 projectDep*（G3-a）。 */
+  issueDependencyAdd: (blockedRepo: string, blockedNumber: string, blockerRepo: string, blockerNumber: string) =>
+    invoke<void>("issue_dependency_add", { blockedRepo, blockedNumber, blockerRepo, blockerNumber }),
+  issueDependencyRemove: (blockedRepo: string, blockedNumber: string, blockerRepo: string, blockerNumber: string) =>
+    invoke<void>("issue_dependency_remove", { blockedRepo, blockedNumber, blockerRepo, blockerNumber }),
   labelList: (repoPath: string) => invoke<LabelInfo[]>("label_list", { repoPath }),
   createLabel: (repoPath: string, name: string, color: string) =>
     invoke<LabelInfo>("create_label", { repoPath, name, color }),

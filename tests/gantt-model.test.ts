@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { arrowPath, buildGanttTree, defaultEndField, ganttRange, wouldCreateCycle, type GanttTask } from "../src/panels/gantt-model";
+import { arrowPath, buildGanttTree, defaultEndField, foldToolbarDecision, ganttRange, wouldCreateCycle, type GanttTask } from "../src/panels/gantt-model";
 import type { IssueRelations } from "../src/api";
 
 const rel = (partial: Partial<IssueRelations>): IssueRelations => ({
@@ -213,5 +213,88 @@ describe("结束字段默认推断（甘特 = 工期，不默认「无」）", (
 
   it("只有一个日期字段 → null（诚实单日条，不硬造工期）", () => {
     expect(defaultEndField([f("a", "开始")], "a")).toBeNull();
+  });
+});
+
+describe("依赖违规与资源/工时字段（G3-c / G4-a）", () => {
+  it("后继开始早于前驱结束 → violations 记前驱 id", () => {
+    const nodes = buildGanttTree([
+      task({ id: "pre", number: "1", start: "2026-05-01", end: "2026-05-10" }),
+      task({ id: "post", number: "2", start: "2026-05-05", end: "2026-05-20",
+             relations: rel({ blockedBy: [{ number: "1", title: "", state: "OPEN" }] }) }),
+    ]);
+    expect(nodes.find((n) => n.id === "post")!.violations).toEqual(["pre"]);
+    expect(nodes.find((n) => n.id === "pre")!.violations).toEqual([]);
+  });
+
+  it("后继开始 ≥ 前驱结束（含同日）→ 无违规", () => {
+    const nodes = buildGanttTree([
+      task({ id: "pre", number: "1", start: "2026-05-01", end: "2026-05-10" }),
+      task({ id: "post", number: "2", start: "2026-05-10", end: "2026-05-20",
+             relations: rel({ blockedBy: [{ number: "1", title: "", state: "OPEN" }] }) }),
+    ]);
+    expect(nodes.find((n) => n.id === "post")!.violations).toEqual([]);
+  });
+
+  it("资源与工时字段透传（assignees/actual/estimatedHours）", () => {
+    const nodes = buildGanttTree([
+      task({ id: "a", number: "1", assignees: ["alice"], actualStart: "2026-05-01",
+             actualEnd: "2026-05-09", estimatedHours: 16, actualHours: 20 }),
+    ]);
+    const n = nodes[0];
+    expect(n.assignees).toEqual(["alice"]);
+    expect(n.actualStart).toBe("2026-05-01");
+    expect(n.estimatedHours).toBe(16);
+    expect(n.actualHours).toBe(20);
+    expect(n.violations).toEqual([]);
+  });
+});
+
+describe("工具条折叠判定（窄面板 → 多级菜单）", () => {
+  it("内在宽 > 可用宽 → 折叠；够宽 → 维持展开", () => {
+    expect(foldToolbarDecision(false, 900, 700)).toBe(true);
+    expect(foldToolbarDecision(false, 900, 1000)).toBeNull();
+  });
+
+  it("折叠后需回到「所需宽 + 迟滞」才展回（边界不抖动）", () => {
+    expect(foldToolbarDecision(true, 900, 905)).toBeNull(); // 刚超出所需宽：仍折叠
+    expect(foldToolbarDecision(true, 900, 923)).toBeNull(); // 迟滞内：仍折叠
+    expect(foldToolbarDecision(true, 900, 924)).toBe(false); // 达到「所需宽+迟滞」：展回
+  });
+});
+
+describe("父子（结构扩展泳道 §3）", () => {
+  it("本地上级生效（容器真源）", () => {
+    const nodes = buildGanttTree([
+      task({ id: "p", number: "1" }),
+      task({ id: "c", number: "2", localParent: "p" }),
+    ]);
+    const c = nodes.find((n) => n.id === "c")!;
+    expect(c.depth).toBe(1);
+    expect(c.parentId).toBe("p");
+  });
+
+  it("本地上级优先于平台镜像（我们排的计划压过 sub-issues）", () => {
+    const nodes = buildGanttTree([
+      task({ id: "p1", number: "1" }),
+      task({ id: "p2", number: "3" }),
+      task({
+        id: "c",
+        number: "2",
+        localParent: "p1",
+        relations: rel({ parent: { number: "3", title: "", state: "OPEN" } }),
+      }),
+    ]);
+    const c = nodes.find((n) => n.id === "c")!;
+    expect(c.parentId).toBe("p1");
+    expect(c.depth).toBe(1);
+  });
+
+  it("无本地上级时用平台 sub-issues 建边", () => {
+    const nodes = buildGanttTree([
+      task({ id: "p", number: "1", relations: rel({ subIssues: [{ number: "2", title: "", state: "OPEN" }] }) }),
+      task({ id: "c", number: "2" }),
+    ]);
+    expect(nodes.find((n) => n.id === "c")!.depth).toBe(1);
   });
 });
