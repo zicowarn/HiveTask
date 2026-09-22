@@ -12,12 +12,14 @@
  * Reachability is tracked passively (gh roundtrip outcomes); clicking the
  * cell runs one user-initiated probe.
  */
-import { computed, nextTick, onMounted, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { storeToRefs } from "pinia";
 import { useRepoStore } from "../stores/repo";
 import { useIssuesStore } from "../stores/issues";
 import { usePullsStore } from "../stores/pulls";
 import { useProjectsStore } from "../stores/projects";
+import { useSettingsStore } from "../stores/settings";
+import { syncFreshness } from "../sync-scheduler";
 import { useKnowledgeStore } from "../stores/knowledge";
 import DropdownMenu from "../components/DropdownMenu.vue";
 import { useSyncMetaStore } from "../stores/sync-meta";
@@ -37,6 +39,7 @@ const repo = useRepoStore();
 const issues = useIssuesStore();
 const pulls = usePullsStore();
 const projectsStore = useProjectsStore();
+const settings = useSettingsStore();
 const knowledge = useKnowledgeStore();
 /** 今日日程格（S4）：只数手建日程（"今天要做什么"）；为 0 隐藏；点击跳日历面板。
  *  数据走共享 calendar store——日历面板增删改后本格即时联动。 */
@@ -138,7 +141,9 @@ function gotoProjects() {
 // switches reads as "lost" rather than "not applicable".
 /** 选中项目的同步时间（拉线上 Projects 条目时盖章）；与 Issue/PR 的仓库同步是两本账。 */
 const projectSyncedAt = computed(() => projectsStore.selected?.syncedAt ?? null);
-const projectSyncedLabel = computed(() => (projectSyncedAt.value ? relative(projectSyncedAt.value) : ""));
+const projectSyncedLabel = computed(() =>
+  projectSyncedAt.value ? relative(projectSyncedAt.value, nowMs.value) : "",
+);
 
 const syncedAt = computed(() => {
   const bucketKey =
@@ -156,10 +161,10 @@ const syncedAt = computed(() => {
 });
 
 /** "2026-09-11T02:00:00Z" → "5 分钟前" / "2 hours ago", locale-following. */
-function relative(iso: string): string {
+function relative(iso: string, now: number): string {
   const then = new Date(iso).getTime();
   if (Number.isNaN(then)) return iso;
-  const diffSeconds = Math.round((then - Date.now()) / 1000);
+  const diffSeconds = Math.round((then - now) / 1000);
   const units: [Intl.RelativeTimeFormatUnit, number][] = [
     ["second", 60],
     ["minute", 60],
@@ -180,7 +185,30 @@ function relative(iso: string): string {
   }
   return iso;
 }
-const syncedLabel = computed(() => (syncedAt.value ? relative(syncedAt.value) : ""));
+const syncedLabel = computed(() => (syncedAt.value ? relative(syncedAt.value, nowMs.value) : ""));
+
+/** 滴答时钟：相对时间标签与「过期」着色都必须随时间自己走，不能只在数据变动时算
+ *  （此前「9 天前」是冻住的——挂机一小时也不会变）。30s 粒度够用且开销可忽略。 */
+const nowMs = ref(Date.now());
+let tickTimer: ReturnType<typeof setInterval> | null = null;
+onMounted(() => {
+  tickTimer = setInterval(() => (nowMs.value = Date.now()), 30_000);
+});
+onBeforeUnmount(() => {
+  if (tickTimer !== null) clearInterval(tickTimer);
+});
+
+/** 仓库同步格的新鲜度：关档不着色；超过间隔还没更新 → stale（红字）。 */
+const syncStale = computed(
+  () => syncFreshness(syncedAt.value, nowMs.value, settings.syncIntervalMin) === "stale",
+);
+const syncCellTitle = computed(() => {
+  if (!syncedAt.value) return "";
+  const abs = t("statusbar.syncedAt", { time: new Date(syncedAt.value).toLocaleString() });
+  return syncStale.value
+    ? `${abs} · ${t("statusbar.syncedStale", { n: settings.syncIntervalMin })}`
+    : abs;
+});
 
 // ---- 知识库：当前文件的语言 / 编码 / 换行 / 大小 ----
 // 光标行列与制表位要等 CM6 编辑器落地（T6）才有真值，届时补在同一个格里。
@@ -404,7 +432,8 @@ async function probe() {
       <span
         v-if="syncedAt"
         class="status-cell"
-        :title="t('statusbar.syncedAt', { time: new Date(syncedAt).toLocaleString() })"
+        :class="{ stale: syncStale }"
+        :title="syncCellTitle"
       >
         <span class="sync-mark">⟳</span> {{ syncedLabel }}
       </span>
@@ -594,6 +623,9 @@ button.status-cell {
 .project-sync-cell .proj-mark {
   margin-right: 4px;
   color: var(--text-dim);
+}
+.status-cell.stale {
+  color: var(--warning);
 }
 .sync-mark {
   font-size: var(--icon-size, 14px);

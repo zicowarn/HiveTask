@@ -15,6 +15,7 @@ import GitHubAuthDialog from "../../components/GitHubAuthDialog.vue";
 import ImportPackDialog from "../../components/ImportPackDialog.vue";
 import DropdownMenu, { type DropdownSection } from "../../components/DropdownMenu.vue";
 import { api, isTauri, type BackupStatus, type CalendarFeed, type ExtApps } from "../../api";
+import { SYNC_INTERVAL_CHOICES } from "../../sync-scheduler";
 import { useKnowledgeStore } from "../../stores/knowledge";
 import { useProjectsStore } from "../../stores/projects";
 import EditorIcon from "../../components/EditorIcon.vue";
@@ -368,6 +369,12 @@ const shellChoices: { value: string; label: string }[] = isWindows
       { value: "/bin/bash", label: "bash" },
     ];
 
+/** 同步间隔选项（关 / 5 / 15 / 30 分钟）——0 = 关。 */
+const syncIntervalChoices: { value: string; label: string }[] = SYNC_INTERVAL_CHOICES.map((m) => ({
+  value: String(m),
+  label: m === 0 ? t("sync.off") : t("sync.minutes", { n: m }),
+}));
+
 const languageChoices: { value: "zh-CN" | "en-US"; label: string }[] = [
   { value: "zh-CN", label: "中文" },
   { value: "en-US", label: "English" },
@@ -575,6 +582,19 @@ function onThemeChange(value: string | string[]) {
         <button class="text-btn" @click="importOpen = true">{{ t("transfer.import") }}</button>
       </div>
       <p v-if="transferError" class="byext-error">{{ transferError }}</p>
+    </div>
+
+    <div class="setting-row">
+      <div class="setting-text">
+        <span class="setting-name">{{ t("settings.syncInterval") }}</span>
+        <span class="setting-desc">{{ t("settings.syncIntervalDesc") }}</span>
+      </div>
+      <DropdownMenu
+        class="setting-dd"
+        :options="syncIntervalChoices"
+        :model-value="String(settings.syncIntervalMin)"
+        @update:model-value="settings.syncIntervalMin = Number($event)"
+      />
     </div>
 
     <div class="setting-row">

@@ -17,6 +17,7 @@ import { syncApplicationMenu } from "./native-menu";
 import { openExternalUrl } from "./open-url";
 import { api, isTauri } from "./api";
 import { startReminderScheduler } from "./reminder-scheduler";
+import { startSyncScheduler } from "./sync-scheduler";
 import { keepsNativeContextMenu } from "./context-menu";
 import { useRepoStore } from "./stores/repo";
 import { useIssuesStore } from "./stores/issues";
@@ -312,6 +313,8 @@ onMounted(async () => {
   if (!inTauri) window.addEventListener("keydown", onKeydown);
   if (!isTauri()) return;
   void startReminderScheduler(); // 日程提醒轮询（模块内自带 isTauri 守卫）
+  // 仓库数据自动刷新（间隔偏好；0 = 关，模块内自带守卫：隐藏窗口/离线不刷）
+  startSyncScheduler(() => activeKey.value);
   await repo.checkHealth();
   void importLegacyRepos();
   void probeNow(); // seed the status bar's online/offline cell

@@ -12,6 +12,7 @@ import { ref, watch } from "vue";
 const STATUSBAR_KEY = "hivetask.statusbar";
 const TERMINAL_SHELL_KEY = "hivetask.terminalShell";
 const CALENDAR_LUNAR_KEY = "hivetask.calendarLunar";
+const SYNC_INTERVAL_KEY = "hivetask.syncInterval";
 
 
 function loadStatusbarVisible(): boolean {
@@ -30,6 +31,16 @@ function loadLunarLine(): boolean {
   }
 }
 
+/** 同步间隔（分钟）；0 = 关。非法值一律落回 0（关）。 */
+function loadSyncInterval(): number {
+  try {
+    const raw = Number(localStorage.getItem(SYNC_INTERVAL_KEY));
+    return [5, 15, 30].includes(raw) ? raw : 0;
+  } catch {
+    return 0;
+  }
+}
+
 function loadTerminalShell(): string {
   try {
     return localStorage.getItem(TERMINAL_SHELL_KEY) ?? "";
@@ -44,6 +55,8 @@ export const useSettingsStore = defineStore("settings", () => {
   const terminalShell = ref(loadTerminalShell());
   /** 日历面板农历副行（UI 态；订阅了含农历的日历源时可关去重）。 */
   const lunarLine = ref(loadLunarLine());
+  /** 仓库数据自动刷新间隔（分钟；0 = 关）。默认关——意外的联网请求必须可解释。 */
+  const syncIntervalMin = ref(loadSyncInterval());
   /** Gitea 实例地址（token 在 OS 钥匙串）。存 Rust 侧 source.json——
    * source_for 在命令内同步读取，webview localStorage 它看不见。 */
   const giteaHost = ref("");
@@ -59,6 +72,14 @@ export const useSettingsStore = defineStore("settings", () => {
   watch(lunarLine, (v) => {
     try {
       localStorage.setItem(CALENDAR_LUNAR_KEY, v ? "1" : "0");
+    } catch {
+      // Storage unavailable — the choice still applies for this session.
+    }
+  });
+
+  watch(syncIntervalMin, (min) => {
+    try {
+      localStorage.setItem(SYNC_INTERVAL_KEY, String(min));
     } catch {
       // Storage unavailable — the choice still applies for this session.
     }
@@ -95,5 +116,5 @@ export const useSettingsStore = defineStore("settings", () => {
     statusbarVisible.value = !statusbarVisible.value;
   }
 
-  return { statusbarVisible, terminalShell, lunarLine, giteaHost, toggleStatusbar };
+  return { statusbarVisible, terminalShell, lunarLine, syncIntervalMin, giteaHost, toggleStatusbar };
 });
