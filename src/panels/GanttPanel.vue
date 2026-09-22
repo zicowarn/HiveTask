@@ -1,215 +1,179 @@
 <script setup lang="ts">
 /**
- * 甘特图 Editor（独立面板，2026-09-21 用户定案：是 Editor 不是 Mode）。
+ * 甘特图 Editor（宿主面板）——2026-09-21 起内部拆 Mode：**任务 / 资源 / 负载**
+ * （用户定案：同一批条目 × 资源分配的不同编队 = Mode；《甘特计划面》§5-bis）。
  *
- * 渲染层 = jordium-gantt-vue3（用户拍板引入，2026-09-21）；数据 = Projects
- * 领域模型（跟随所选项目）+ G1 关系数据：
- * - 起止 ← 项目日期字段（拖拽/改宽回写字段值，走 Roadmap 同款写穿透通道）
- * - WBS/依赖/进度 ← 关系数据（GitHub 全量 / Gitea 仅依赖 / Gitee·本地无）
- *
- * 自有的 `gantt-model.ts` 投影（库无关）负责把领域模型算成 WBS 行 + 依赖 +
- * 进度，再由本文件适配成 jordium 的 Task 树——换渲染库不动投影。
- * 主题与字号全部经 --gantt-* → 本应用 token 映射（见文件尾非 scoped 样式）。
+ * 宿主职责：Editor 外壳、mode 标签（PanelShell `#switcher`）、工具条（字段映射 +
+ * 刻度 + 溢出折叠）、任务编辑面板、把共享状态（`gantt-state.ts`）接到各 Mode。
+ * 领域状态在 projects store；甘特特有派生状态在共享层——**切 Mode 不重置**。
  */
-import { computed, onMounted, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { storeToRefs } from "pinia";
-import { GanttChart, type Task as JTask } from "jordium-gantt-vue3";
-import "jordium-gantt-vue3/index.css";
+import "jordium-gantt-vue3/index.css"; // 库样式：只在宿主导入一次（Vite 去重）
+import { api, type ProjectItem } from "../api";
 import PanelShell from "../workbench/PanelShell.vue";
-import { useProjectsStore } from "../stores/projects";
-import { api, isTauri, type IssueRelations, type ProjectItem } from "../api";
-import { useI18n } from "../i18n";
-import { useTheme } from "../theme";
-import { pushToast } from "../toast";
-import { translateError } from "../gh-errors";
-import { itemTitle } from "./item-fields";
-import EditorIcon from "../components/EditorIcon.vue";
+import ModeTabs from "../components/ModeTabs.vue";
 import DropdownMenu from "../components/DropdownMenu.vue";
-import { buildGanttTree, defaultEndField, wouldCreateCycle, type GanttNode, type GanttTask } from "./gantt-model";
+import ActionMenu, { type ActionItem } from "../components/ActionMenu.vue";
+import EditorIcon from "../components/EditorIcon.vue";
+import GanttTaskEditor from "./GanttTaskEditor.vue";
+import { resolvePanel } from "../workbench/registry";
+import { useProjectsStore } from "../stores/projects";
+import { useGanttState } from "./gantt-state";
+import { useI18n } from "../i18n";
+import { translateError } from "../gh-errors";
+import { pushToast } from "../toast";
+import { foldToolbarDecision, type TaskFormPayload } from "./gantt-model";
 
-/** 面板外壳身份：Editor 面板必须经 PanelShell 提供切换器/分栏/关闭
- *  （leafId/panelType 由 WorkbenchNode 透传）。缺了它 = 切进来出不去。 */
-defineProps<{ leafId?: string; panelType?: string }>();
+const props = defineProps<{ leafId?: string; panelType?: string }>();
+void props;
 
 const store = useProjectsStore();
-const { filteredItems, fields, selectedId, loading: storeLoading, localDeps } = storeToRefs(store);
+const g = useGanttState();
 const { t, locale } = useI18n();
-const { resolvedTheme } = useTheme();
+const { selectedId, loading: storeLoading } = storeToRefs(store);
+const {
+  dateFields,
+  numberFields,
+  startField,
+  endField,
+  actualStartField,
+  actualEndField,
+  estHoursField,
+  actHoursField,
+  progressField,
+  nodes,
+  relationsLoading,
+  relationsError,
+  loadRelations,
+  undatedCount,
+} = g;
 
-// ---- 日期字段（开始 / 结束）----
-const dateFields = computed(() => fields.value.filter((f) => f.kind === "date"));
-const startFieldId = ref("");
-const startField = computed(
-  () => dateFields.value.find((f) => f.id === startFieldId.value) ?? dateFields.value[0] ?? null,
-);
-/** 结束字段：null = 未手选（默认推断）；"" = 显式「无」；字段 id = 显式选。
- *  甘特语义 = 工期 → 未选时不给「无」，自动落到推断的结束字段上。 */
-const endFieldChoice = ref<string | null>(null);
-const endField = computed(() => {
-  if (endFieldChoice.value !== null) {
-    return dateFields.value.find((f) => f.id === endFieldChoice.value) ?? null;
+// ---- Mode：任务 / 资源 / 负载（与 issue.list 同款：modeKey + localStorage 持久化）----
+const MODE_STORAGE_KEY = "hivetask.gantt-mode";
+const modes = resolvePanel("project.gantt").modes ?? [];
+const storedMode = modes.find((m) => m.key === localStorage.getItem(MODE_STORAGE_KEY))?.key ?? modes[0]?.key;
+const modeKey = ref(storedMode ?? "task");
+watch(modeKey, (key) => localStorage.setItem(MODE_STORAGE_KEY, key));
+const activeMode = computed(() => modes.find((m) => m.key === modeKey.value) ?? modes[0]);
+
+// ---- 刻度 ----
+type GanttScale = "hour" | "day" | "week" | "month" | "quarter" | "year";
+const scale = ref<GanttScale>("week");
+const scaleOptions = computed(() => [
+  { value: "day", label: t("gantt.scaleDay") },
+  { value: "week", label: t("gantt.scaleWeek") },
+  { value: "month", label: t("gantt.scaleMonth") },
+]);
+
+// ---- 工具条溢出折叠（窄面板 → 「字段」多级菜单；判定抽成纯函数有测试）----
+const toolbarEl = ref<HTMLElement | null>(null);
+const toolbarCollapsed = ref(false);
+const toolbarNeeded = ref(0);
+const EXPAND_SLACK = 24;
+
+/** 内在宽度：排除撑开项后子项宽 + 间距 + 内边距。
+ *  不能用 scrollWidth——容器够宽时撑开项会填满，会把 fill 宽度误记成所需宽度。 */
+function intrinsicToolbarWidth(el: HTMLElement): number {
+  const style = getComputedStyle(el);
+  const gap = Number.parseFloat(style.columnGap || style.gap || "0") || 0;
+  const pad = (Number.parseFloat(style.paddingLeft) || 0) + (Number.parseFloat(style.paddingRight) || 0);
+  const kids = [...el.children] as HTMLElement[];
+  let sum = pad + gap * Math.max(0, kids.length - 1);
+  for (const k of kids) {
+    if (k.classList.contains("gt-flex")) continue;
+    sum += k.offsetWidth;
   }
-  const id = defaultEndField(dateFields.value, startField.value?.id);
-  return dateFields.value.find((f) => f.id === id) ?? null;
-});
-
-function dateOf(item: ProjectItem, fieldId: string | null | undefined): string | null {
-  if (!fieldId) return null;
-  const raw = item.fieldValues[fieldId];
-  if (!raw) return null;
-  const d = new Date(raw);
-  return Number.isNaN(d.getTime()) ? null : d.toISOString().slice(0, 10);
+  return sum;
 }
 
-// ---- 关系数据（批量装载：WBS / 进度 / 箭头共用）----
-const relationsByKey = ref<Record<string, IssueRelations>>({});
-const relationsLoading = ref(false);
-const relationsError = ref<string | null>(null);
-const relKey = (repoId: string | null, number: string | null) =>
-  repoId && number ? `${repoId}::${number}` : "";
-
-/** 为板内全部 issue 条目批量拉关系（每仓一次 GraphQL；已有缓存不重复拉）。 */
-async function loadRelations(force = false) {
-  if (!isTauri() || !selectedId.value) return;
-  const byRepo = new Map<string, string[]>();
-  for (const it of filteredItems.value) {
-    if (it.kind !== "issue" || !it.repoId || !it.number) continue;
-    if (!force && relationsByKey.value[relKey(it.repoId, it.number)]) continue;
-    const arr = byRepo.get(it.repoId) ?? [];
-    arr.push(it.number);
-    byRepo.set(it.repoId, arr);
+function measureToolbar() {
+  const el = toolbarEl.value;
+  if (!el) return;
+  if (!toolbarCollapsed.value) {
+    const needed = intrinsicToolbarWidth(el);
+    if (needed > 0) toolbarNeeded.value = needed;
   }
-  if (!byRepo.size) return;
-  relationsLoading.value = true;
-  relationsError.value = null;
-  try {
-    const repos = await api.repoList();
-    const targets = new Map<string, string>();
-    for (const r of repos) {
-      const target = r.path || r.remoteUrl || "";
-      if (r.id && target) targets.set(r.id, target);
-    }
-    const merged = { ...relationsByKey.value };
-    await Promise.all(
-      [...byRepo.entries()].map(async ([repoId, numbers]) => {
-        const target = targets.get(repoId);
-        if (!target) return;
-        const res = await api.issueRelationsBatch(target, numbers);
-        for (const [number, relations] of Object.entries(res)) {
-          merged[`${repoId}::${number}`] = relations;
-        }
-      }),
-    );
-    relationsByKey.value = merged;
-  } catch (e) {
-    // 关系是投影增强：失败不打断甘特，只诚实提示（条仍按日期画）
-    relationsError.value = String(e);
-  } finally {
-    relationsLoading.value = false;
-  }
+  const basis = toolbarNeeded.value || intrinsicToolbarWidth(el);
+  const next = foldToolbarDecision(toolbarCollapsed.value, basis, el.clientWidth, EXPAND_SLACK);
+  if (next !== null) toolbarCollapsed.value = next;
 }
 
-// ---- 投影：条目 → 任务 → WBS 行 → jordium 任务树 ----
-const tasks = computed<GanttTask[]>(() =>
-  filteredItems.value.map((it) => ({
-    id: it.id,
-    repoId: it.repoId,
-    number: it.number,
-    kind: it.kind,
-    title: itemTitle(it),
-    start: dateOf(it, startField.value?.id),
-    end: dateOf(it, endField.value?.id),
-    closed: (it.entity?.state ?? "").toUpperCase() === "CLOSED",
-    relations: relationsByKey.value[relKey(it.repoId, it.number)] ?? null,
-    localDeps: localDeps.value[it.id],
-  })),
-);
-const nodes = computed(() => buildGanttTree(tasks.value));
-const undatedCount = computed(() => nodes.value.filter((n) => !n.start).length);
-
-/** 数字 id 映射（jordium 的 Task.id 是 number）：条目 id → 序号，正反向各一份。 */
-const idOf = computed(() => new Map(nodes.value.map((n, i) => [n.id, i + 1])));
-const nodeById = computed(() => new Map(nodes.value.map((n) => [n.id, n])));
-/** jordium 数字 id → 条目 id（事件负载反解）。 */
-const nodeIdOf = computed(() => {
-  const out = new Map<number, string>();
-  for (const [nodeId, jid] of idOf.value) out.set(jid, nodeId);
-  return out;
-});
-
-// ---- 依赖编辑（G3-a 容器真源泳道）----
-/** 仓库平台缓存（形态分级用：本地 issue 引用也属容器形态）。 */
-const repoPlatform = ref<Record<string, string>>({});
-onMounted(async () => {
+let toolbarRO: ResizeObserver | null = null;
+onMounted(() => {
+  void g.loadRepos();
   void loadRelations();
-  try {
-    const repos = await api.repoList();
-    const map: Record<string, string> = {};
-    for (const r of repos) if (r.id) map[r.id] = r.platform ?? "";
-    repoPlatform.value = map;
-  } catch {
-    /* 平台未知 → 按平台形态处理（保守） */
+  if (typeof ResizeObserver !== "undefined" && toolbarEl.value) {
+    toolbarRO = new ResizeObserver(() => measureToolbar());
+    toolbarRO.observe(toolbarEl.value);
   }
+  void nextTick(measureToolbar);
+});
+onBeforeUnmount(() => {
+  toolbarRO?.disconnect();
+  toolbarRO = null;
+});
+watch([() => dateFields.value.length, locale, () => toolbarCollapsed.value], () => void nextTick(measureToolbar));
+watch(selectedId, () => void loadRelations());
+
+/** 折叠态多级菜单：每行一个映射项，二级面板列候选（当前值 ✓）。 */
+const collapsedMenuItems = computed<ActionItem[]>(() => {
+  const dateOpts = (current: string | null, allowNone: boolean): ActionItem[] => [
+    ...(allowNone ? [{ value: "none", label: t("project.none"), checked: !current }] : []),
+    ...dateFields.value.map((f) => ({ value: f.id, label: f.name, checked: f.id === current })),
+  ];
+  const numOpts = (current: string): ActionItem[] => [
+    { value: "none", label: t("project.none"), checked: !current },
+    ...numberFields.value.map((f) => ({ value: f.id, label: f.name, checked: f.id === current })),
+  ];
+  return [
+    { value: "m:start", label: t("gantt.startField"), submenu: dateOpts(startField.value?.id ?? null, false) },
+    { value: "m:end", label: t("gantt.endField"), submenu: dateOpts(endField.value?.id ?? null, true) },
+    { value: "m:actualStart", label: t("gantt.actualStartField"), submenu: dateOpts(actualStartField.value?.id ?? null, true) },
+    { value: "m:actualEnd", label: t("gantt.actualEndField"), submenu: dateOpts(actualEndField.value?.id ?? null, true) },
+    { value: "m:estHours", label: `${t("gantt.hoursField")}·${t("gantt.estHours")}`, submenu: numOpts(estHoursField.value?.id ?? "") },
+    { value: "m:actHours", label: `${t("gantt.hoursField")}·${t("gantt.actHours")}`, submenu: numOpts(actHoursField.value?.id ?? "") },
+    { value: "m:progress", label: t("gantt.progressField"), submenu: numOpts(progressField.value?.id ?? "") },
+    {
+      value: "m:scale",
+      label: t("gantt.scale"),
+      dividerBefore: true,
+      submenu: scaleOptions.value.map((o) => ({ ...o, checked: o.value === scale.value })),
+    },
+  ];
 });
 
-/** 写路由（《架构设计-甘特计划面》§4）：草稿与本地仓库的 issue 引用 = 容器
- *  真源（直接写 app.db）；GitHub/Gitea/Gitee 引用 = 平台真源（写穿透属
- *  G3-b，当前诚实拒绝）；PR 引用不参与（blockedBy 是 issue 语义）。 */
-function isContainerForm(nodeId: string): boolean {
-  const item = filteredItems.value.find((i) => i.id === nodeId);
-  if (!item) return false;
-  if (item.kind === "draft") return true;
-  if (item.kind === "issue" && item.repoId) {
-    return repoPlatform.value[item.repoId] === "local";
-  }
-  return false;
-}
-
-/** 锚点连线（两个事件负载同构：targetTask 依赖 newTask）。
- *  库已先改自己内部数组——我们不认它，只认写库成功后的重投影。 */
-async function onDepLink(payload: { targetTask?: JTask; newTask?: JTask }) {
-  const targetId = payload.targetTask?.id != null ? nodeIdOf.value.get(payload.targetTask.id) : undefined;
-  const newId = payload.newTask?.id != null ? nodeIdOf.value.get(payload.newTask.id) : undefined;
-  if (!targetId || !newId) return;
-  if (!isContainerForm(targetId) || !isContainerForm(newId)) {
-    pushToast({ kind: "info", message: t("gantt.depPlatformTodo") });
-    jTasks.value = toJordiumTasks(nodes.value); // 回滚库内的乐观改动
-    return;
-  }
-  if (wouldCreateCycle(localDeps.value, targetId, newId)) {
-    pushToast({ kind: "error", message: t("gantt.depCycle") });
-    jTasks.value = toJordiumTasks(nodes.value);
-    return;
-  }
-  try {
-    await store.addItemDep(targetId, newId);
-  } catch (e) {
-    pushToast({ kind: "error", message: translateError(String(e)) });
-    jTasks.value = toJordiumTasks(nodes.value);
+function onCollapsedMenuPick(value: string) {
+  const [key, id = ""] = value.split(":");
+  const landed = id === "none" || id === "" ? "" : id;
+  switch (key) {
+    case "m:start":
+      if (landed) g.startFieldId.value = landed;
+      return;
+    case "m:end":
+      g.endFieldChoice.value = landed;
+      return;
+    case "m:actualStart":
+      g.actualStartFieldId.value = landed;
+      return;
+    case "m:actualEnd":
+      g.actualEndFieldId.value = landed;
+      return;
+    case "m:estHours":
+      g.estHoursFieldId.value = landed;
+      return;
+    case "m:actHours":
+      g.actHoursFieldId.value = landed;
+      return;
+    case "m:progress":
+      g.progressFieldId.value = landed;
+      return;
+    case "m:scale":
+      return void (scale.value = id as GanttScale);
   }
 }
 
-/** 连线删除：负载 sourceTaskId=前驱、targetTaskId=后继（target 依赖 source）。
- *  只删容器真源边；平台镜像边删不掉（归 G1 刷新/G3-b），回滚乐观改动。 */
-async function onDepUnlink(payload: { sourceTaskId?: number; targetTaskId?: number }) {
-  const sourceId = payload.sourceTaskId != null ? nodeIdOf.value.get(payload.sourceTaskId) : undefined;
-  const targetId = payload.targetTaskId != null ? nodeIdOf.value.get(payload.targetTaskId) : undefined;
-  if (!sourceId || !targetId) return;
-  const isLocal = (localDeps.value[targetId] ?? []).includes(sourceId);
-  if (!isLocal) {
-    jTasks.value = toJordiumTasks(nodes.value); // 平台镜像边：不可删，恢复
-    return;
-  }
-  try {
-    await store.removeItemDep(targetId, sourceId);
-  } catch (e) {
-    pushToast({ kind: "error", message: translateError(String(e)) });
-    jTasks.value = toJordiumTasks(nodes.value);
-  }
-}
-
-/** 新增任务（容器草稿 + 播种 今天→+3 天：编辑器默认值，可拖改——
- *  《甘特计划面》§7，非数据伪造）。 */
+// ---- 新增任务（容器草稿 + 播种 今天→+3 天）----
 async function addSeededTask() {
   if (!selectedId.value) return;
   const item = await store.addItem({
@@ -228,221 +192,255 @@ async function addSeededTask() {
   }
 }
 
-/** 折叠状态跨重建保留（库的折叠事件回写到这里）。 */
-const collapsed = ref<Set<number>>(new Set());
-function onCollapseChange(payload: { taskId?: number; collapsed?: boolean } | number, c?: boolean) {
-  const id = typeof payload === "number" ? payload : payload?.taskId;
-  const next = typeof payload === "number" ? !!c : !!payload?.collapsed;
-  if (typeof id !== "number") return;
-  const set = new Set(collapsed.value);
-  if (next) set.add(id);
-  else set.delete(id);
-  collapsed.value = set;
+// ---- 任务编辑面板（应用风格；字段集照甘特库任务表单）----
+const editorItem = ref<ProjectItem | null>(null);
+const editorOpen = ref(false);
+const editorRef = ref<InstanceType<typeof GanttTaskEditor> | null>(null);
+
+function openTaskEditor(nodeId: string) {
+  const item = g.filteredItems.value.find((i) => i.id === nodeId);
+  if (!item) return;
+  editorItem.value = item;
+  editorOpen.value = true;
 }
 
-/** 扁平行 → jordium 任务树（嵌套 children；投影已保证父在子前）。 */
-function toJordiumTasks(flat: GanttNode[]): JTask[] {
-  const ids = idOf.value;
-  const roots: JTask[] = [];
-  const stack: JTask[] = [];
-  for (const n of flat) {
-    const jid = ids.get(n.id);
-    if (!jid) continue;
-    const task: JTask = {
-      id: jid,
-      name: n.title,
-      startDate: n.start ?? undefined,
-      endDate: n.end ?? undefined,
-      progress: n.progress ?? 0,
-      predecessor: n.dependsOn.map((d) => ids.get(d) ?? 0).filter((d) => d > 0),
-      isParent: n.childCount > 0,
-      children: [],
-      collapsed: collapsed.value.has(jid),
-    };
-    stack.length = n.depth;
-    if (n.depth === 0 || !stack[n.depth - 1]) {
-      roots.push(task);
-    } else {
-      const parent = stack[n.depth - 1];
-      parent.children = parent.children ?? [];
-      parent.children.push(task);
-      task.parentId = parent.id;
-    }
-    stack.push(task);
-  }
-  return roots;
-}
-/** 交给组件的是普通数组（库会就地改写条上的日期，reactive 数组才跟得上）。 */
-const jTasks = ref<JTask[]>([]);
-watch(
-  nodes,
-  (flat) => {
-    jTasks.value = toJordiumTasks(flat);
-  },
-  { immediate: true },
+const editorMapping = computed(() => ({
+  startFieldId: startField.value?.id ?? null,
+  endFieldId: endField.value?.id ?? null,
+  actualStartFieldId: actualStartField.value?.id ?? null,
+  actualEndFieldId: actualEndField.value?.id ?? null,
+  estHoursFieldId: estHoursField.value?.id ?? null,
+  actHoursFieldId: actHoursField.value?.id ?? null,
+  progressFieldId: progressField.value?.id ?? null,
+}));
+
+const editorCandidates = computed(() =>
+  nodes.value
+    .filter((n) => n.id !== editorItem.value?.id)
+    .map((n) => ({ id: n.id, label: n.number ? `#${n.number} ${n.title}` : n.title })),
 );
 
-// ---- 写回：拖拽 / 改宽 → 项目日期字段（Roadmap 同款 write-through）----
-
-/** 库回传的日期可能是 'YYYY-MM-DD' 或 ISO——取日期部分即可（不做时区换算）。 */
-function isoDay(v?: string | null): string | null {
-  if (!v) return null;
-  const m = /^(\d{4}-\d{2}-\d{2})/.exec(v);
-  return m ? m[1] : null;
-}
-
-/**
- * 拖拽/改宽结束 → 把新起止写进项目日期字段。
- * 只写有变化的字段；写失败（平台拒绝/断网）由 store 抛错并提示，不吞。
- */
-async function onBarDatesChanged(task: JTask) {
-  const nodeId = [...idOf.value.entries()].find(([, jid]) => jid === task.id)?.[0];
-  const node = nodeId ? nodeById.value.get(nodeId) : undefined;
-  if (!node) return;
-  const newStart = isoDay(task.startDate);
-  const newEnd = isoDay(task.endDate);
-  const startFieldRef = startField.value;
-  const endFieldRef = endField.value;
-  try {
-    if (startFieldRef && newStart && newStart !== node.start) {
-      await store.setFieldValue(node.id, startFieldRef.id, newStart);
-    }
-    if (endFieldRef && newEnd && newEnd !== node.end) {
-      await store.setFieldValue(node.id, endFieldRef.id, newEnd);
-    }
-  } catch (e) {
-    pushToast({ kind: "error", message: String(e) });
-  }
-}
-
-// ---- 工具栏（本应用形态：字段选择 + 刻度 + 刷新；不用库自带工具条）----
-/** 库的 TimelineScale 未从包入口导出（index.d.ts 实证）——同构本地类型。 */
-type GanttScale = "hour" | "day" | "week" | "month" | "quarter" | "year";
-const scale = ref<GanttScale>("week");
-const scaleOptions = computed(() => [
-  { value: "day", label: t("gantt.scaleDay") },
-  { value: "week", label: t("gantt.scaleWeek") },
-  { value: "month", label: t("gantt.scaleMonth") },
-]);
-
-/** 依赖线用应用 token 上色（--gantt-* 映射在文件尾，这里只管语义色）。 */
-const linkConfig = {
-  type: "orthogonal" as const,
-  style: "solid" as const,
-  width: 1.2,
-  highlightWidth: 2,
-};
-
-const taskListConfig = {
-  columns: [
-    { key: "name", type: "name" as const, width: 260 },
-    { key: "startDate", type: "startDate" as const, width: 100 },
-    { key: "endDate", type: "endDate" as const, width: 100 },
-    { key: "progress", type: "progress" as const, width: 64 },
-  ],
-  defaultWidth: 380,
-  minWidth: 280,
-};
-
-// ---- 生命周期 ----
-onMounted(() => void loadRelations());
-watch(selectedId, () => {
-  relationsByKey.value = {};
-  collapsed.value = new Set();
-  void loadRelations();
+const editorDeps = computed(() => {
+  const id = editorItem.value?.id;
+  return id ? (g.nodeById.value.get(id)?.dependsOn ?? []) : [];
 });
-watch(
-  () => filteredItems.value.map((i) => relKey(i.repoId, i.number)).join(","),
-  () => void loadRelations(),
-);
+
+const editorParentId = computed(() => {
+  const id = editorItem.value?.id;
+  return (id ? g.nodeById.value.get(id)?.parentId : null) ?? null;
+});
+
+const editorResources = computed(() => {
+  const id = editorItem.value?.id;
+  return id ? (store.itemResources[id] ?? []) : [];
+});
+
+const editorKindText = computed(() => {
+  const it = editorItem.value;
+  if (!it) return "";
+  if (it.kind === "draft") return t("gantt.kindDraft");
+  if (it.kind === "pull") return `PR #${it.number ?? ""}`;
+  return `Issue #${it.number ?? ""}`;
+});
+
+async function onTaskSave(payload: TaskFormPayload) {
+  const item = editorItem.value;
+  if (!item) return;
+  const repoPath = item.repoId ? g.repoPathOf(item.repoId) : null;
+  const platformish = item.kind !== "draft" && !!repoPath && !!item.number;
+  try {
+    // 标题 / 描述
+    if (item.kind === "draft") {
+      await store.updateDraft(item.id, payload.title, payload.body);
+    } else if (platformish) {
+      const node = g.nodeById.value.get(item.id);
+      if (payload.title !== node?.title || payload.body) {
+        await api.updateIssue(repoPath, item.number!, payload.title, payload.body);
+      }
+    }
+    // 资源分配（§5-bis）：分配行 diff + 类别写回资源目录
+    const before = editorResources.value.map((r) => r.resourceId);
+    for (const row of payload.resources) {
+      const prev = editorResources.value.find((r) => r.resourceId === row.resourceId);
+      if (!prev || prev.allocation !== row.allocation) {
+        await store.setItemResource(item.id, row.resourceId, row.allocation);
+      }
+    }
+    for (const gone of before.filter((id) => !payload.resources.some((r) => r.resourceId === id))) {
+      await store.removeItemResource(item.id, gone);
+    }
+    // 平台条目：把「平台派生资源」的名字同步为 issue assignees（§5-bis 写路径）
+    if (platformish) {
+      const names = payload.resources
+        .map((r) => store.resourceCatalog.find((c) => c.id === r.resourceId))
+        .filter((r) => r && r.origin)
+        .map((r) => r!.name);
+      if (names.join(",") !== (item.entity?.assignees ?? []).join(",")) {
+        await api.issueUpdateAssignees(repoPath, item.number!, names);
+      }
+    }
+    // 上级任务（结构扩展泳道）
+    const currentParent = editorParentId.value;
+    if (payload.parentId && payload.parentId !== currentParent) {
+      await store.setItemParent(item.id, payload.parentId);
+    } else if (!payload.parentId && currentParent) {
+      await store.clearItemParent(item.id);
+    }
+    // 项目字段（未配置映射的跳过——没有落点就不写）
+    const m = editorMapping.value;
+    const writeField = async (fieldId: string | null, value: string | null) => {
+      if (!fieldId || value === null) return;
+      await store.setFieldValue(item.id, fieldId, value);
+    };
+    await writeField(m.startFieldId, payload.plannedStart);
+    await writeField(m.endFieldId, payload.plannedEnd);
+    await writeField(m.actualStartFieldId, payload.actualStart);
+    await writeField(m.actualEndFieldId, payload.actualEnd);
+    await writeField(m.estHoursFieldId, payload.estHours === null ? null : String(payload.estHours));
+    await writeField(m.actHoursFieldId, payload.actualHours === null ? null : String(payload.actualHours));
+    await writeField(m.progressFieldId, payload.progress === null ? null : String(payload.progress));
+    // 依赖边 diff（容器/平台分流）
+    await g.syncPredecessors(item.id, payload.predecessorIds);
+    await loadRelations(true);
+    editorRef.value?.done();
+  } catch (e) {
+    editorRef.value?.fail(translateError(String(e)));
+  }
+}
+
+async function onTaskRemove(nodeId: string) {
+  if (!nodeId) return;
+  if (!confirm(t("gantt.removeConfirm"))) return;
+  try {
+    await store.removeItemAndDeps(nodeId);
+    editorRef.value?.done();
+  } catch (e) {
+    pushToast({ kind: "error", message: translateError(String(e)) });
+  }
+}
 </script>
 
 <template>
   <PanelShell :leaf-id="leafId" :panel-type="panelType">
-    <!-- 右栏动作：无日期计数 + 依赖刷新（与看板面板同款 22px 小按钮） -->
+    <template v-if="modes.length > 1" #switcher>
+      <ModeTabs v-model="modeKey" :modes="modes" />
+    </template>
+
     <template #actions>
-      <span v-if="undatedCount" class="gt-note">
-        {{ t("gantt.undated", { n: String(undatedCount) }) }}
-      </span>
+      <span v-if="undatedCount" class="gt-note">{{ t("gantt.undated", { n: String(undatedCount) }) }}</span>
       <span v-if="relationsLoading" class="gt-note">{{ t("gantt.depsLoading") }}</span>
-      <button v-else class="gt-refresh" :title="t('gantt.refreshDeps')" @click="loadRelations(true)">
+      <button class="gt-add" :title="t('gantt.addTask')" @click="addSeededTask">
+        <EditorIcon name="o.plus" />
+        <span>{{ t("gantt.addTask") }}</span>
+      </button>
+      <button class="gt-refresh" :title="t('gantt.refreshDeps')" @click="loadRelations(true)">
         <EditorIcon name="o.sync" />
-        <span>{{ t("gantt.refreshDeps") }}</span>
       </button>
     </template>
 
     <div class="gt">
-      <!-- 面板内工具条：日期字段选择 + 刻度（Roadmap mode 同款形态）；
-           空态不显示（无项目/无日期字段时无字段可选） -->
-      <div v-if="selectedId && dateFields.length" class="gt-toolbar">
-        <span class="gt-flex"></span>
-        <span class="gt-label">{{ t("gantt.startField") }}</span>
-        <DropdownMenu
-          class="gt-dd gt-dd-start"
-          :options="dateFields.map((f) => ({ value: f.id, label: f.name }))"
-          :model-value="startField?.id ?? ''"
-          @update:model-value="startFieldId = $event as string"
-        />
-        <span class="gt-label">{{ t("gantt.endField") }}</span>
-        <DropdownMenu
-          class="gt-dd gt-dd-end"
-          :options="[
-            { value: '', label: t('project.none') },
-            ...dateFields.map((f) => ({ value: f.id, label: f.name })),
-          ]"
-          :model-value="endFieldChoice ?? endField?.id ?? ''"
-          @update:model-value="endFieldChoice = $event as string"
-        />
-        <span class="gt-label">{{ t("gantt.scale") }}</span>
-        <DropdownMenu
-          class="gt-dd gt-dd-scale"
-          :options="scaleOptions"
-          :model-value="scale"
-          @update:model-value="scale = $event as GanttScale"
-        />
-        <button class="gt-add" @click="addSeededTask">
-          <EditorIcon name="o.plus" />
-          <span>{{ t("gantt.addTask") }}</span>
-        </button>
+      <div v-if="selectedId && dateFields.length" ref="toolbarEl" class="gt-toolbar">
+        <template v-if="toolbarCollapsed">
+          <span class="gt-label">{{ t("gantt.fields") }}</span>
+          <ActionMenu
+            :items="collapsedMenuItems"
+            trigger-icon="o.sliders"
+            :title="t('gantt.fields')"
+            align="left"
+            @pick="onCollapsedMenuPick"
+          />
+        </template>
+        <template v-else>
+          <span class="gt-flex"></span>
+          <span class="gt-label">{{ t("gantt.startField") }}</span>
+          <DropdownMenu
+            class="gt-dd gt-dd-start"
+            :options="dateFields.map((f) => ({ value: f.id, label: f.name }))"
+            :model-value="startField?.id ?? ''"
+            @update:model-value="g.startFieldId.value = $event as string"
+          />
+          <span class="gt-label">{{ t("gantt.endField") }}</span>
+          <DropdownMenu
+            class="gt-dd gt-dd-end"
+            :options="[{ value: '', label: t('project.none') }, ...dateFields.map((f) => ({ value: f.id, label: f.name }))]"
+            :model-value="g.endFieldChoice.value ?? endField?.id ?? ''"
+            @update:model-value="g.endFieldChoice.value = $event as string"
+          />
+          <span class="gt-label">{{ t("gantt.actualStartField") }}</span>
+          <DropdownMenu
+            class="gt-dd gt-dd-end"
+            :options="[{ value: '', label: t('project.none') }, ...dateFields.map((f) => ({ value: f.id, label: f.name }))]"
+            :model-value="actualStartField?.id ?? ''"
+            @update:model-value="g.actualStartFieldId.value = $event as string"
+          />
+          <span class="gt-label">{{ t("gantt.actualEndField") }}</span>
+          <DropdownMenu
+            class="gt-dd gt-dd-end"
+            :options="[{ value: '', label: t('project.none') }, ...dateFields.map((f) => ({ value: f.id, label: f.name }))]"
+            :model-value="actualEndField?.id ?? ''"
+            @update:model-value="g.actualEndFieldId.value = $event as string"
+          />
+          <span class="gt-label">{{ t("gantt.hoursField") }}</span>
+          <DropdownMenu
+            class="gt-dd gt-dd-end"
+            :options="[{ value: '', label: t('project.none') }, ...numberFields.map((f) => ({ value: f.id, label: f.name }))]"
+            :model-value="estHoursField?.id ?? ''"
+            @update:model-value="g.estHoursFieldId.value = $event as string"
+          />
+          <DropdownMenu
+            class="gt-dd gt-dd-end"
+            :options="[{ value: '', label: t('project.none') }, ...numberFields.map((f) => ({ value: f.id, label: f.name }))]"
+            :model-value="actHoursField?.id ?? ''"
+            @update:model-value="g.actHoursFieldId.value = $event as string"
+          />
+          <span class="gt-label">{{ t("gantt.progressField") }}</span>
+          <DropdownMenu
+            class="gt-dd gt-dd-end"
+            :options="[{ value: '', label: t('project.none') }, ...numberFields.map((f) => ({ value: f.id, label: f.name }))]"
+            :model-value="progressField?.id ?? ''"
+            @update:model-value="g.progressFieldId.value = $event as string"
+          />
+          <span class="gt-label">{{ t("gantt.scale") }}</span>
+          <DropdownMenu
+            class="gt-dd gt-dd-scale"
+            :options="scaleOptions"
+            :model-value="scale"
+            @update:model-value="scale = $event as GanttScale"
+          />
+        </template>
       </div>
       <p v-if="relationsError" class="gt-warn">{{ t("gantt.depsFailed") }}</p>
 
-      <!-- 空态三档：未选项目 / 无日期字段 / 无条目 -->
       <p v-if="!selectedId" class="gt-empty">{{ t("project.empty") }}</p>
       <p v-else-if="!dateFields.length" class="gt-empty">{{ t("roadmap.noDateField") }}</p>
       <p v-else-if="!nodes.length && !storeLoading" class="gt-empty">{{ t("gantt.noItems") }}</p>
 
-      <!-- 甘特本体（jordium）：视图锁定任务模式。依赖锚点 G3-a 起对容器形态
-           开放（草稿/本地 issue；平台引用 toast 说明待 G3-b——《甘特计划面》§4
-           写路由）；抽屉与右键菜单仍关（编辑面随 G3-b/c 分级打开，不开假交互）。 -->
-      <div v-else class="gt-jordium">
-        <GanttChart
-          :tasks="jTasks"
-          view-mode="task"
-          :available-view-modes="['task']"
-          :show-toolbar="false"
-          :theme="resolvedTheme"
-          :locale="locale"
-          :time-scale="scale"
-          :row-height="40"
-          :link-config="linkConfig"
-          :task-list-config="taskListConfig"
-          :allow-drag-and-resize="true"
-          :enable-link-anchor="true"
-          :use-default-drawer="false"
-          :enable-task-list-context-menu="false"
-          :enable-task-bar-context-menu="false"
-          :show-conflicts="false"
-          :auto-sort-by-start-date="false"
-          @taskbar-drag-end="onBarDatesChanged"
-          @taskbar-resize-end="onBarDatesChanged"
-          @task-collapse-change="onCollapseChange"
-          @predecessor-added="onDepLink"
-          @successor-added="onDepLink"
-          @link-deleted="onDepUnlink"
-        />
-      </div>
+      <component
+        :is="activeMode!.component"
+        v-else
+        :key="activeMode!.key"
+        :scale="scale"
+        :open-editor="openTaskEditor"
+        :remove-item="onTaskRemove"
+      />
     </div>
+
+    <GanttTaskEditor
+      v-if="editorItem"
+      ref="editorRef"
+      :open="editorOpen"
+      :item="editorItem"
+      :mapping="editorMapping"
+      :resource-catalog="store.resourceCatalog"
+      :current-resources="editorResources"
+      :candidates="editorCandidates"
+      :current-deps="editorDeps"
+      :parent-id="editorParentId"
+      :kind-text="editorKindText"
+      @close="editorOpen = false"
+      @save="onTaskSave"
+      @remove="onTaskRemove(editorItem?.id ?? '')"
+    />
   </PanelShell>
 </template>
 
@@ -461,12 +459,19 @@ watch(
   border-bottom: 1px solid var(--border);
   flex: none;
 }
+.gt-toolbar > * {
+  flex: none;
+}
+.gt-toolbar > .gt-flex {
+  flex: 1;
+}
 .gt-label {
   font-size: var(--font-sm);
   color: var(--text-dim);
 }
 /* 右栏动作（PanelShell #actions）：与看板面板的 22px 小按钮同款 */
-.gt-refresh {
+.gt-refresh,
+.gt-add {
   display: inline-flex;
   align-items: center;
   gap: 5px;
@@ -479,7 +484,8 @@ watch(
   border-radius: 5px;
   cursor: pointer;
 }
-.gt-refresh:hover {
+.gt-refresh:hover,
+.gt-add:hover {
   border-color: var(--accent);
   color: var(--accent);
 }
@@ -488,11 +494,19 @@ watch(
   color: var(--text-dim);
   white-space: nowrap;
 }
-.gt-flex {
-  flex: 1;
+.gt-warn {
+  margin: 0;
+  padding: 4px 10px;
+  font-size: var(--font-sm);
+  color: var(--text-dim);
+  border-bottom: 1px solid var(--border);
 }
-/* 下拉宽度收齐（触发盒内容自适应会参差）：日期字段 128 / 结束 104 / 刻度 72；
-   标签超长省略，chevron 恒贴右缘 */
+.gt-empty {
+  margin: 24px auto;
+  font-size: var(--font-base);
+  color: var(--text-dim);
+}
+/* 下拉宽度收齐（触发盒内容自适应会参差） */
 .gt-dd :deep(.dd-trigger) {
   justify-content: space-between;
 }
@@ -510,55 +524,12 @@ watch(
 .gt-dd-scale :deep(.dd-trigger) {
   width: 72px;
 }
-/* 新增任务：与刷新按钮同款 22px 小按钮 */
-.gt-add {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  height: 22px;
-  padding: 0 10px;
-  border: 1px solid var(--border);
-  background: var(--bg-panel);
-  color: var(--text);
-  font-size: var(--font-md);
-  border-radius: 5px;
-  cursor: pointer;
-}
-.gt-add:hover {
-  border-color: var(--accent);
-  color: var(--accent);
-}
-.gt-warn {
-  margin: 0;
-  padding: 4px 10px;
-  font-size: var(--font-sm);
-  color: var(--text-dim);
-  border-bottom: 1px solid var(--border);
-}
-.gt-empty {
-  margin: 24px auto;
-  font-size: var(--font-base);
-  color: var(--text-dim);
-}
-.gt-jordium {
-  flex: 1;
-  min-height: 0;
-  /* jordium 的画布自己滚，容器只负责给高度 */
-  display: flex;
-}
-.gt-jordium > * {
-  flex: 1;
-  min-height: 0;
-}
 </style>
 
-<!-- 主题对齐：jordium 的 --gantt-* 变量族 → 本应用 token。
-     非 scoped：变量要走继承覆盖库自身的 :root / [data-theme] 声明，
-     故用 .gt-jordium 前缀限域 + 提高一级特异度覆盖库内组件级默认值。 -->
+<!-- 主题对齐与库内样式覆盖（非 scoped：变量要走继承压过库内声明） -->
 <style>
 .gt-jordium,
 .gt-jordium .gantt-root[data-theme] {
-  /* 底色 */
   --gantt-bg-primary: var(--bg-panel);
   --gantt-bg-secondary: var(--bg-app);
   --gantt-bg-tertiary: var(--bg-app);
@@ -571,7 +542,6 @@ watch(
   --gantt-bg-hover-parent: var(--bg-hover);
   --gantt-bg-toolbar: var(--bg-panel);
   --gantt-bg-disabled: var(--bg-chip);
-  /* 文字 */
   --gantt-text-primary: var(--text);
   --gantt-text-regular: var(--text);
   --gantt-text-secondary: var(--text-dim);
@@ -583,7 +553,6 @@ watch(
   --gantt-text-disabled: var(--text-dim);
   --gantt-text-white: #ffffff;
   --gantt-text-on-primary: #ffffff;
-  /* 边框 */
   --gantt-border-light: var(--border);
   --gantt-border-color: var(--border);
   --gantt-border-base: var(--border);
@@ -591,7 +560,6 @@ watch(
   --gantt-border-dark: var(--border);
   --gantt-border-hover: var(--text-dim);
   --gantt-border-disabled: var(--border);
-  /* 语义色 */
   --gantt-primary: var(--accent);
   --gantt-primary-color: var(--accent);
   --gantt-primary-light: var(--accent-soft);
@@ -607,32 +575,18 @@ watch(
   --gantt-info: var(--accent);
   --gantt-off-leave: var(--merged);
   --gantt-off-leave-light: var(--merged-soft);
-  /* 滚动条 */
   --gantt-scrollbar-thumb: var(--border);
   --gantt-scrollbar-thumb-hover: var(--text-dim);
-  /* 度量：字号收进本应用五档；圆角随面板体系 */
   --gantt-font-size-sm: var(--font-sm);
   --gantt-radius-sm: 6px;
-}
-/* 库内字体的绝对尺寸兜底（沿用 token 而非 13/14px 裸值） */
-.gt-jordium {
   font-size: var(--font-md);
 }
 
-/* ---- 字号对齐（2026-09-21 用户实测对比 Roadmap 后要求）----
-   库内 156 处 font-size 几乎全是硬编码 px、只有 1 处走变量；其中
-   `.task-list { font-size: 15px }` 是「整块左栏大一圈」的根源（列头与
-   单元格都继承它）。此处按 Roadmap 的既定档位逐类改写：
-   月/年标签 = --font-md(12)、日/周标签 = --font-sm(11)、任务名与条内标题
-   = --font-base(13)、条内进度/工具条按钮 = --font-md(12)、徽标 = --font-xs(10)。
-   选择器用 `.gt-jordium` 前缀（特异性 ≥ 库的 scoped 规则 (0,2,0)，
-   且在产物中后于库样式注入；`pnpm build` 后可在 dist CSS 复核顺序）。 */
+/* ---- 库内硬编码字号 → 本仓库五档 token（169 条库规则全在覆盖之前，产物实证）---- */
 .gt-jordium .task-list {
   font-size: var(--font-md);
 }
-.gt-jordium .task-name {
-  font-size: var(--font-base);
-}
+.gt-jordium .task-name,
 .gt-jordium .expanded-title {
   font-size: var(--font-base);
 }
@@ -645,8 +599,6 @@ watch(
 .gt-jordium .actual-bar-content {
   font-size: var(--font-sm);
 }
-/* 库内有 3 条高特异性规则（.task-bar.overflow-effect …）会压过上面对条内
-   文字的覆盖——按同特异性后写胜出补齐，条内字号也走 token。 */
 .gt-jordium .task-bar.overflow-effect .task-bar-content,
 .gt-jordium .task-bar.overflow-effect .task-name {
   font-size: var(--font-md);
@@ -654,7 +606,6 @@ watch(
 .gt-jordium .task-bar.overflow-effect .task-progress {
   font-size: var(--font-sm);
 }
-/* 时间轴表头刻度 */
 .gt-jordium .year-month-label,
 .gt-jordium .month-label,
 .gt-jordium .quarter-label,
@@ -672,11 +623,8 @@ watch(
 .gt-jordium .predecessor-tag {
   font-size: var(--font-sm);
 }
-/* 工具条与按钮（本面板关了库工具条，保底对齐） */
 .gt-jordium .gantt-btn,
-.gt-jordium .gantt-btn-group-item,
-.gt-jordium .status-badge,
-.gt-jordium .timer-badge {
+.gt-jordium .gantt-btn-group-item {
   font-size: var(--font-md);
 }
 .gt-jordium .status-badge,
@@ -684,13 +632,10 @@ watch(
   font-size: var(--font-xs);
 }
 .gt-jordium .avatar,
-.gt-jordium .resource-avatar {
-  font-size: var(--font-xs);
-}
+.gt-jordium .resource-avatar,
 .gt-jordium .avatar .avatar-text {
   font-size: var(--font-xs);
 }
-/* 悬浮/拖拽提示与空态 */
 .gt-jordium .tooltip-title,
 .gt-jordium .hover-tooltip-title {
   font-size: var(--font-base);
@@ -713,7 +658,6 @@ watch(
 .gt-jordium .placeholder-desc {
   font-size: var(--font-md);
 }
-/* 冲突/超载徽标（本面板关了冲突显示，保底） */
 .gt-jordium .conflict-header,
 .gt-jordium .conflict-title,
 .gt-jordium .total-overload,
@@ -721,13 +665,12 @@ watch(
 .gt-jordium .conflict-detail {
   font-size: var(--font-sm);
 }
-
-/* ---- 深色模式与形态对齐（2026-09-21 用户实机对比）----
-   库的任务条配色是**运行时内联计算**的：状态色再混 95%/70% 白生成底色/边框
-   （源码实证 `Math.round(255*0.95 + c*0.05)`），公式硬编码白底假设——深色画布
-   上必然呈现粉白块。状态色同样内联写死，无类名可分（只有 completed/parent-task
-   两个状态类），故只能以 !important 覆盖，且只在深色下生效（浅色下库的淡彩可读）。
-   本仓库对内嵌组件用 !important 是既有手法（KnowledgeTree/TableEditor 等 8 处先例）。 */
+/* 依赖违规行（G4-a）：行名染警示色（barColor 已让条带警示边） */
+.gt-jordium .gt-violation .task-name {
+  color: var(--danger);
+}
+/* 深色模式：库的条色是「状态色混白」内联计算（95%/70% 白），深色画布上呈粉白块——
+   只能 !important 覆盖（本仓库对内嵌组件的既有手法）。 */
 :root[data-theme="dark"] .gt-jordium .task-bar {
   background-color: var(--bg-panel) !important;
   border-color: var(--border) !important;
@@ -741,15 +684,10 @@ watch(
   background-color: var(--bg-chip) !important;
   border-color: var(--text-dim) !important;
 }
-/* 条太窄时库把标题甩出条外（overflow-effect），且沿用状态色（一律红）——
-   深色下满屏浮红字很跳。收到次级文本色：与左侧列表同名信息形成"二次提及"
-   而非告警（逾期语义由列表里的逾期徽标承担）。 */
 .gt-jordium .task-bar.overflow-effect .task-name,
 .gt-jordium .task-bar.overflow-effect .task-progress {
   color: var(--text-dim);
 }
-/* 左侧列表表头：应用口径 = 600 字重 + 次级色 + 名称列左对齐
-   （库是 700 加粗 + 居中 + 头部 80px 用于与时间轴表头对齐，高度保留） */
 .gt-jordium .task-list-header,
 .gt-jordium .task-list-header .col {
   font-weight: 600;
@@ -761,8 +699,6 @@ watch(
 .gt-jordium .task-list-header .col-taskName {
   justify-content: flex-start;
 }
-/* 今日：库给整列铺主色（蓝）半透明 + 表头日号实心蓝块；应用口径（Roadmap）
-   是「一条淡红今日线」。整列铺色改为淡红，表头日号保留实心块做定位锚。 */
 .gt-jordium .day-column.today {
   background-color: color-mix(in srgb, var(--danger) 22%, transparent);
   opacity: 1;

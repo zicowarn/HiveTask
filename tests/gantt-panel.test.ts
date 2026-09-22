@@ -97,6 +97,11 @@ describe("甘特面板（jordium 渲染）", () => {
     expect(host.querySelector(".editor-switcher")).toBeTruthy();
     // 分栏/关闭控件同属外壳
     expect(host.querySelector(".layout-actions")).toBeTruthy();
+    // Mode 标签（任务/资源/负载）——2026-09-21 拆分后必须可见且可切换
+    const tabs = host.querySelectorAll(".mode-tab");
+    expect(tabs.length).toBe(3); // 任务 / 资源 / 负载
+    expect([...tabs].every((b) => (b.textContent ?? "").trim().length > 0)).toBe(true);
+    expect(host.querySelector(".mode-tab.active")).toBeTruthy();
     app.unmount();
     host.remove();
   });

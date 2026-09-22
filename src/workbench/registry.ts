@@ -15,6 +15,9 @@ import PullListPanel from "../panels/PullListPanel.vue";
 import PullDetailPanel from "../panels/PullDetailPanel.vue";
 import ProjectPanel from "../panels/ProjectPanel.vue";
 import GanttPanel from "../panels/GanttPanel.vue";
+import GanttTaskMode from "../panels/modes/GanttTaskMode.vue";
+import GanttResourceMode from "../panels/modes/GanttResourceMode.vue";
+import GanttUsageMode from "../panels/modes/GanttUsageMode.vue";
 import SettingsPanel from "../panels/SettingsPanel.vue";
 import GitHistoryPanel from "../panels/GitHistoryPanel.vue";
 import TerminalPanel from "../panels/TerminalPanel.vue";
@@ -72,7 +75,11 @@ registerPanel("project.board", ProjectPanel, [
 ]);
 registerPanel("knowledge.workbench", KnowledgeWorkbench);
 registerPanel("knowledge.graph", KnowledgeGraphPanel);
-registerPanel("project.gantt", GanttPanel);
+registerPanel("project.gantt", GanttPanel, [
+  { key: "task", labelKey: "gantt.viewTask", component: GanttTaskMode },
+  { key: "resource", labelKey: "gantt.viewResource", component: GanttResourceMode },
+  { key: "usage", labelKey: "gantt.viewUsage", component: GanttUsageMode },
+]);
 registerPanel("git.history", GitHistoryPanel);
 registerPanel("terminal", TerminalPanel);
 registerPanel("calendar", CalendarPanel);
