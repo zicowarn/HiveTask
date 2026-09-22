@@ -409,6 +409,7 @@ export const zhCN = {
   "gantt.refreshDeps": "刷新依赖关系",
   "gantt.noItems": "项目里还没有条目。",
   "gantt.scale": "刻度",
+  "gantt.criticalPath": "关键路径",
   "gantt.view": "视图",
   "gantt.fields": "字段",
   "gantt.estHours": "预估",

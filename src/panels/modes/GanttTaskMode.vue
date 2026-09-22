@@ -3,18 +3,20 @@
  * 甘特 · 任务 Mode（排程主视图）——共享状态见 `gantt-state.ts`；本组件只负责
  * 渲染（GanttChart viewMode=task）+ 交互事件转发到共享写路由。
  */
-import { ref, watch } from "vue";
+import { computed, ref, watch } from "vue";
 import { GanttChart, TaskListContextMenu, type Task as JTask } from "jordium-gantt-vue3";
 import { useGanttState } from "../gantt-state";
 import { useI18n } from "../../i18n";
 import { useTheme } from "../../theme";
 import EditorIcon from "../../components/EditorIcon.vue";
-import { computeRipple, type GanttNode } from "../gantt-model";
+import { computeCriticalPath, computeRipple, type GanttNode } from "../gantt-model";
 import { pushToast } from "../../toast";
 
 const props = defineProps<{
   /** 刻度与违规行样式等由宿主面板下传（工具条在宿主）。 */
   scale: "hour" | "day" | "week" | "month" | "quarter" | "year";
+  /** 关键路径标注开关（G4-c；行标在左列——条色承担逾期/完成状态语义，不抢） */
+  showCritical: boolean;
   openEditor: (nodeId: string) => void;
   removeItem: (nodeId: string) => void;
 }>();
@@ -37,11 +39,15 @@ function onCollapseChange(payload: { taskId?: number; collapsed?: boolean } | nu
   collapsed.value = set;
 }
 
-/** 违规行类名（G4-a：后继开始早于前驱结束）。 */
+/** 关键路径集合（开关开启时才计算；纯函数有测试）。 */
+const criticalIds = computed(() => (props.showCritical ? computeCriticalPath(g.nodes.value) : new Set<string>()));
+
+/** 行类名：违规（G4-a）优先，其次关键路径（G4-c）。 */
 function rowClassName(row: JTask): string {
   const nodeId = g.nodeIdOf.value.get(row.id);
   const node = nodeId ? g.nodeById.value.get(nodeId) : undefined;
-  return node && node.violations.length > 0 ? "gt-violation" : "";
+  if (node && node.violations.length > 0) return "gt-violation";
+  return nodeId && criticalIds.value.has(nodeId) ? "gt-critical" : "";
 }
 
 function toJordiumTasks(flat: GanttNode[]): JTask[] {

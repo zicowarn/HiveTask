@@ -412,3 +412,74 @@ export function computeRipple(
   }
   return [...moves.values()].sort((a, b) => a.start.localeCompare(b.start));
 }
+
+/**
+ * 关键路径（调度语义第三步，G4-c；CPM 正推/反推）：
+ * 有日期且有依赖关系的任务构成网络，取「总松弛为 0」的任务集合。
+ *
+ * - 正推：ES(v) = max(EF(前驱))（无前驱 = 自身计划开始）；EF = ES + 工期（天）
+ * - 反推：LF(v) = min(LS(后继))（无后继 = 项目最晚 EF）；LS = LF - 工期
+ * - 松弛 = LS - ES；= 0 即关键（工期不可延、延了必拖整体交付）
+ *
+ * 只算**有起止且参与依赖**的任务；孤立任务（无依赖边）不标——否则「全是关键」。
+ */
+export function computeCriticalPath(nodes: GanttNode[]): Set<string> {
+  const dated = nodes.filter((n) => n.start && n.end);
+  const byId = new Map(dated.map((n) => [n.id, n]));
+  const critical = new Set<string>();
+  if (!dated.length) return critical;
+
+  const dur = (n: GanttNode) => Math.max(1, diffDays(n.start!, n.end!));
+  const es = new Map<string, number>(); // 相对天数
+  const ef = new Map<string, number>();
+  const ls = new Map<string, number>();
+  const lf = new Map<string, number>();
+  const epoch = dated.reduce((min, n) => (n.start! < min ? n.start! : min), dated[0]!.start!);
+  const offset = (iso: string) => diffDays(epoch, iso);
+  const preds = (n: GanttNode) => n.dependsOn.filter((d) => byId.has(d));
+  const succs = new Map<string, string[]>();
+  for (const n of dated) {
+    for (const p of preds(n)) {
+      const list = succs.get(p) ?? [];
+      list.push(n.id);
+      succs.set(p, list);
+    }
+  }
+  // 正推（按 ES 依赖顺序：反复松弛直到稳定，与涟漪同款稳妥做法）
+  for (const n of dated) es.set(n.id, offset(n.start!));
+  for (let pass = 0; pass <= dated.length + 1; pass += 1) {
+    let changed = false;
+    for (const n of dated) {
+      let start = offset(n.start!);
+      for (const p of preds(n)) start = Math.max(start, (ef.get(p) ?? 0));
+      if (es.get(n.id) !== start) {
+        es.set(n.id, start);
+        changed = true;
+      }
+      ef.set(n.id, start + dur(n));
+    }
+    if (!changed) break;
+  }
+  const projectEnd = Math.max(...dated.map((n) => ef.get(n.id) ?? 0));
+  // 反推
+  for (const n of dated) lf.set(n.id, projectEnd);
+  for (let pass = 0; pass <= dated.length + 1; pass += 1) {
+    let changed = false;
+    for (const n of [...dated].reverse()) {
+      const kids = succs.get(n.id) ?? [];
+      let finish = projectEnd;
+      if (kids.length) finish = Math.min(...kids.map((k) => ls.get(k) ?? projectEnd));
+      if (lf.get(n.id) !== finish) {
+        lf.set(n.id, finish);
+        changed = true;
+      }
+      ls.set(n.id, finish - dur(n));
+    }
+    if (!changed) break;
+  }
+  for (const n of dated) {
+    const hasEdge = preds(n).length > 0 || (succs.get(n.id)?.length ?? 0) > 0;
+    if (hasEdge && (ls.get(n.id) ?? 0) === (es.get(n.id) ?? 0)) critical.add(n.id);
+  }
+  return critical;
+}

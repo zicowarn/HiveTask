@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   arrowPath,
   buildGanttTree,
+  computeCriticalPath,
   computeRipple,
   defaultEndField,
   foldToolbarDecision,
@@ -356,5 +357,39 @@ describe("涟漪顺延（G4-b 调度语义第二步）", () => {
              relations: rel({ blockedBy: [{ number: "1", title: "", state: "OPEN" }] }) }),
     ]);
     expect(computeRipple(nodes, { id: "a", start: "2026-05-01", end: "2026-05-20" })).toEqual([]);
+  });
+});
+
+describe("关键路径（G4-c CPM）", () => {
+  const chain = () =>
+    buildGanttTree([
+      task({ id: "a", number: "1", start: "2026-05-01", end: "2026-05-06" }),
+      task({ id: "b", number: "2", start: "2026-05-06", end: "2026-05-10",
+             relations: rel({ blockedBy: [{ number: "1", title: "", state: "OPEN" }] }) }),
+      // 旁支：更短且开工更晚（有松弛）
+      task({ id: "x", number: "3", start: "2026-05-08", end: "2026-05-09",
+             relations: rel({ blockedBy: [{ number: "1", title: "", state: "OPEN" }] }) }),
+    ]);
+
+  it("最长链为关键；有松弛的旁支不标", () => {
+    const cp = computeCriticalPath(chain());
+    expect(cp.has("a")).toBe(true);
+    expect(cp.has("b")).toBe(true); // a→b 是决定总工期的最长链
+    expect(cp.has("x")).toBe(false); // 2 天旁支有松弛
+  });
+
+  it("孤立任务（无依赖边）不标——否则「全是关键」", () => {
+    const nodes = buildGanttTree([
+      task({ id: "solo", number: "9", start: "2026-05-01", end: "2026-05-20" }),
+    ]);
+    expect(computeCriticalPath(nodes).size).toBe(0);
+  });
+
+  it("无日期任务不参与计算", () => {
+    const nodes = buildGanttTree([
+      task({ id: "a", number: "1", start: "2026-05-01", end: "2026-05-06" }),
+      task({ id: "b", number: "2", relations: rel({ blockedBy: [{ number: "1", title: "", state: "OPEN" }] }) }),
+    ]);
+    expect(computeCriticalPath(nodes).has("b")).toBe(false);
   });
 });

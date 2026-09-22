@@ -57,6 +57,11 @@ const modeKey = ref(storedMode ?? "task");
 watch(modeKey, (key) => localStorage.setItem(MODE_STORAGE_KEY, key));
 const activeMode = computed(() => modes.find((m) => m.key === modeKey.value) ?? modes[0]);
 
+// ---- 关键路径开关（G4-c；localStorage 持久化，与 mode 同款）----
+const CRITICAL_STORAGE_KEY = "hivetask.gantt-critical";
+const showCritical = ref(localStorage.getItem(CRITICAL_STORAGE_KEY) === "1");
+watch(showCritical, (on) => localStorage.setItem(CRITICAL_STORAGE_KEY, on ? "1" : "0"));
+
 // ---- 刻度 ----
 type GanttScale = "hour" | "day" | "week" | "month" | "quarter" | "year";
 const scale = ref<GanttScale>("week");
@@ -135,9 +140,14 @@ const collapsedMenuItems = computed<ActionItem[]>(() => {
     { value: "m:actHours", label: `${t("gantt.hoursField")}·${t("gantt.actHours")}`, submenu: numOpts(actHoursField.value?.id ?? "") },
     { value: "m:progress", label: t("gantt.progressField"), submenu: numOpts(progressField.value?.id ?? "") },
     {
+      value: "m:critical",
+      label: t("gantt.criticalPath"),
+      dividerBefore: true,
+      badge: showCritical.value ? "✓" : undefined,
+    },
+    {
       value: "m:scale",
       label: t("gantt.scale"),
-      dividerBefore: true,
       submenu: scaleOptions.value.map((o) => ({ ...o, checked: o.value === scale.value })),
     },
   ];
@@ -167,6 +177,9 @@ function onCollapsedMenuPick(value: string) {
       return;
     case "m:progress":
       g.progressFieldId.value = landed;
+      return;
+    case "m:critical":
+      showCritical.value = !showCritical.value;
       return;
     case "m:scale":
       return void (scale.value = id as GanttScale);
@@ -396,6 +409,9 @@ async function onTaskRemove(nodeId: string) {
             :model-value="progressField?.id ?? ''"
             @update:model-value="g.progressFieldId.value = $event as string"
           />
+          <button class="gt-toggle" :class="{ on: showCritical }" @click="showCritical = !showCritical">
+            {{ t("gantt.criticalPath") }}
+          </button>
           <span class="gt-label">{{ t("gantt.scale") }}</span>
           <DropdownMenu
             class="gt-dd gt-dd-scale"
@@ -416,6 +432,7 @@ async function onTaskRemove(nodeId: string) {
         v-else
         :key="activeMode!.key"
         :scale="scale"
+        :show-critical="showCritical"
         :open-editor="openTaskEditor"
         :remove-item="onTaskRemove"
       />
@@ -484,6 +501,21 @@ async function onTaskRemove(nodeId: string) {
 .gt-add:hover {
   border-color: var(--accent);
   color: var(--accent);
+}
+/* 关键路径开关（开关态高亮，与工具条其余控件 22px 归一） */
+.gt-toggle {
+  height: 22px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  background: var(--bg-panel);
+  color: var(--text);
+  font-size: var(--font-md);
+  border-radius: 5px;
+  cursor: pointer;
+}
+.gt-toggle.on {
+  border-color: var(--warning);
+  color: var(--warning);
 }
 .gt-note {
   font-size: var(--font-sm);
@@ -664,6 +696,14 @@ async function onTaskRemove(nodeId: string) {
 /* 依赖违规行（G4-a）：行名染警示色（barColor 已让条带警示边） */
 .gt-jordium .gt-violation .task-name {
   color: var(--danger);
+}
+/* 关键路径行（G4-c）：行首警示色竖条 + 行名加重——**条色不动**（条色承担
+   逾期/完成状态语义，不抢用） */
+.gt-jordium .gt-critical {
+  box-shadow: inset 2px 0 0 var(--warning);
+}
+.gt-jordium .gt-critical .task-name {
+  color: var(--warning);
 }
 /* 深色模式：库的条色是「状态色混白」内联计算（95%/70% 白），深色画布上呈粉白块——
    只能 !important 覆盖（本仓库对内嵌组件的既有手法）。 */

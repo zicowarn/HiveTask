@@ -408,6 +408,7 @@ export const enUS: Record<MessageKey, string> = {
   "gantt.refreshDeps": "Refresh dependencies",
   "gantt.noItems": "No items in this project yet.",
   "gantt.scale": "Scale",
+  "gantt.criticalPath": "Critical path",
   "gantt.view": "View",
   "gantt.fields": "Fields",
   "gantt.estHours": "Estimated",
