@@ -28,7 +28,7 @@ export function kindLabel(item: ProjectItem): string {
 
 /** 来源标签（引用卡 = 仓库名；悬挂 / 草稿各有标记）。 */
 export function sourceLabel(item: ProjectItem): string {
-  if (item.ghost) return t("project.ghost");
+  if (item.ghost) return t("project.unlinked");
   if (item.kind === "draft") return t("project.draftTag");
   return item.repoLabel ?? "";
 }

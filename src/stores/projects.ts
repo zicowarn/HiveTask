@@ -1044,6 +1044,15 @@ export const useProjectsStore = defineStore("projects", () => {
     await loadDeps();
   }
 
+  /** 回填「未关联」条目（按 origin 快照挂回本机登记表）；返回挂接条数。
+   *  设备包导入未命中时留下的坑：登记/打开来源仓库后调它即可挂回（幂等）。 */
+  async function relinkOrigin(): Promise<number> {
+    if (!selectedId.value) return 0;
+    const n = await api.projectRelinkOrigin(selectedId.value);
+    if (n > 0) await loadSelected();
+    return n;
+  }
+
   /** 从项目移除条目（引用行删除；平台 Issue 本体不受影响——语义 =
    *  「从甘特/看板移除」，非关闭平台 Issue）。 */
   async function removeItemAndDeps(itemId: string) {
@@ -1289,6 +1298,7 @@ export const useProjectsStore = defineStore("projects", () => {
     removeItemDep,
     syncPlatformDeps,
     removeItemAndDeps,
+    relinkOrigin,
     setFieldSort,
     addFieldFilter,
     toggleField,

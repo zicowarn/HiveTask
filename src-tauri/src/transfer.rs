@@ -262,7 +262,7 @@ pub fn export_pack_in(conn: &Connection, project_ids: Option<&[String]>) -> Resu
         // 条目 + 字段值
         let mut istmt = conn
             .prepare(
-                "SELECT id, kind, repo_id, number, draft_title, draft_body, rank, added_at
+                "SELECT id, kind, repo_id, number, draft_title, draft_body, rank, added_at, origin_url, origin_type
                  FROM project_items WHERE project_id = ?1 ORDER BY CAST(rank AS INTEGER)",
             )
             .map_err(|e| e.to_string())?;
@@ -277,12 +277,19 @@ pub fn export_pack_in(conn: &Connection, project_ids: Option<&[String]>) -> Resu
                     r.get::<_, Option<String>>(5)?,
                     r.get::<_, String>(6)?,
                     r.get::<_, String>(7)?,
+                    r.get::<_, Option<String>>(8)?,
+                    r.get::<_, Option<String>>(9)?,
                 ))
             })
             .map_err(|e| e.to_string())?
             .filter_map(|x| x.ok())
-            .map(|(iid, kind, repo_id, number, dt, db, rank, added_at)| PackItem {
-                repo: pack_refs(conn, repo_id.as_deref()),
+            .map(|(iid, kind, repo_id, number, dt, db, rank, added_at, origin_url, origin_type)| PackItem {
+                // 条目自带的引用快照优先（未关联条目也能带着 origin 走完一个来回），
+                // 老数据没有快照时退回登记的 remote_url。
+                repo: match origin_url {
+                    Some(url) => Some(PackRefs { origin_url: Some(url), source_type: origin_type }),
+                    None => pack_refs(conn, repo_id.as_deref()),
+                },
                 id: iid,
                 kind,
                 number,
@@ -400,9 +407,20 @@ pub fn import_preview_in(conn: &Connection, pack: &Pack) -> Vec<ImportPreview> {
         .collect()
 }
 
+/// 包内 origin_url → 本机仓库 id：**归一后匹配**（https/scp、大小写、.git 后缀、
+/// 尾斜杠都能认），命中不了返回 None（条目留 origin 快照，等 relink）。
 fn repo_id_by_origin(conn: &Connection, refs: &Option<PackRefs>) -> Option<String> {
-    let url = refs.as_ref()?.origin_url.as_ref()?;
-    conn.query_row("SELECT id FROM repos WHERE remote_url = ?1 LIMIT 1", (url,), |r| r.get(0)).ok()
+    let want = crate::projects::origin_key(refs.as_ref()?.origin_url.as_deref()?)?;
+    let rows: Vec<(String, Option<String>)> = conn
+        .prepare("SELECT id, remote_url FROM repos")
+        .ok()?
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+        .ok()?
+        .filter_map(|x| x.ok())
+        .collect();
+    rows.into_iter()
+        .find(|(_, url)| url.as_deref().and_then(crate::projects::origin_key).as_deref() == Some(want.as_str()))
+        .map(|(id, _)| id)
 }
 
 /// 应用导入（单事务；覆盖前由调用方先打快照）。
@@ -470,11 +488,15 @@ pub fn import_apply_in(
             // 条目 + 字段值（仓库按 origin_url 重解析；未命中 → NULL = ghost）
             for it in &p.items {
                 let repo_id = repo_id_by_origin(conn, &it.repo);
+                // origin 快照照抄（命中与否都写）：未命中时它是之后 relink 的唯一线索
+                let origin_url = it.repo.as_ref().and_then(|r| r.origin_url.clone());
+                let origin_type = it.repo.as_ref().and_then(|r| r.source_type.clone());
                 conn.execute(
-                    "INSERT INTO project_items (id, project_id, kind, repo_id, number, draft_title, draft_body, rank, added_at)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                    "INSERT INTO project_items (id, project_id, kind, repo_id, number, draft_title, draft_body, rank, added_at, origin_url, origin_type)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
                     rusqlite::params![
-                        it.id, p.id, it.kind, repo_id, it.number, it.draft_title, it.draft_body, it.rank, it.added_at
+                        it.id, p.id, it.kind, repo_id, it.number, it.draft_title, it.draft_body, it.rank, it.added_at,
+                        origin_url, origin_type
                     ],
                 )
                 .map_err(|e| e.to_string())?;
@@ -686,6 +708,56 @@ mod tests {
         conn.execute("UPDATE projects SET updated_at = ?2 WHERE id = ?1", (&pid, stale)).unwrap();
         crate::projects::deps_sync_platform_in(&conn, &pid, "gh", &[(aid.clone(), aid.clone())]).unwrap();
         assert_eq!(watermark(&conn), stale, "镜像行同步不该抬水位");
+    }
+
+    /// 设备迁移的真实路径：新设备没有该仓库 → 导入的引用条目「未关联但留档」，
+    /// 之后再导出也带着 origin 走完来回，登记同一来源（写法不同）即回填。
+    #[test]
+    fn import_keeps_origin_when_repo_missing_then_relinks() {
+        let src = mem_db();
+        let p = crate::projects::project_create_in(&src, "看板", None, None).unwrap();
+        src.execute(
+            "INSERT INTO repos (id, path, display_name, remote_url, created_at, last_opened_at)
+             VALUES ('r1', '/tmp/r1', 'demo', 'https://github.com/o/r', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+            [],
+        )
+        .unwrap();
+        crate::projects::item_add_in(&src, &p.id, "issue", Some("r1"), Some("42"), None, None).unwrap();
+        let pack = export_pack_in(&src, None).unwrap();
+        assert_eq!(
+            pack.projects[0].items[0].repo.as_ref().unwrap().origin_url.as_deref(),
+            Some("https://github.com/o/r"),
+            "导出带 origin 快照"
+        );
+
+        // 目标端：一个仓库登记都没有
+        let dst = mem_db();
+        let mut decisions = std::collections::HashMap::new();
+        decisions.insert(p.id.clone(), ImportAction::Add);
+        import_apply_in(&dst, &pack, &decisions).unwrap();
+        let items = crate::projects::item_list_in(&dst, &p.id).unwrap();
+        assert!(items[0].ghost, "没落到仓库 = 未关联");
+        assert!(items[0].repo_id.is_none());
+        assert_eq!(items[0].origin_url.as_deref(), Some("https://github.com/o/r"), "快照留档");
+
+        // 再导出：未关联条目也能带着 origin 走完来回（不再依赖登记行）
+        let pack2 = export_pack_in(&dst, None).unwrap();
+        assert_eq!(
+            pack2.projects[0].items[0].repo.as_ref().unwrap().origin_url.as_deref(),
+            Some("https://github.com/o/r")
+        );
+
+        // 目标端登记同一来源（大小写 / .git 写法不同）→ 回填
+        dst.execute(
+            "INSERT INTO repos (id, path, display_name, remote_url, created_at, last_opened_at)
+             VALUES ('r9', '/tmp/r9', 'demo', 'https://GitHub.com/O/R.git', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+            [],
+        )
+        .unwrap();
+        assert_eq!(crate::projects::relink_origin_in(&dst, &p.id).unwrap(), 1);
+        let after = crate::projects::item_list_in(&dst, &p.id).unwrap();
+        assert_eq!(after[0].repo_id.as_deref(), Some("r9"));
+        assert!(!after[0].ghost);
     }
 
     #[test]

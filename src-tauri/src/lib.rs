@@ -1444,6 +1444,7 @@ pub fn run() {
             projects::project_item_remove,
             projects::project_item_update_draft,
             projects::project_field_value_set,
+            projects::project_relink_origin,
             projects::project_repo_bind,
             projects::project_repo_unbind,
             projects::project_repo_list,

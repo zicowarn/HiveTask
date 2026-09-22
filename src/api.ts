@@ -151,6 +151,9 @@ export interface ProjectItem {
   projectId: string;
   kind: "issue" | "pull" | "draft";
   repoId: string | null;
+  /** 平台引用快照（origin_url + 来源类型）：导入未命中时留档，登记后据此回填。 */
+  originUrl: string | null;
+  originType: string | null;
   number: string | null;
   draftTitle: string | null;
   draftBody: string | null;
@@ -159,7 +162,7 @@ export interface ProjectItem {
   repoLabel: string | null;
   ghost: boolean;
   fieldValues: Record<string, string>;
-  /** 引用实体的镜像元数据（仓库缓存里的 Issue/PR 行）；草稿/悬挂/未同步为 null。 */
+  /** 引用实体的镜像元数据（仓库缓存里的 Issue/PR 行）；草稿/未关联/未同步为 null。 */
   entity?: ProjectEntityMeta | null;
 }
 
@@ -744,6 +747,8 @@ export const api = {
       nextId: nextId ?? null,
     }),
   projectItemRemove: (itemId: string) => invoke<void>("project_item_remove", { itemId }),
+  /** 回填未关联条目（按 origin 快照挂回登记表）；返回挂接条数。 */
+  projectRelinkOrigin: (projectId: string) => invoke<number>("project_relink_origin", { projectId }),
   projectItemUpdateDraft: (itemId: string, title: string, body?: string) =>
     invoke<ProjectItem>("project_item_update_draft", { itemId, title, body: body ?? null }),
   projectFieldValueSet: (itemId: string, fieldId: string, value?: string) =>

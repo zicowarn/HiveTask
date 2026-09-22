@@ -344,11 +344,17 @@ function stateColorOf(item: ProjectItem): string {
 }
 /** 元信息行第二段：`仓库 #编号`。 */
 function refOf(item: ProjectItem): string {
-  if (item.ghost) return t("project.ghost");
+  if (item.ghost) return t("project.unlinked");
   if (item.kind === "draft") return t("project.draftTag");
   const label = item.repoLabel ?? "";
   return item.number ? `${label} #${item.number}` : label;
 }
+/** 未关联卡的 meta 提示：说清该登记哪个来源（鼠标一问即知，不用点开抽屉）。 */
+function refTitleOf(item: ProjectItem): string {
+  if (!item.ghost) return "";
+  return t("project.unlinkedNote", { origin: item.originUrl ?? t("project.unlinkedUnknown") });
+}
+
 /** 负责人头像（平台：卡片右上 20px 圆；取首个负责人）。 */
 function avatarOf(item: ProjectItem): string | null {
   const login = item.entity?.assignees?.[0];
@@ -739,7 +745,7 @@ async function submitConvert(item: ProjectItem, path: string) {
             :name="stateIconOf(card)!"
             :style="{ color: stateColorOf(card) }"
           />
-          <span class="card-ref">{{ refOf(card) }}</span>
+          <span class="card-ref" :title="refTitleOf(card)">{{ refOf(card) }}</span>
           <!-- 平台：⋯ 常显、紧跟 #编号 右侧；行最右端是负责人头像 -->
           <ActionMenu
             class="card-menu"

@@ -241,7 +241,7 @@ const identity = computed(() => {
   const item = props.item;
   if (!item) return t("project.taskPanelTitle");
   const kind = kindLabel(item);
-  if (item.ghost) return kind + " · " + t("project.ghost");
+  if (item.ghost) return kind + " · " + t("project.unlinked");
   return item.number ? `${kind} #${item.number}` : kind;
 });
 
@@ -821,7 +821,9 @@ onBeforeUnmount(() => ro?.disconnect());
             @blur="saveText"
           ></textarea>
         </div>
-        <p v-else-if="item.ghost" class="pd-note">{{ t("project.ghost") }}</p>
+        <p v-else-if="item.ghost" class="pd-note">
+          {{ t("project.unlinkedNote", { origin: item.originUrl ?? t("project.unlinkedUnknown") }) }}
+        </p>
       </div>
 
       <!-- ================= 右栏：Metadata 分区（平台同构；齿轮 = 后续 gh 操作入口） ================= -->

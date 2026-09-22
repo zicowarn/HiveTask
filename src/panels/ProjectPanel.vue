@@ -13,6 +13,7 @@ import ActionMenu, { type ActionItem } from "../components/ActionMenu.vue";
 import ProjectViewSettings from "./ProjectViewSettings.vue";
 import TeamSlicePanel from "./TeamSlicePanel.vue";
 import ProjectItemDrawer from "./ProjectItemDrawer.vue";
+import ProjectUnlinkedHint from "./ProjectUnlinkedHint.vue";
 import type { ProjectItem } from "../api";
 import { resolvePanel } from "../workbench/registry";
 import { useProjectsStore } from "../stores/projects";
@@ -33,7 +34,6 @@ const { projects, loading, error, publishError } = storeToRefs(store);
 
 // 视图页签（对齐平台）：页签 = 视图，布局是视图属性（View 弹层的 Layout 分段切换）。
 const activeMode = computed(() => modes.find((m) => m.key === store.layout) ?? modes[0]);
-
 
 /** 新建视图：平台该按钮是 ActionMenu（已取证 haspopup=true）——先选布局再建。 */
 const newViewItems = computed(() => [
@@ -302,6 +302,9 @@ function openItemInWorkspace(item: ProjectItem) {
           <ProjectViewSettings v-if="viewOpen" :layout="store.layout" />
         </div>
       </div>
+
+      <!-- 未关联提示条（自持 store 的小组件；三个视图共用——未关联与视图无关） -->
+      <ProjectUnlinkedHint />
 
       <div class="pj-view">
         <component :is="activeMode.component" />

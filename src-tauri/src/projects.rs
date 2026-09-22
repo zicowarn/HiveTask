@@ -57,20 +57,23 @@ pub struct ProjectItem {
     pub id: String,
     pub project_id: String,
     pub kind: String,
-    /// kind=issue|pull 时非空；悬挂（仓库已删）= ghost。
+    /// kind=issue|pull 时非空；未关联（未登记 / 登记行已删）= ghost。
     pub repo_id: Option<String>,
+    /// 平台引用快照（设备包携带的同一对字段）：导入未命中时留档，登记后据此回填。
+    pub origin_url: Option<String>,
+    pub origin_type: Option<String>,
     pub number: Option<String>,
     pub draft_title: Option<String>,
     pub draft_body: Option<String>,
     pub rank: String,
     pub added_at: String,
-    /// JOIN 派生：仓库显示名（ghost 时 None）。
+    /// JOIN 派生：仓库显示名（未关联时 None）。
     pub repo_label: Option<String>,
-    /// JOIN 派生：仓库登记的 remote_url（meta 行显示用）。
+    /// JOIN 派生：是否「没落到仓库」——非草稿且 repo_id 缺失或指向已删登记行。
     pub ghost: bool,
     /// 字段值 map（field_id → value）。
     pub field_values: std::collections::BTreeMap<String, String>,
-    /// 引用实体的只读元数据（跨库读仓库缓存，草稿/悬挂/未同步为 None）。
+    /// 引用实体的只读元数据（跨库读仓库缓存，草稿/未关联/未同步为 None）。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub entity: Option<EntityMeta>,
 }
@@ -449,14 +452,18 @@ pub fn field_set_options_in(conn: &Connection, field_id: &str, options: &[FieldO
 
 fn item_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ProjectItem> {
     let repo_id: Option<String> = row.get("repo_id")?;
-    // 悬挂 = 条目引用了某个仓库、但登记行已被删（JOIN 落空）。
-    // 草稿的 repo_id 本来就为空，不属于悬挂——早先只看 JOIN 会把所有草稿误标 ghost。
-    let ghost = repo_id.is_some() && row.get::<_, Option<String>>("joined_repo_id")?.is_none();
+    let kind: String = row.get("kind")?;
+    // 「没落到仓库」= 非草稿 且 JOIN 落空。两种来路都算：条目引用的登记行被删
+    // （悬挂），或设备包导入时未命中本机登记表（repo_id 为 NULL，origin 留档待回填）。
+    // 草稿天然没有仓库，不属此列——早先只看 JOIN 会把所有草稿误标。
+    let ghost = kind != "draft" && row.get::<_, Option<String>>("joined_repo_id")?.is_none();
     Ok(ProjectItem {
         id: row.get("id")?,
         project_id: row.get("project_id")?,
-        kind: row.get("kind")?,
+        kind,
         repo_id,
+        origin_url: row.get("origin_url")?,
+        origin_type: row.get("origin_type")?,
         number: row.get("number")?,
         draft_title: row.get("draft_title")?,
         draft_body: row.get("draft_body")?,
@@ -623,6 +630,8 @@ pub fn item_get_in(conn: &Connection, item_id: &str) -> Result<ProjectItem, Stri
 
 /// 添加条目：draft 直接建；issue/pull 引用必须带 repo_id + number。
 /// 初始状态落第一列（builtin_status 首个 option）。
+/// 引用条目顺带记**平台引用快照**（origin_url / origin_type）——设备包导出、
+/// 登记行删除后的回填都靠它（见 relink_origin_in）。
 pub fn item_add_in(
     conn: &Connection,
     project_id: &str,
@@ -639,10 +648,11 @@ pub fn item_add_in(
     }
     let id = uuid();
     let rank = next_rank_in(conn, project_id)?;
+    let (origin_url, origin_type) = repo_id.map(|rid| repo_origin_of(conn, rid)).unwrap_or((None, None));
     conn.execute(
-        "INSERT INTO project_items (id, project_id, kind, repo_id, number, draft_title, draft_body, rank, added_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
-        rusqlite::params![id, project_id, kind, repo_id, number, draft_title, draft_body, rank, now()],
+        "INSERT INTO project_items (id, project_id, kind, repo_id, number, draft_title, draft_body, rank, added_at, origin_url, origin_type)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+        rusqlite::params![id, project_id, kind, repo_id, number, draft_title, draft_body, rank, now(), origin_url, origin_type],
     )
     .map_err(|e| e.to_string())?;
     if let Some(field) = status_field_in(conn, project_id)? {
@@ -664,6 +674,83 @@ fn next_rank_in(conn: &Connection, project_id: &str) -> Result<String, String> {
         )
         .map_err(|e| e.to_string())?;
     Ok((max.unwrap_or(0) + RANK_GAP).to_string())
+}
+
+/// 登记的 remote_url / platform（条目记引用快照用）。仓库可仅有本地路径 →
+/// remote_url 为空（本地库条目没有平台引用，"origin 快照"就是空）。
+fn repo_origin_of(conn: &Connection, repo_id: &str) -> (Option<String>, Option<String>) {
+    conn.query_row(
+        "SELECT r.remote_url, c.platform FROM repos r LEFT JOIN connections c ON c.id = r.connection_id WHERE r.id = ?1",
+        (repo_id,),
+        |row| Ok((row.get::<_, Option<String>>(0)?, row.get::<_, Option<String>>(1)?)),
+    )
+    .unwrap_or((None, None))
+}
+
+/// URL 归一（只用于**匹配**，不落库）：host 小写 + owner/repo 小写、去 .git。
+/// 两侧都过这一道，才能让 `https://GitHub.com/O/R.git` 与 `https://github.com/o/r` 相等。
+/// 导入时的 origin→repo 解析与 `relink_origin_in` 共用它，避免两把尺子量出两种结果。
+pub fn origin_key(url: &str) -> Option<String> {
+    crate::source::split_host_slug(url).map(|(host, slug)| format!("{host}/{}", slug.to_lowercase()))
+}
+
+/// 回填「未关联」条目：按 origin_url 把它们挂回本机登记表，返回成功挂接的条数。
+///
+/// 使用时机 = 用户把设备包引用的仓库登记/打开之后（导入当时未命中才留的坑）。
+/// 幂等：已落到仓库的条目不参与；找不到匹配仓库的条目原样留着（origin 还在，
+/// 下次登记后再回填即可）。写入安全（不删任何行），故无快照、无事务要求，
+/// 但按项目一次性更新仍走单事务，避免半途状态。
+pub fn relink_origin_in(conn: &Connection, project_id: &str) -> Result<usize, String> {
+    let dangling: Vec<(String, String)> = conn
+        .prepare(
+            "SELECT i.id, i.origin_url FROM project_items i
+             WHERE i.project_id = ?1 AND i.kind != 'draft' AND i.origin_url IS NOT NULL
+               AND (i.repo_id IS NULL OR i.repo_id NOT IN (SELECT id FROM repos))",
+        )
+        .map_err(|e| e.to_string())?
+        .query_map((project_id,), |r| Ok((r.get(0)?, r.get(1)?)))
+        .map_err(|e| e.to_string())?
+        .filter_map(|x| x.ok())
+        .collect();
+    if dangling.is_empty() {
+        return Ok(0);
+    }
+    let repos: Vec<(String, Option<String>)> = conn
+        .prepare("SELECT id, remote_url FROM repos")
+        .map_err(|e| e.to_string())?
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+        .map_err(|e| e.to_string())?
+        .filter_map(|x| x.ok())
+        .collect();
+    let mut n = 0usize;
+    conn.execute("BEGIN", ()).map_err(|e| e.to_string())?;
+    let result = (|| -> Result<(), String> {
+        for (item_id, origin) in &dangling {
+            let Some(want) = origin_key(origin) else { continue };
+            let hit = repos
+                .iter()
+                .find(|(_, url)| url.as_deref().and_then(origin_key).as_deref() == Some(want.as_str()));
+            if let Some((repo_id, _)) = hit {
+                conn.execute("UPDATE project_items SET repo_id = ?2 WHERE id = ?1", (item_id, repo_id))
+                    .map_err(|e| e.to_string())?;
+                n += 1;
+            }
+        }
+        Ok(())
+    })();
+    match result {
+        Ok(()) => {
+            conn.execute("COMMIT", ()).map(|_| ()).map_err(|e| e.to_string())?;
+            if n > 0 {
+                project_mark_changed_in(conn, project_id);
+            }
+            Ok(n)
+        }
+        Err(e) => {
+            let _ = conn.execute("ROLLBACK", ());
+            Err(e)
+        }
+    }
 }
 
 pub fn item_remove_in(conn: &Connection, item_id: &str) -> Result<(), String> {
@@ -1182,6 +1269,14 @@ pub fn project_field_value_set(item_id: String, field_id: String, value: Option<
     set_field_value_in(&conn, &item_id, &field_id, value.as_deref())
 }
 
+/// 回填「未关联」条目（按 origin_url 挂回登记表）；返回挂接条数。
+/// 用户把设备包引用的仓库登记/打开之后调用（幂等，找不到匹配就原样留着）。
+#[tauri::command]
+pub fn project_relink_origin(project_id: String) -> Result<usize, String> {
+    let conn = crate::appdb::open().map_err(|e| e.to_string())?;
+    relink_origin_in(&conn, &project_id)
+}
+
 #[tauri::command]
 pub fn project_repo_bind(project_id: String, repo_id: String) -> Result<(), String> {
     let conn = crate::appdb::open().map_err(|e| e.to_string())?;
@@ -1436,6 +1531,65 @@ mod tests {
             rusqlite::params![id, format!("/tmp/{id}")],
         )
         .unwrap();
+    }
+
+    /// 回填链路：导入未命中的条目（repo_id NULL + origin 快照）→ 登记仓库后挂回。
+    /// 也守 ghost 判定：非草稿且没落到仓库才算未关联；草稿永远不是。
+    #[test]
+    fn relink_origin_reattaches_unlinked_items() {
+        let conn = mem_db();
+        let p = project_create_in(&conn, "看板", None, None).unwrap();
+        // 导入留下的形态：引用条目没有 repo_id，但有 origin 快照
+        conn.execute(
+            "INSERT INTO project_items (id, project_id, kind, repo_id, number, rank, added_at, origin_url, origin_type)
+             VALUES ('it1', ?1, 'issue', NULL, '42', '1024', '2026-01-01T00:00:00Z', 'https://GitHub.com/O/R.git', 'github')",
+            (&p.id,),
+        )
+        .unwrap();
+        let draft = item_add_in(&conn, &p.id, "draft", None, None, Some("草稿"), None).unwrap();
+        let items = item_list_in(&conn, &p.id).unwrap();
+        let unlinked = items.iter().find(|i| i.id == "it1").unwrap();
+        assert!(unlinked.ghost, "没落到仓库的引用条目 = 未关联");
+        assert!(!items.iter().find(|i| i.id == draft.id).unwrap().ghost, "草稿不算未关联");
+        assert_eq!(unlinked.origin_url.as_deref(), Some("https://GitHub.com/O/R.git"));
+
+        // 还没登记 → 回填 0 条，origin 不动
+        assert_eq!(relink_origin_in(&conn, &p.id).unwrap(), 0);
+
+        // 登记同一个仓库（写法不同：小写、无 .git、尾斜杠）→ 归一后挂上
+        seed_repo(&conn, "r1");
+        conn.execute("UPDATE repos SET remote_url = 'https://github.com/o/r/' WHERE id = 'r1'", []).unwrap();
+        assert_eq!(relink_origin_in(&conn, &p.id).unwrap(), 1);
+        let after = item_list_in(&conn, &p.id).unwrap();
+        let linked = after.iter().find(|i| i.id == "it1").unwrap();
+        assert_eq!(linked.repo_id.as_deref(), Some("r1"));
+        assert!(!linked.ghost, "挂上后不再是未关联");
+        assert_eq!(linked.repo_label.as_deref(), Some("demo"));
+        // 幂等：再跑一次没有可回填的
+        assert_eq!(relink_origin_in(&conn, &p.id).unwrap(), 0);
+    }
+
+    /// 登记行被删（悬挂）的条目也能按 origin 回填——同一把尺子量两种情况。
+    #[test]
+    fn relink_origin_heals_dangling_repo_links() {
+        let conn = mem_db();
+        let p = project_create_in(&conn, "看板", None, None).unwrap();
+        seed_repo(&conn, "r1");
+        conn.execute("UPDATE repos SET remote_url = 'https://github.com/o/r' WHERE id = 'r1'", []).unwrap();
+        let it = item_add_in(&conn, &p.id, "issue", Some("r1"), Some("7"), None, None).unwrap();
+        // 引用时自动记了快照
+        assert_eq!(
+            item_get_in(&conn, &it.id).unwrap().origin_url.as_deref(),
+            Some("https://github.com/o/r")
+        );
+        // 登记行被删 → 悬挂
+        conn.execute("DELETE FROM repos WHERE id = 'r1'", []).unwrap();
+        assert!(item_get_in(&conn, &it.id).unwrap().ghost);
+        // 重新登记同一来源（新 id）→ 回填
+        seed_repo(&conn, "r2");
+        conn.execute("UPDATE repos SET remote_url = 'https://github.com/o/r.git' WHERE id = 'r2'", []).unwrap();
+        assert_eq!(relink_origin_in(&conn, &p.id).unwrap(), 1);
+        assert_eq!(item_get_in(&conn, &it.id).unwrap().repo_id.as_deref(), Some("r2"));
     }
 
     #[test]
