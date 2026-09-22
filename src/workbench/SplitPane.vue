@@ -5,7 +5,7 @@
  *
  * `direction="horizontal"` = side by side (vertical divider bar).
  */
-import { computed, ref } from "vue";
+import { computed, onBeforeUnmount, ref } from "vue";
 
 const props = withDefaults(
   defineProps<{
@@ -32,9 +32,24 @@ const ratio = computed({
 const containerEl = ref<HTMLElement | null>(null);
 const dragging = ref(false);
 
+/** 拖拽期的全局锁类名（styles.css）：拖过面板时光标随方向，不是文本光标。 */
+const resizeAxisClass = computed(() =>
+  props.direction === "horizontal" ? "pane-resizing-x" : "pane-resizing-y",
+);
+
+/** 拖拽期间挂 body 上的全局锁（禁选 + 光标）。解锁只有这一个出口——漏了全应用选不中文字。 */
+function setResizeLock(on: boolean): void {
+  document.body.classList.toggle("pane-resizing", on);
+  document.body.classList.toggle(resizeAxisClass.value, on);
+}
+
 function onPointerDown(event: PointerEvent) {
+  // 必须掐掉默认行为：原生"文字选择"从按下这一刻就开始，拖过分隔条扫到的面板文本
+  // （含面板里的控件）会连成蓝底——事后再补 user-select: none 收不回来（KnowledgeTree 同款教训）。
+  event.preventDefault();
   dragging.value = true;
-  (event.target as HTMLElement).setPointerCapture(event.pointerId);
+  setResizeLock(true);
+  (event.currentTarget as HTMLElement).setPointerCapture?.(event.pointerId);
 }
 
 function onPointerMove(event: PointerEvent) {
@@ -48,8 +63,12 @@ function onPointerMove(event: PointerEvent) {
 }
 
 function onPointerUp() {
+  if (!dragging.value) return;
   dragging.value = false;
+  setResizeLock(false);
 }
+
+onBeforeUnmount(() => setResizeLock(false));
 </script>
 
 <template>
@@ -59,6 +78,7 @@ function onPointerUp() {
     :class="direction"
     @pointermove="onPointerMove"
     @pointerup="onPointerUp"
+    @pointercancel="onPointerUp"
   >
     <div class="pane" :style="direction === 'horizontal' ? { width: ratio * 100 + '%' } : { height: ratio * 100 + '%' }">
       <slot name="first" />
@@ -67,6 +87,7 @@ function onPointerUp() {
       class="divider"
       :class="{ active: dragging }"
       @pointerdown="onPointerDown"
+      @lostpointercapture="onPointerUp"
     >
       <span class="divider-handle" />
     </div>

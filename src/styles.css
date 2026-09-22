@@ -187,6 +187,19 @@ body.tree-dragging {
   cursor: grabbing;
 }
 
+/* 拖分隔条期间（SplitPane）：禁文本选择 + 拖拽光标 —— 拖动扫过的面板文本会被
+   原生"文字选择"连成蓝底（控件上同样落选）。`*` 是必需的：面板里自制控件有自己的
+   user-select/cursor，光锁 body 管不到它们（同 .tree-dragging 的来意）。 */
+body.pane-resizing,
+body.pane-resizing * {
+  user-select: none;
+  cursor: col-resize;
+}
+body.pane-resizing.pane-resizing-y,
+body.pane-resizing.pane-resizing-y * {
+  cursor: row-resize;
+}
+
 /* ---- 加载等待原语（统一骨架脉冲；token 驱动，明暗自动）----
    原则：等待态只服务远端/重计算场景；本地缓存数据不配拥有 loading。
    形态阶梯：<150ms 不显示；150ms–1s 骨架；>1s 骨架 + 文案。 */
