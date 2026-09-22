@@ -590,6 +590,8 @@ export const zhCN = {
   "common.refresh": "刷新",
   "common.syncing": "同步中…",
   "common.empty": "暂无数据，点击「刷新」从远端拉取",
+  "common.loadFailed": "加载失败",
+  "common.retry": "重试",
   "common.noBody": "（无描述内容）",
   "common.openInGithub": "在 GitHub 打开",
   "common.openOnPlatform": "在 {name} 打开",

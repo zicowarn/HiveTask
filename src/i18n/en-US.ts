@@ -589,6 +589,8 @@ export const enUS: Record<MessageKey, string> = {
   "common.refresh": "Refresh",
   "common.syncing": "Syncing…",
   "common.empty": "No data yet — hit Refresh to fetch from the remote",
+  "common.loadFailed": "Failed to load",
+  "common.retry": "Retry",
   "common.noBody": "(No description)",
   "common.openInGithub": "Open on GitHub",
   "common.openOnPlatform": "Open on {name}",
