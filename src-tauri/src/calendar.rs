@@ -955,6 +955,196 @@ pub fn feed_events_on(conn: &Connection) -> Result<Vec<FeedEvent>> {
     Ok(out)
 }
 
+// ---- ICS 导出（系统日历同步「导出出」半边；双向不做，写回列 EventKit spike） ----
+
+/// RFC 5545 TEXT 转义（反斜杠/分号/逗号/换行）。
+fn ics_escape(s: &str) -> String {
+    s.replace('\\', "\\\\")
+        .replace(';', "\\;")
+        .replace(',', "\\,")
+        .replace('\n', "\\n")
+}
+
+/// YYYY-MM-DD → YYYYMMDD；格式坏则 None。
+fn compact_date(s: &str) -> Option<String> {
+    let b = s.as_bytes();
+    if b.len() != 10 || b[4] != b'-' || b[7] != b'-' {
+        return None;
+    }
+    if !s.chars().enumerate().all(|(i, c)| [4, 7].contains(&i) || c.is_ascii_digit()) {
+        return None;
+    }
+    Some(s.replace('-', ""))
+}
+
+/// datetime-local（YYYY-MM-DDTHH:MM[:SS]）→ ICS 浮墙时刻 YYYYMMDDTHHMMSS。
+/// 浮墙（无时区后缀）= 导入端按设备本地时区解释，与「设备间传递」定位一致。
+fn compact_local_datetime(dt: &str) -> Option<String> {
+    let (d, hm) = dt.split_once('T')?;
+    let date = compact_date(d)?;
+    let hm = hm.replace(':', "");
+    if hm.len() < 4 || !hm.chars().all(|c| c.is_ascii_digit()) {
+        return None;
+    }
+    let (hhmm, rest) = hm.split_at(4);
+    Some(format!("{date}T{hhmm}{}", if rest.is_empty() { "00" } else { rest }))
+}
+
+/// Howard Hinnant days_from_civil（1970-01-01 = day 0）——end+1 排他端点与星期计算用。
+fn days_from_civil(y: i64, m: u32, d: u32) -> i64 {
+    let y = if m <= 2 { y - 1 } else { y };
+    let era = if y >= 0 { y } else { y - 399 } / 400;
+    let yoe = y - era * 400;
+    let mp = ((m + 9) % 12) as i64;
+    let doy = (153 * mp + 2) / 5 + d as i64 - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    era * 146_097 + doe - 719_468
+}
+
+/// YYYY-MM-DD + n 天（导出 DTEND 排他端点用）；坏日期 None。
+fn add_days(date: &str, n: i64) -> Option<String> {
+    let b = date.as_bytes();
+    if b.len() != 10 {
+        return None;
+    }
+    let y: i64 = date.get(..4)?.parse().ok()?;
+    let m: u32 = date.get(5..7)?.parse().ok()?;
+    let d: u32 = date.get(8..10)?.parse().ok()?;
+    if !(1..=12).contains(&m) || !(1..=31).contains(&d) {
+        return None;
+    }
+    let (y2, m2, d2) = civil_from_days(days_from_civil(y, m, d) + n);
+    Some(format!("{y2:04}-{m2:02}-{d2:02}"))
+}
+
+/// civil_from_days（git.rs 同算法；此处私有副本避免跨模块可见性扩散）。
+fn civil_from_days(z: i64) -> (i64, u32, u32) {
+    let z = z + 719_468;
+    let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let y = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = (doy - (153 * mp + 2) / 5 + 1) as u32;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 } as u32;
+    (if m <= 2 { y + 1 } else { y }, m, d)
+}
+
+/// recur → RRULE 行；None = 不导出重复语义（"" 不重复；lunar 农历无 RRULE 等价物，
+/// 导出锚点单次）。weekly 按起始日星期锚定，weekly:N 按 ISO 星期（1=MO…7=SU）。
+fn rrule_for(recur: &str, start_date: &str) -> Option<String> {
+    match recur {
+        "" => None,
+        "daily" => Some("RRULE:FREQ=DAILY".into()),
+        "monthly" => Some("RRULE:FREQ=MONTHLY".into()),
+        "yearly" => Some("RRULE:FREQ=YEARLY".into()),
+        "lunar" => None,
+        "weekly" | "weekly:1" | "weekly:2" | "weekly:3" | "weekly:4" | "weekly:5" | "weekly:6"
+        | "weekly:7" => {
+            let iso = if let Some(n) = recur.strip_prefix("weekly:") {
+                n.to_string()
+            } else {
+                // 起始日星期：1970-01-01 是周四 → (days + 3) % 7 + 1 = ISO 1..7
+                let b = start_date.as_bytes();
+                if b.len() != 10 {
+                    return None;
+                }
+                let y: i64 = start_date.get(..4)?.parse().ok()?;
+                let m: u32 = start_date.get(5..7)?.parse().ok()?;
+                let d: u32 = start_date.get(8..10)?.parse().ok()?;
+                (((days_from_civil(y, m, d) + 3) % 7) + 1).to_string()
+            };
+            let byday = match iso.as_str() {
+                "1" => "MO",
+                "2" => "TU",
+                "3" => "WE",
+                "4" => "TH",
+                "5" => "FR",
+                "6" => "SA",
+                "7" => "SU",
+                _ => return None,
+            };
+            Some(format!("RRULE:FREQ=WEEKLY;BYDAY={byday}"))
+        }
+        _ => None,
+    }
+}
+
+/// 手建日程 → RFC 5545 文本（CRLF 行尾；时刻均为本地浮墙，导入端按本地时区解释）。
+pub fn build_ics(rows: &[EventRow], stamp_now: &str) -> String {
+    let mut out = String::from(
+        "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//HiveTask//Calendar//CN\r\nCALSCALE:GREGORIAN\r\n",
+    );
+    for r in rows {
+        out.push_str("BEGIN:VEVENT\r\n");
+        out.push_str(&format!("UID:{}@hivetask\r\n", ics_escape(&r.id)));
+        out.push_str(&format!("DTSTAMP:{}\r\n", stamp_now));
+        out.push_str(&format!("SUMMARY:{}\r\n", ics_escape(&r.title)));
+        if let Some(notes) = &r.notes {
+            if !notes.is_empty() {
+                out.push_str(&format!("DESCRIPTION:{}\r\n", ics_escape(notes)));
+            }
+        }
+        if r.all_day {
+            if let Some(start) = compact_date(&r.start_date) {
+                out.push_str(&format!("DTSTART;VALUE=DATE:{start}\r\n"));
+                // DTEND 是**排他**端点（RFC 5545：单日事件 = 次日），且必须是紧凑
+                // 日期——add_days 给的是 YYYY-MM-DD，这里同 DTSTART 一样过 compact_date。
+                let end_excl = match &r.end_date {
+                    Some(e) => add_days(e, 1),
+                    None => add_days(&r.start_date, 1),
+                };
+                if let Some(end) = end_excl.as_deref().and_then(compact_date) {
+                    out.push_str(&format!("DTEND;VALUE=DATE:{end}\r\n"));
+                }
+            }
+        } else if let (Some(start), Some(st)) =
+            (compact_date(&r.start_date), r.start_time.as_deref())
+        {
+            let st = st.replace(':', "");
+            out.push_str(&format!("DTSTART:{start}T{st}00\r\n"));
+            if let Some(et) = &r.end_time {
+                let et = et.replace(':', "");
+                out.push_str(&format!("DTEND:{start}T{et}00\r\n"));
+            }
+        }
+        if let Some(rrule) = rrule_for(&r.recur, &r.start_date) {
+            out.push_str(&rrule);
+            out.push_str("\r\n");
+        }
+        if let Some(remind) = r.remind_at.as_deref().and_then(compact_local_datetime) {
+            out.push_str("BEGIN:VALARM\r\nACTION:DISPLAY\r\n");
+            out.push_str(&format!("TRIGGER;VALUE=DATE-TIME:{remind}\r\n"));
+            out.push_str(&format!("DESCRIPTION:{}\r\n", ics_escape(&r.title)));
+            out.push_str("END:VALARM\r\n");
+        }
+        out.push_str("END:VEVENT\r\n");
+    }
+    out.push_str("END:VCALENDAR\r\n");
+    out
+}
+
+/// 导出全部手建日程为 .ics 文件；返回导出条数。
+pub fn export_ics(path: &str) -> Result<usize> {
+    let rows = event_list()?;
+    let count = rows.len();
+    std::fs::write(path, build_ics(&rows, &ics_stamp_now()))
+        .map_err(|e| anyhow!("写入 ICS 失败：{e}"))?;
+    Ok(count)
+}
+
+/// DTSTAMP 用 UTC 时刻（YYYYMMDDTHHMMSSZ）——RFC 5545 对 DTSTAMP 要求 UTC。
+fn ics_stamp_now() -> String {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as i64;
+    let (y, m, d) = civil_from_days(now.div_euclid(86_400));
+    let rem = now.rem_euclid(86_400);
+    format!("{y:04}{m:02}{d:02}T{:02}{:02}{:02}Z", rem / 3600, rem % 3600 / 60, rem % 60)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1365,5 +1555,92 @@ mod tests {
         assert!(feed_add_on(&conn, "", "https://example.com/a.ics").is_err());
         assert!(feed_add_on(&conn, "x", "ftp://example.com/a.ics").is_err());
         assert!(feed_add_on(&conn, "ok", "https://example.com/a.ics").is_ok());
+    }
+
+    fn ics_row(id: &str, title: &str, all_day: bool, start_date: &str, recur: &str) -> EventRow {
+        EventRow {
+            id: id.into(),
+            title: title.into(),
+            start_date: start_date.into(),
+            end_date: None,
+            all_day,
+            start_time: None,
+            end_time: None,
+            recur: recur.into(),
+            notes: None,
+            remind_at: None,
+            reminded_at: None,
+            created_at: "2026-09-24T00:00:00".into(),
+            updated_at: "2026-09-24T00:00:00".into(),
+        }
+    }
+
+    #[test]
+    fn ics_allday_exclusive_end_and_crlf() {
+        // 单日：DTEND = 次日（排他）；跨日：DTEND = end_date + 1（排他）。
+        let single = ics_row("a", "单日", true, "2026-09-24", "");
+        let mut span = ics_row("b", "跨日", true, "2026-09-22", "");
+        span.end_date = Some("2026-09-26".into());
+        let rows = vec![single, span];
+        let out = build_ics(&rows, "20260924T120000Z");
+        assert!(out.starts_with("BEGIN:VCALENDAR\r\n"));
+        assert!(out.ends_with("END:VCALENDAR\r\n"));
+        assert!(out.contains("DTSTART;VALUE=DATE:20260924\r\n"));
+        assert!(out.contains("DTEND;VALUE=DATE:20260925\r\n"), "单日端点=次日");
+        assert!(out.contains("DTSTART;VALUE=DATE:20260922\r\n"));
+        assert!(out.contains("DTEND;VALUE=DATE:20260927\r\n"), "跨日端点=end+1");
+        // CRLF 行尾：剥掉 \r\n 后不应再有任何裸换行/回车残字
+        assert!(!out.replace("\r\n", "").contains(['\n', '\r']));
+    }
+
+    #[test]
+    fn ics_timed_event_and_valarm() {
+        let mut r = ics_row("t1", "站会", false, "2026-09-24", "");
+        r.start_time = Some("09:30".into());
+        r.end_time = Some("10:00".into());
+        r.remind_at = Some("2026-09-24T09:00".into());
+        let out = build_ics(&[r], "20260924T120000Z");
+        assert!(out.contains("DTSTART:20260924T093000\r\n"));
+        assert!(out.contains("DTEND:20260924T100000\r\n"));
+        assert!(out.contains("TRIGGER;VALUE=DATE-TIME:20260924T090000\r\n"));
+        assert!(out.contains("BEGIN:VALARM\r\n"));
+    }
+
+    #[test]
+    fn ics_rrule_variants() {
+        let base = |recur: &str, start: &str| vec![ics_row("r", "重复", true, start, recur)];
+        assert!(build_ics(&base("daily", "2026-09-21"), "X").contains("RRULE:FREQ=DAILY\r\n"));
+        // 2026-09-21 是周一 → BYDAY=MO
+        assert!(
+            build_ics(&base("weekly", "2026-09-21"), "X")
+                .contains("RRULE:FREQ=WEEKLY;BYDAY=MO\r\n")
+        );
+        // weekly:5 = 周五
+        assert!(
+            build_ics(&base("weekly:5", "2026-09-21"), "X")
+                .contains("RRULE:FREQ=WEEKLY;BYDAY=FR\r\n")
+        );
+        assert!(build_ics(&base("monthly", "2026-09-21"), "X").contains("RRULE:FREQ=MONTHLY\r\n"));
+        assert!(build_ics(&base("yearly", "2026-09-21"), "X").contains("RRULE:FREQ=YEARLY\r\n"));
+        // 农历无 RRULE 等价物：导出锚点单次
+        let lunar = build_ics(&base("lunar", "2026-02-17"), "X");
+        assert!(!lunar.contains("RRULE"));
+    }
+
+    #[test]
+    fn ics_escapes_text_and_drops_empty_notes() {
+        let mut r = ics_row("x;1", "a;b,c\\d\ne", true, "2026-09-24", "");
+        r.notes = Some("".into()); // 空备注不写 DESCRIPTION
+        let out = build_ics(&[r], "X");
+        assert!(out.contains("UID:x\\;1@hivetask\r\n"));
+        assert!(out.contains("SUMMARY:a\\;b\\,c\\\\d\\ne\r\n"));
+        assert!(!out.contains("DESCRIPTION"));
+    }
+
+    #[test]
+    fn ics_weekday_anchor_known_date() {
+        // 2026-09-21 周一：weekly 锚定导 BYDAY=MO（days_from_civil 锚点核对）
+        let days = days_from_civil(2026, 9, 21);
+        assert_eq!(((days + 3) % 7) + 1, 1, "2026-09-21 应为 ISO 周一");
     }
 }

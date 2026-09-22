@@ -173,6 +173,9 @@ export const enUS: Record<MessageKey, string> = {
   "calendar.eventDeleteArm": "Confirm delete",
   "calendar.feedColorReset": "Default",
   "calendar.feedEmpty": "No subscriptions yet.",
+  "calendar.export": "Export events (.ics)",
+  "calendar.export.done": "Exported {n} events",
+  "calendar.export.failed": "Export failed: {error}",
 
   // Git history panel
   "gitHistory.fetch": "Fetch",

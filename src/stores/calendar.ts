@@ -35,6 +35,28 @@ export const useCalendarStore = defineStore("calendar", () => {
     }
   }
 
+  // ---- 提交热力（每仓库，应用级缓存）----
+  // 组件内持有会导致：切工作区卸载面板 → 缓存清零 → 重挂后等异步拉取，
+  // 角标出现约 2 秒空窗。提到 store 按仓库路径键控，缓存命中时挂载即有。
+
+  /** path → (date → 提交数)。 */
+  const commitHeat = ref<Map<string, Map<string, number>>>(new Map());
+
+  /** 缓存命中返回 false（调用方无需重挂）；新拉取成功返回 true。 */
+  async function ensureCommitHeat(path: string): Promise<boolean> {
+    if (commitHeat.value.has(path)) return false;
+    try {
+      const rows = await api.gitCommitActivity(path, 366);
+      commitHeat.value = new Map(commitHeat.value).set(
+        path,
+        new Map(rows.map((r) => [r.date, r.count])),
+      );
+      return true;
+    } catch {
+      return false; // 诚实无热力（非本地仓/读取失败）
+    }
+  }
+
   async function create(
     title: string,
     startDate: string,
@@ -77,5 +99,10 @@ export const useCalendarStore = defineStore("calendar", () => {
     events.value = events.value.filter((e) => e.id !== id);
   }
 
-  return { events, ensureEvents, reload, create, update, remove };
+  /** 通知已发标记（reminder-scheduler 专用）：仅改本地镜像，避免整行重拉。 */
+  function markReminded(id: string, remindedAt: string): void {
+    events.value = events.value.map((e) => (e.id === id ? { ...e, remindedAt } : e));
+  }
+
+  return { events, ensureEvents, reload, create, update, remove, markReminded, commitHeat, ensureCommitHeat };
 });

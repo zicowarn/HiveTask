@@ -30,6 +30,7 @@ import { useCalendarStore } from "../stores/calendar";
 import CalendarEventDialog from "./CalendarEventDialog.vue";
 import { useI18n } from "../i18n";
 import { api, isTauri } from "../api";
+import { pushToast } from "../toast";
 import type { CalendarEventRow, CalendarFeed, CalendarFeedEvent, LunarYmd } from "../api";
 import { openExternalUrl } from "../open-url";
 import {
@@ -199,10 +200,18 @@ async function ensureLunar(from: Date, to: Date): Promise<void> {
 
 // ---- 提交热力（仓库级） ----
 
-/** 提交热力（日格角标）——刻意不进图层菜单：装饰语义，非事件层。 */
-const commitCounts = ref<Map<string, number>>(new Map());
-/** 数据到达/切换时 bump：强制 FullCalendar 重挂载，重跑 dayCellDidMount。 */
+/** 提交热力（日格角标）——刻意不进图层菜单：装饰语义，非事件层。
+ *  数据存 calendar store（按仓库键控，应用级缓存）：切工作区卸载面板不再清零，
+ *  缓存命中时挂载即有角标，无「重挂后等异步拉取」的空窗。 */
+const EMPTY_HEAT: ReadonlyMap<string, number> = new Map();
+// 注意:Pinia store 实例上的 ref 自动解包——calendar.commitHeat 就是 Map,没有 .value
+const commitCounts = computed<ReadonlyMap<string, number>>(
+  () => (current.value ? calendar.commitHeat.get(current.value) ?? EMPTY_HEAT : EMPTY_HEAT),
+);
+/** 数据到达时 bump：强制 FullCalendar 重挂载，重跑 dayCellDidMount。 */
 const calKey = ref(0);
+/** 等待态：无仓库缓存的首载期（以热力拉取为信号，最慢的一路）。缓存命中不闪。 */
+const calLoading = ref(true);
 
 // ---- 事件装配 ----
 
@@ -322,15 +331,19 @@ const calendarEvents = computed<FcEvent[]>(() => {
   return [...projections, ...extras];
 });
 
-/** 事件条单击不动作（防误触，与日期格双击同一手势语言）；双击才执行：
- *  本地日程 → 编辑对话框；带线上链接的 chip → 开浏览器。 */
+/** 事件条交互：格内 chip 单击不动作（防误触，与日期格双击同一手势语言）、双击执行；
+ *  「+N 更多」popover 内 = 用户已明确展开该日列表，单击即执行。
+ *  执行 = 本地日程开编辑对话框；带线上链接的 chip 跳浏览器。 */
 let lastEventClick = { id: "", at: 0 };
 function onEventClick(info: EventClickArg): void {
-  const key = info.event.id;
-  const now = Date.now();
-  const isDouble = lastEventClick.id === key && now - lastEventClick.at < 500;
-  lastEventClick = { id: key, at: now };
-  if (!isDouble) return;
+  const inPopover = (info.jsEvent.target as HTMLElement | null)?.closest(".fc-more-popover") != null;
+  if (!inPopover) {
+    const key = info.event.id;
+    const now = Date.now();
+    const isDouble = lastEventClick.id === key && now - lastEventClick.at < 500;
+    lastEventClick = { id: key, at: now };
+    if (!isDouble) return;
+  }
 
   const url = info.event.extendedProps?.url as string | undefined;
   if (url) {
@@ -344,6 +357,23 @@ function onEventClick(info: EventClickArg): void {
       editing.value = row;
       dialogOpen.value = true;
     }
+  }
+}
+
+/** 导出全部手建日程为 .ics（系统日历「导出出」半边）：保存对话框 → Rust 写文件 → toast 回执。 */
+async function exportIcs(): Promise<void> {
+  if (!isTauri()) return;
+  const { save } = await import("@tauri-apps/plugin-dialog");
+  const path = await save({
+    defaultPath: "hivetask-events.ics",
+    filters: [{ name: "iCalendar", extensions: ["ics"] }],
+  });
+  if (!path) return;
+  try {
+    const n = await api.calendarExportIcs(path);
+    pushToast({ kind: "success", message: t("calendar.export.done", { n }) });
+  } catch (e) {
+    pushToast({ kind: "error", message: t("calendar.export.failed", { error: String(e) }) });
   }
 }
 
@@ -366,8 +396,7 @@ const options = computed<CalendarOptions>(() => ({
     "allDay",
     "title",
   ] as unknown as string,
-  eventClick: onEventClick,
-  datesSet: (arg: DatesSetArg) => {
+  eventClick: onEventClick,  datesSet: (arg: DatesSetArg) => {
     visibleRange.value = { from: dateKey(arg.start), to: dateKey(arg.end) };
     void ensureLunar(arg.start, arg.end);
   },
@@ -428,6 +457,9 @@ const options = computed<CalendarOptions>(() => ({
   },
   // 日格挂载：提交热力 data-heat(-level)（::after 渲染）+ 农历副行（追加 span）
   dayCellDidMount: (arg: DayCellMountArg) => {
+    // fc 在「+N 更多」popover 内部还会挂一个隐藏 DayCellContainer（命中检测用），
+    // 对它执行挂载会把农历 span 叠到 popover 标题上、热力角标画进 popover——跳过。
+    if (arg.el.closest(".fc-more-popover")) return;
     const n = commitCounts.value.get(dateKey(arg.date));
     if (n) {
       arg.el.setAttribute("data-heat", String(n));
@@ -449,20 +481,23 @@ const options = computed<CalendarOptions>(() => ({
 watch(
   current,
   (path) => {
-    if (!path || !isTauri()) return;
+    if (!path || !isTauri()) {
+      calLoading.value = false; // 无仓库/浏览器预览：不显示等待态
+      return;
+    }
     void issues.loadCache().catch(() => {});
     void pulls.loadCache().catch(() => {});
     void issues.loadMilestones(path).catch(() => {});
     if (projects.items.length === 0 && projects.fields.length === 0) {
       void projects.loadAll().catch(() => {});
     }
-    api
-      .gitCommitActivity(path, 366)
-      .then((rows) => {
-        commitCounts.value = new Map(rows.map((r) => [r.date, r.count]));
-        calKey.value += 1;
-      })
-      .catch(() => {});
+    // 等待态以热力拉取为信号（最慢的一路）；缓存命中即关，不闪进度条
+    calLoading.value = true;
+    // 热力走 store 缓存：新拉取成功才重挂补角标；缓存命中时挂载即有，不 bump
+    void calendar.ensureCommitHeat(path).then((fresh) => {
+      calLoading.value = false;
+      if (fresh) calKey.value += 1;
+    });
   },
   { immediate: true },
 );
@@ -503,6 +538,9 @@ onMounted(() => {
 <template>
   <PanelShell :leaf-id="leafId" :panel-type="panelType">
     <template #actions>
+      <button class="icon-btn" type="button" :title="t('calendar.export')" @click="exportIcs">
+        <EditorIcon name="o.download" />
+      </button>
       <DropdownMenu v-model="visibleLayers" multiple checkbox :options="layerOptions">
         <template #trigger="{ open, toggle }">
           <button class="layer-btn" :class="{ open }" type="button" @click="toggle">
@@ -512,7 +550,8 @@ onMounted(() => {
         </template>
       </DropdownMenu>
     </template>
-    <div class="calendar-wrap">
+    <div class="calendar-wrap" :class="{ 'cal-loading': calLoading }">
+      <div v-if="calLoading" class="cal-progress" aria-hidden="true" />
       <p v-if="!current" class="cal-hint">{{ t("calendar.noRepo") }}</p>
       <FullCalendar v-else :key="calKey" :options="options" />
     </div>
@@ -542,6 +581,23 @@ onMounted(() => {
   cursor: pointer;
   outline: none;
 }
+/* 导出按钮：与图层按钮同高同描边，纯图标形态 */
+.icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 22px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-app);
+  color: var(--text);
+  cursor: pointer;
+  outline: none;
+}
+.icon-btn:hover {
+  background: var(--bg-hover);
+}
 .layer-btn:hover,
 .layer-btn.open {
   border-color: var(--accent);
@@ -549,11 +605,36 @@ onMounted(() => {
 }
 
 .calendar-wrap {
+  position: relative;
   height: 100%;
   min-height: 0;
   padding: 10px 14px;
   display: flex;
   flex-direction: column;
+}
+/* 等待态：顶部细进度条（accent 滑块横扫）+ 网格降透明度；
+   prefers-reduced-motion 下进度条静止为细线。 */
+.cal-progress {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 2px;
+  width: 30%;
+  background: var(--accent);
+  border-radius: 1px;
+  animation: cal-progress-sweep 1.1s ease-in-out infinite;
+  z-index: 5;
+}
+@keyframes cal-progress-sweep {
+  from { left: -30%; }
+  to { left: 100%; }
+}
+.calendar-wrap.cal-loading :deep(.fc) {
+  opacity: 0.55;
+  transition: opacity 0.2s;
+}
+@media (prefers-reduced-motion: reduce) {
+  .cal-progress { animation: none; left: 0; width: 100%; opacity: 0.5; }
 }
 .cal-hint {
   font-size: var(--font-md);

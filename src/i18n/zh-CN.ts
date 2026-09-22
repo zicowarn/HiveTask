@@ -174,6 +174,9 @@ export const zhCN = {
   "calendar.eventDeleteArm": "确认删除",
   "calendar.feedColorReset": "默认",
   "calendar.feedEmpty": "还没有订阅。",
+  "calendar.export": "导出日程 (.ics)",
+  "calendar.export.done": "已导出 {n} 条日程",
+  "calendar.export.failed": "导出失败：{error}",
 
   // Git history panel
   "gitHistory.fetch": "抓取远端",
