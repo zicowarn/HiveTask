@@ -1,4 +1,5 @@
 import { defineStore } from "pinia";
+import { durableGet, durableSet } from "../ui-prefs";
 import { ref } from "vue";
 import { pushToast } from "../toast";
 import { t } from "../i18n";
@@ -10,7 +11,7 @@ const LAST_KEY = "hivetask.lastRepo";
 
 function loadRecent(): string[] {
   try {
-    return JSON.parse(localStorage.getItem(RECENT_KEY) ?? "[]") as string[];
+    return JSON.parse(durableGet(RECENT_KEY) ?? "[]") as string[];
   } catch {
     return [];
   }
@@ -22,7 +23,7 @@ function loadRecent(): string[] {
  * grow (migrations, multiple data sources).
  */
 export const useRepoStore = defineStore("repo", () => {
-  const current = ref<string | null>(localStorage.getItem(LAST_KEY));
+  const current = ref<string | null>(durableGet(LAST_KEY));
   const origin = ref<string | null>(null);
   // 当前仓库的来源路由口径（repo_info 与运行时同链解析）；null = 本地/未知。
   const platform = ref<string | null>(null);
@@ -50,7 +51,7 @@ export const useRepoStore = defineStore("repo", () => {
       if (info.valid === false) {
         current.value = null;
         platform.value = null;
-        localStorage.removeItem(LAST_KEY);
+        durableSet(LAST_KEY, null);
       } else {
         void probeVisibility();
       }
@@ -74,9 +75,9 @@ export const useRepoStore = defineStore("repo", () => {
 
   function setCurrent(path: string) {
     current.value = path;
-    localStorage.setItem(LAST_KEY, path);
+    durableSet(LAST_KEY, path);
     recent.value = [path, ...recent.value.filter((p) => p !== path)].slice(0, 10);
-    localStorage.setItem(RECENT_KEY, JSON.stringify(recent.value));
+    durableSet(RECENT_KEY, JSON.stringify(recent.value));
     visibility.value = null; // 旧仓库的可见性不串台，探测后落位
     refreshInfo();
     void probeVisibility();

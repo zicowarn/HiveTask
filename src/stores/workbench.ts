@@ -12,6 +12,7 @@
  * their target without needing an active-workspace parameter.
  */
 import { defineStore } from "pinia";
+import { durableGet, durableSet } from "../ui-prefs";
 import { ref, watch } from "vue";
 import { workspaces } from "../workbench/workspaces";
 import { panelTypes } from "../workbench/panel-types";
@@ -88,7 +89,7 @@ function defaultLayouts(): Record<string, LayoutNode> {
 function loadLayouts(): Record<string, LayoutNode> {
   const layouts = defaultLayouts();
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = durableGet(STORAGE_KEY);
     if (!raw) return layouts;
     const parsed = JSON.parse(raw) as Record<string, unknown>;
     for (const ws of workspaces) {
@@ -114,7 +115,7 @@ export const useWorkbenchStore = defineStore("workbench", () => {
   let saveTimer: ReturnType<typeof setTimeout> | null = null;
   function persist() {
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(layouts.value));
+      durableSet(STORAGE_KEY, JSON.stringify(layouts.value));
     } catch {
       // Storage full or unavailable — layout changes still apply this session.
     }

@@ -18,6 +18,7 @@ mod models;
 mod projects;
 mod resources;
 mod source_time;
+mod ui_prefs;
 mod transfer;
 mod pty;
 mod source;
@@ -1464,6 +1465,10 @@ pub fn run() {
             transfer::import_preview,
             transfer::import_apply,
             transfer::read_text_file,
+            ui_prefs::ui_prefs_get_all,
+            ui_prefs::ui_prefs_set,
+            ui_prefs::ui_prefs_remove,
+            ui_prefs::app_data_path,
             resources::resource_list,
             resources::resource_upsert,
             resources::resource_remove,

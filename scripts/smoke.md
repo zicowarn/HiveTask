@@ -15,6 +15,37 @@
   TCP 端口**——多应用安装/运行零冲突。唯一要求：bundle identifier
   全局唯一（本项目 dev.zicowarn.hivetask 已配置）。
 
+## 打包产物的验证清单（首次启动必跑，2026-09-22 定）
+
+背景：**装机形态会换掉 webview 存储的位置与来源**——开发态是裸二进制
+（`~/Library/WebKit/<进程名>` + `http://localhost:1420`），安装版按 bundle id +
+`tauri://localhost`。工作内容级 UI 态已上提 app.db（见《架构设计-数据存储》§5），
+所以安装版首启应当**从 app.db 把值灌回自己的镜像**，而不是从零开始。逐项验：
+
+1. **数据目录一致**：设置 →「数据备份」里的「数据目录」应仍是
+   `~/Library/Application Support/dev.zicowarn.hivetask`；点「打开目录」能打开。
+2. **主库同源**：`app.db` 的 mtime 在启动后更新；对比启动前后的项目/条目/日程/快照计数
+   （基线快照见 `backups/data-baseline-*.txt`）——数字应完全一致，不是 0。
+3. **日志一行判定**：`~/Library/Logs/dev.zicowarn.hivetask/hivetask.log` 出现
+   `[boot] origin=tauri://localhost appData=… kbRoot=set` —— `origin` 说明来源已换、
+   `kbRoot=set` 说明镜像灌值成功（unset = app.db 里没有、需排查）。
+4. **界面态回位**：知识库根仍在（不用重选）、项目视图配置（筛选/排序/列）仍在、
+   工作台分栏布局仍在。这三项是「工作内容级」的抽样，任一项丢失都是上提链路的问题。
+5. **写回双向**：在安装版里改一处（如换知识库根或调视图列），退出再启应保持；
+   同时 `sqlite3 <app data>/app.db "select key,value from prefs where key like 'ui.%'"` 能看到该键。
+6. **设备态允许不同**（不是 bug）：主题/语言/终端 shell/同步间隔/面板 Mode/工作区选择
+   在这些"这台机器的偏好"里可能仍是默认值——有意留在 localStorage，随手重选即可。
+
+CLI 取证（不需打开界面）：
+
+```bash
+D="$HOME/Library/Application Support/dev.zicowarn.hivetask"
+sqlite3 "$D/app.db" "select count(*) from projects;"
+sqlite3 "$D/app.db" "select key, substr(value,1,40) from prefs where key like 'ui.%' limit 10;"
+tail -3 ~/Library/Logs/dev.zicowarn.hivetask/hivetask.log
+ls -1d ~/Library/WebKit/*hivetask*   # 安装版首次启动后会多出按 bundle id 的目录
+```
+
 ## 标准流程
 
 1. **改代码后先整页验证**：HMR 长会话会积累幽灵状态（模块实例重复、监听器错乱）。

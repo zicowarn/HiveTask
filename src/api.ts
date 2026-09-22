@@ -721,6 +721,12 @@ export const api = {
   /** 另存文本（视图数据 CSV 导出）：取消返回 null。 */
   saveTextFile: (defaultName: string, contents: string) =>
     invoke<string | null>("save_text_file", { defaultName, contents }),
+  /** 工作内容级 UI 偏好（app.db prefs 表的 ui. 命名空间）——见 src/ui-prefs.ts。 */
+  uiPrefsGetAll: () => invoke<[string, string][]>("ui_prefs_get_all"),
+  uiPrefsSet: (key: string, value: string) => invoke<void>("ui_prefs_set", { key, value }),
+  uiPrefsRemove: (key: string) => invoke<void>("ui_prefs_remove", { key }),
+  /** 应用数据目录（「家在哪」；设置页展示 + 启动日志）。 */
+  appDataPath: () => invoke<string>("app_data_path"),
   /** 读文本文件（设备包导入）：路径来自系统文件选择器。 */
   readTextFile: (path: string) => invoke<string>("read_text_file", { path }),
   /** 每日备份状态（设置面板展示）。 */

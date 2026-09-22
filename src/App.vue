@@ -15,6 +15,7 @@ import { workspaces } from "./workbench/registry";
 import { buildMenuDefs } from "./menu-defs";
 import { syncApplicationMenu } from "./native-menu";
 import { openExternalUrl } from "./open-url";
+import { durableGet } from "./ui-prefs";
 import { api, isTauri } from "./api";
 import { startReminderScheduler } from "./reminder-scheduler";
 import { startSyncScheduler } from "./sync-scheduler";
@@ -198,7 +199,7 @@ async function importLegacyRepos() {
   if (!isTauri()) return;
   const legacy = [
     current.value,
-    ...JSON.parse(localStorage.getItem("hivetask.recentRepos") ?? "[]") as string[],
+    ...JSON.parse(durableGet("hivetask.recentRepos") ?? "[]") as string[],
   ].filter((p): p is string => !!p);
   const m = await import("./api");
   for (const path of [...new Set(legacy)]) {
@@ -290,6 +291,24 @@ function onKeydown(event: KeyboardEvent) {
   }
 }
 
+/**
+ * 启动时把「这一轮读的是哪个家」写进日志：前端来源 + 应用数据目录 + 知识库根是否已设。
+ * 安装态与开发态的 webview 存储是两套（来源不同），有了这一行就不必靠猜——日志里对着看。
+ */
+async function logBootPaths(): Promise<void> {
+  if (!inTauri) return;
+  let dataDir = "?";
+  try {
+    dataDir = await api.appDataPath();
+  } catch {
+    // 读不到就留 "?"，不为一行日志干扰启动
+  }
+  api.logLine(
+    "info",
+    `[boot] origin=${location.origin} appData=${dataDir} kbRoot=${durableGet("hivetask.kb.root") ? "set" : "unset"}`,
+  );
+}
+
 /** 外壳右键：不让 WebView 弹默认菜单（可编辑处/链接/有选中文本时放行）。 */
 function onContextMenu(event: MouseEvent): void {
   if (!keepsNativeContextMenu(event)) event.preventDefault();
@@ -315,6 +334,7 @@ onMounted(async () => {
   void startReminderScheduler(); // 日程提醒轮询（模块内自带 isTauri 守卫）
   // 仓库数据自动刷新（间隔偏好；0 = 关，模块内自带守卫：隐藏窗口/离线不刷）
   startSyncScheduler(() => activeKey.value);
+  void logBootPaths();
   await repo.checkHealth();
   void importLegacyRepos();
   void probeNow(); // seed the status bar's online/offline cell

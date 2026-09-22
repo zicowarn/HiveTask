@@ -1033,6 +1033,8 @@ export const zhCN = {
   // 数据保险：每日备份 + 设备包（《架构设计-导出与导入》）
   "transfer.dataTitle": "数据备份",
   "transfer.backupHint": "主库（项目看板 / 甘特扩展信息 / 日程）每天首次启动自动备份一份，滚动保留 14 份。",
+  "transfer.dataPath": "数据目录（开发态与安装态共用，装出来的应用读的就是这里）：",
+  "transfer.openDataDir": "打开目录",
   "transfer.backupUnknown": "备份状态未知（浏览器预览下不可用）。",
   "transfer.backupNone": "还没有备份。",
   "transfer.backupLatest": "最近备份：{file} · 共 {count} 份",

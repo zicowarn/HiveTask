@@ -7,6 +7,7 @@
 import { defineStore } from "pinia";
 import { computed, ref } from "vue";
 import { api, isTauri, type ExtApps, type KbEntry, type KbText, type OpenWithPrefs, type SystemApp } from "../api";
+import { durableGet, durableSet } from "../ui-prefs";
 
 const ROOT_KEY = "hivetask.kb.root";
 const RECENT_KEY = "hivetask.kb.recent";
@@ -18,7 +19,7 @@ const RECENT_FILES_MAX = 20;
 
 function readRecentFiles(): string[] {
   try {
-    const raw = localStorage.getItem("hivetask.kb.recentFiles");
+    const raw = durableGet("hivetask.kb.recentFiles");
     const parsed = raw ? (JSON.parse(raw) as unknown) : [];
     return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === "string") : [];
   } catch {
@@ -27,20 +28,12 @@ function readRecentFiles(): string[] {
 }
 
 function readLocal(key: string): string | null {
-  try {
-    return localStorage.getItem(key);
-  } catch {
-    return null;
-  }
+  // 走持久化桥：app.db 是真理、localStorage 是本安装形态的镜像（见 src/ui-prefs.ts）
+  return durableGet(key);
 }
 
 function writeLocal(key: string, value: string | null): void {
-  try {
-    if (value === null) localStorage.removeItem(key);
-    else localStorage.setItem(key, value);
-  } catch {
-    // 存储不可用（隐私模式）→ 本次会话仍可用
-  }
+  durableSet(key, value);
 }
 
 function loadRecent(): string[] {
@@ -418,7 +411,7 @@ export const useKnowledgeStore = defineStore("knowledge", () => {
     select(rel);
     recentFiles.value = [rel, ...recentFiles.value.filter((item) => item !== rel)].slice(0, RECENT_FILES_MAX);
     try {
-      localStorage.setItem(RECENT_FILES_KEY, JSON.stringify(recentFiles.value));
+      durableSet(RECENT_FILES_KEY, JSON.stringify(recentFiles.value));
     } catch {
       // 存储不可用 → 本次会话内仍然生效
     }

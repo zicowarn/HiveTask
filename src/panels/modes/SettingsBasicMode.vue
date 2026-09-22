@@ -269,6 +269,8 @@ async function browseRowApp(index: number): Promise<void> {
 // 自动备份在应用启动时由 Rust 侧完成，这里只展示状态并提供手动入口。
 const backupStatus = ref<BackupStatus | null>(null);
 const backupWorking = ref(false);
+/** 应用数据目录（「家在哪」：开发态与安装态读的是同一个——设置里可见，不用猜）。 */
+const dataPath = ref<string | null>(null);
 const transferError = ref<string | null>(null);
 const importOpen = ref(false);
 
@@ -283,9 +285,16 @@ async function loadBackupStatus(): Promise<void> {
   if (!isTauri()) return;
   try {
     backupStatus.value = await api.backupStatus();
+    dataPath.value = await api.appDataPath();
   } catch (e) {
     transferError.value = String(e);
   }
+}
+
+async function revealDataDir(): Promise<void> {
+  if (!dataPath.value) return;
+  const { revealPath } = await import("../../knowledge/open-path");
+  await revealPath(dataPath.value);
 }
 
 async function backupNow(): Promise<void> {
@@ -577,6 +586,13 @@ function onThemeChange(value: string | string[]) {
       </div>
       <p class="byext-desc">{{ t("transfer.backupHint") }}</p>
       <p class="byext-desc">{{ backupState }}</p>
+      <p class="byext-desc">
+        {{ t("transfer.dataPath") }}
+        <code v-if="dataPath" class="byext-meta">{{ dataPath }}</code>
+        <button v-if="dataPath" class="text-btn" @click="revealDataDir">
+          {{ t("transfer.openDataDir") }}
+        </button>
+      </p>
       <div class="data-actions">
         <button class="text-btn" @click="exportPack">{{ t("transfer.export") }}</button>
         <button class="text-btn" @click="importOpen = true">{{ t("transfer.import") }}</button>

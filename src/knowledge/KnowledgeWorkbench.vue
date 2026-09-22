@@ -9,6 +9,7 @@
  */
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import PanelShell from "../workbench/PanelShell.vue";
+import { durableGet, durableSet } from "../ui-prefs";
 import SplitPane from "../workbench/SplitPane.vue";
 import { api, isTauri } from "../api";
 import { useI18n } from "../i18n";
@@ -54,7 +55,7 @@ const ratio = ref(loadRatio());
 
 function loadRatio(): number {
   try {
-    const raw = Number(localStorage.getItem(WIDTH_KEY));
+    const raw = Number(durableGet(WIDTH_KEY));
     if (Number.isFinite(raw) && raw > 0.1 && raw < 0.7) return raw;
   } catch {
     // 存储不可用 → 用默认
@@ -65,7 +66,7 @@ function loadRatio(): number {
 
 watch(ratio, (value) => {
   try {
-    localStorage.setItem(WIDTH_KEY, String(value));
+    durableSet(WIDTH_KEY, String(value));
   } catch {
     // 存储不可用 → 本次会话内仍然生效
   }

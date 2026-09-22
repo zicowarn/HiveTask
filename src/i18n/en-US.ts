@@ -1032,6 +1032,8 @@ export const enUS: Record<MessageKey, string> = {
   // Data insurance: daily backup + device pack (《架构设计-导出与导入》)
   "transfer.dataTitle": "Data backup",
   "transfer.backupHint": "The main database (boards / Gantt extensions / calendar) is backed up once a day on first launch; the last 14 copies are kept.",
+  "transfer.dataPath": "Data directory (shared by dev and installed builds — the installed app reads exactly this):",
+  "transfer.openDataDir": "Open folder",
   "transfer.backupUnknown": "Backup status unavailable (not in the desktop app).",
   "transfer.backupNone": "No backup yet.",
   "transfer.backupLatest": "Latest backup: {file} · {count} kept",

@@ -5,6 +5,7 @@
  * base 分支按 repo 记忆（localStorage），默认 main → master → 首个分支。
  */
 import { defineStore } from "pinia";
+import { durableGet, durableSet } from "../ui-prefs";
 import { translateError } from "../gh-errors";
 import { computed, ref, watch } from "vue";
 import { api, isTauri, type BranchReviewDiff, type ReviewBranch } from "../api";
@@ -36,7 +37,7 @@ export const useBranchReviewStore = defineStore("branch-review", () => {
     // 先取全量本地分支（现成 gitBranches），定 base，再拉计数
     const rows = await api.gitBranches(repo);
     const names = rows.filter((r) => !r.isRemote).map((r) => r.name);
-    const saved = localStorage.getItem(baseKey(repo));
+    const saved = durableGet(baseKey(repo));
     const valid = (n: string | null) => (n && names.includes(n) ? n : null);
     base.value =
       valid(saved) ??
@@ -44,7 +45,7 @@ export const useBranchReviewStore = defineStore("branch-review", () => {
       valid(names.find((n) => n === "master") ?? null) ??
       names[0] ??
       null;
-    if (base.value) localStorage.setItem(baseKey(repo), base.value);
+    if (base.value) durableSet(baseKey(repo), base.value);
     try {
       branches.value = base.value
         ? (await api.branchReviewList(repo, base.value)).filter((b) => b.name !== base.value)
@@ -62,7 +63,7 @@ export const useBranchReviewStore = defineStore("branch-review", () => {
   async function setBase(name: string) {
     base.value = name;
     const repo = repoStore.current;
-    if (repo) localStorage.setItem(baseKey(repo), name);
+    if (repo) durableSet(baseKey(repo), name);
     if (selected.value === name) {
       selected.value = null;
       diff.value = null;

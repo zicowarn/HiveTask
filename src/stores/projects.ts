@@ -17,6 +17,7 @@ import {
   type ProjectItem,
 } from "../api";
 import { isTauri } from "../api";
+import { durableGet, durableSet } from "../ui-prefs";
 import { pushToast } from "../toast";
 import { useI18n } from "../i18n";
 import type { ProjectLayout, ProjectViewConfig, ProjectViewEntry } from "../panels/project-views";
@@ -58,8 +59,8 @@ export const useProjectsStore = defineStore("projects", () => {
   }
   /** 切项目即换一整套配置（旧实现是全局键，两个项目共用一份筛选/排序）。 */
   function loadViewConfig(): void {
-    loadViews(localStorage.getItem(viewsKey()));
-    const raw = localStorage.getItem(viewKey());
+    loadViews(durableGet(viewsKey()));
+    const raw = durableGet(viewKey());
     if (!raw) {
       view.value = defaultViewConfig();
       return;
@@ -112,10 +113,10 @@ export const useProjectsStore = defineStore("projects", () => {
   function expandCatalogue(): void {
     views.value = views.value.map((v) => ({ ...v, config: seedConfig(v.config) }));
     view.value = seedConfig(view.value);
-    localStorage.setItem(viewsKey(), JSON.stringify({ views: views.value, activeId: activeViewId.value }));
+    durableSet(viewsKey(), JSON.stringify({ views: views.value, activeId: activeViewId.value }));
   }
   // sync：回填必须与切换同拍，否则晚一拍会把同一 tick 内刚写下的配置清回旧值
-  watch(view, (v) => localStorage.setItem(viewKey(), JSON.stringify(v)), {
+  watch(view, (v) => durableSet(viewKey(), JSON.stringify(v)), {
     deep: true,
     flush: "sync",
   });
@@ -450,7 +451,7 @@ export const useProjectsStore = defineStore("projects", () => {
     (v) => {
       const entry = views.value.find((e) => e.id === activeViewId.value);
       if (entry) entry.config = { ...v, fields: [...v.fields] };
-      localStorage.setItem(viewsKey(), JSON.stringify({ views: views.value, activeId: activeViewId.value }));
+      durableSet(viewsKey(), JSON.stringify({ views: views.value, activeId: activeViewId.value }));
     },
     { deep: true, flush: "sync" },
   );
@@ -463,13 +464,13 @@ export const useProjectsStore = defineStore("projects", () => {
     if (!entry) return;
     activeViewId.value = id;
     view.value = { ...entry.config, fields: [...entry.config.fields] };
-    localStorage.setItem(viewsKey(), JSON.stringify({ views: views.value, activeId: id }));
+    durableSet(viewsKey(), JSON.stringify({ views: views.value, activeId: id }));
   }
   /** 切当前视图的布局（View 弹层的 Layout 分段）。 */
   function setLayout(next: ProjectLayout) {
     const entry = views.value.find((e) => e.id === activeViewId.value);
     if (entry) entry.layout = next;
-    localStorage.setItem(viewsKey(), JSON.stringify({ views: views.value, activeId: activeViewId.value }));
+    durableSet(viewsKey(), JSON.stringify({ views: views.value, activeId: activeViewId.value }));
   }
   /** 新建视图（平台的 New view）：按选定布局建，默认板面配置，名字「View N」。 */
   function addView(layout?: ProjectLayout) {
@@ -527,7 +528,7 @@ export const useProjectsStore = defineStore("projects", () => {
     }
   }
   function persistViews() {
-    localStorage.setItem(viewsKey(), JSON.stringify({ views: views.value, activeId: activeViewId.value }));
+    durableSet(viewsKey(), JSON.stringify({ views: views.value, activeId: activeViewId.value }));
   }
   /** Table 布局列集迁移的「未定制」判定：fields 覆盖全部固定字段
    * （旧种子发的就是全集；用户加删过列则不再满足）。幂等，随加载常驻。 */

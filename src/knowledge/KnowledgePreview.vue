@@ -43,6 +43,7 @@ import {
 import { ZoomController, type Size } from "./preview/zoom";
 import type { ZoomAction } from "./preview/registry";
 import { useKnowledgeStore } from "../stores/knowledge";
+import { durableGet, durableSet } from "../ui-prefs";
 import { tableEditor as tableEditorBus, closeTableEditor } from "./editor/table-editor-bus";
 import { openPathWithConfiguredApp, revealPath } from "./open-path";
 
@@ -309,7 +310,7 @@ const editorRatio = ref(0.72);
 
 function loadView(): { outlineOpen: boolean; livePreview: boolean; editorRatio: number } {
   try {
-    const raw = JSON.parse(localStorage.getItem(VIEW_KEY) ?? "{}") as Record<string, unknown>;
+    const raw = JSON.parse(durableGet(VIEW_KEY) ?? "{}") as Record<string, unknown>;
     return {
       outlineOpen: raw.outlineOpen === true,
       livePreview: raw.livePreview !== false,
@@ -325,14 +326,11 @@ const livePreview = ref(savedView.livePreview);
 editorRatio.value = savedView.editorRatio;
 
 function persistView(): void {
-  try {
-    localStorage.setItem(
-      VIEW_KEY,
-      JSON.stringify({ outlineOpen: outlineOpen.value, livePreview: livePreview.value, editorRatio: editorRatio.value }),
-    );
-  } catch {
-    // 存储不可用 → 本次会话内仍生效
-  }
+  // 走持久化桥：app.db 是真理、localStorage 是镜像（安装版/换机后仍在，见 src/ui-prefs.ts）
+  durableSet(
+    VIEW_KEY,
+    JSON.stringify({ outlineOpen: outlineOpen.value, livePreview: livePreview.value, editorRatio: editorRatio.value }),
+  );
 }
 
 function toggleOutline(): void {
