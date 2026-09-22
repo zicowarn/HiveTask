@@ -29,6 +29,7 @@ export interface PanelTypeInfo {
     | "terminal"
     | "o.calendar"
     | "o.graph"
+    | "o.people"
     | "settings"
     | "o.book";
 }
@@ -50,6 +51,7 @@ export const panelTypes: PanelTypeInfo[] = [
   { type: "pull.detail", titleKey: "panelTitle.pull.detail", category: "editorCat.pulls", icon: "pull.detail" },
   { type: "project.board", titleKey: "panelTitle.project.board", category: "editorCat.projects", icon: "project.board" },
   { type: "project.gantt", titleKey: "panelTitle.project.gantt", category: "editorCat.projects", icon: "project.gantt" },
+  { type: "project.resources", titleKey: "panelTitle.project.resources", category: "editorCat.projects", icon: "o.people" },
   { type: "knowledge.workbench", titleKey: "panelTitle.knowledge.workbench", category: "editorCat.knowledge", icon: "o.book" },
   { type: "knowledge.graph", titleKey: "panelTitle.knowledge.graph", category: "editorCat.knowledge", icon: "o.graph" },
   { type: "git.history", titleKey: "panelTitle.git.history", category: "editorCat.tools", icon: "git.history" },

@@ -29,6 +29,7 @@ import IssueMilestoneMode from "../panels/modes/IssueMilestoneMode.vue";
 import ProjectBoardMode from "../panels/modes/ProjectBoardMode.vue";
 import ProjectTableMode from "../panels/modes/ProjectTableMode.vue";
 import ProjectRoadmapMode from "../panels/modes/ProjectRoadmapMode.vue";
+import ProjectResourcesPanel from "../panels/ProjectResourcesPanel.vue";
 import SettingsBasicMode from "../panels/modes/SettingsBasicMode.vue";
 import { workspaces } from "./workspaces";
 import type { MessageKey } from "../i18n";
@@ -80,6 +81,7 @@ registerPanel("project.gantt", GanttPanel, [
   { key: "resource", labelKey: "gantt.viewResource", component: GanttResourceMode },
   { key: "usage", labelKey: "gantt.viewUsage", component: GanttUsageMode },
 ]);
+registerPanel("project.resources", ProjectResourcesPanel);
 registerPanel("git.history", GitHistoryPanel);
 registerPanel("terminal", TerminalPanel);
 registerPanel("calendar", CalendarPanel);

@@ -37,4 +37,14 @@ describe("工作区注册表", () => {
     expect(settings?.category).toBe("editorCat.general");
     expect(editorCategories).toContain("editorCat.general");
   });
+
+  it("资源目录是「项目」分类下的独立 Editor（元数据与分类）", async () => {
+    const resources = panelTypes.find((p) => p.type === "project.resources");
+    expect(resources, "面板类型应登记").toBeTruthy();
+    expect(resources!.category).toBe("editorCat.projects");
+    expect(resources!.titleKey).toBe("panelTitle.project.resources");
+    expect(resources!.icon).toBe("o.people");
+    // 组件表是否真的注册，由 tests/resource-catalog.test.ts 在 jsdom 下挂载验证
+    // （本文件是纯数据测试：导入 registry 会把整个组件图拉进来，需要 window）
+  });
 });
