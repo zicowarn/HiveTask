@@ -36,6 +36,8 @@ chinese-lunisolar-calendar = "0.2.5"
 # 「打开方式」的系统来源：读 .app 的 Info.plist（二进制/XML 都认）
 plist = "1"
 tauri-plugin-clipboard-manager = "2.1.0-beta.7"
+# 日程本地通知（S4）：到点弹系统通知；凭据/账户零依赖
+tauri-plugin-notification = "2"
 # LaunchServices（Finder「打开方式」那张表）：只在 macOS 用，见 openwith_apps.rs
 [target.'cfg(target_os = "macos")'.dependencies]
 core-foundation-sys = "0.8"

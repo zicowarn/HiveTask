@@ -12,6 +12,7 @@ import ToastHost from "./components/ToastHost.vue";
 import SwitchKnowledgeDialog from "./knowledge/SwitchKnowledgeDialog.vue";
 import { workspaces } from "./workbench/registry";
 import { buildMenuDefs } from "./menu-defs";
+import { startReminderScheduler } from "./reminder-scheduler";
 import { syncApplicationMenu } from "./native-menu";
 import { openExternalUrl } from "./open-url";
 import { api, isTauri } from "./api";
@@ -260,6 +261,7 @@ onMounted(async () => {
   window.addEventListener("contextmenu", onContextMenu);
   if (!inTauri) window.addEventListener("keydown", onKeydown);
   if (!isTauri()) return;
+  void startReminderScheduler(); // 日程提醒轮询（模块内自带 isTauri 守卫）
   await repo.checkHealth();
   void importLegacyRepos();
   void probeNow(); // seed the status bar's online/offline cell

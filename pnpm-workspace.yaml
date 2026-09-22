@@ -1,6 +1,8 @@
 # pnpm >= 11 reads build approval / run settings here
 # (auto-generated placeholder replaced with explicit approvals)
 allowBuilds:
+  # core-js 的 postinstall 只是募捐横幅（不产出构建物）；拒掉即 pnpm 默认口径
+  core-js: false
   esbuild: true
   vue-demi: true
 verifyDepsBeforeRun: false

@@ -1,13 +1,15 @@
 <script setup lang="ts">
 /**
  * 日程新建/编辑对话框（S4）：标题必填，结束日期/备注/提醒可选。
- * 提醒存 datetime-local 形态；通知触发属后续切片（tauri-plugin-notification）。
- * 删除是危险动作：两击确认。保存走 calendar store（状态栏与日历面板即时联动）。
+ * 提醒存 datetime-local 形态；保存「带提醒」的事件时顺带请求一次系统通知
+ * 权限（用户手势点，调度器侧永不主动弹框）。删除是危险动作：两击确认。
+ * 保存走 calendar store（状态栏与日历面板即时联动）。
  */
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from "vue";
 import DropdownMenu from "../components/DropdownMenu.vue";
 import EditorIcon from "../components/EditorIcon.vue";
 import { useI18n } from "../i18n";
+import { requestNotificationPermission } from "../reminder-scheduler";
 import { useCalendarStore } from "../stores/calendar";
 import type { CalendarEventRow } from "../api";
 
@@ -79,6 +81,7 @@ function onKeydown(event: KeyboardEvent): void {
 async function save(): Promise<void> {
   if (working.value) return;
   if (!title.value.trim() || !startDate.value) return;
+  if (remindAt.value) void requestNotificationPermission(); // 带提醒才请求；fire-and-forget
   working.value = true;
   error.value = null;
   try {
