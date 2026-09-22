@@ -8,7 +8,7 @@ setLocale("zh-CN");
 const { buildMenuDefs } = await import("../src/menu-defs");
 
 const actions = Object.fromEntries(
-  ["pickRepo", "refresh", "refreshDisabled", "openPreferences", "gotoIssues", "gotoPulls", "gotoTools", "statusbarVisible", "toggleStatusbar", "githubUrlMissing", "openInGithub", "copyUrl", "openAbout", "quickOpen", "searchKnowledge", "knowledgeReady"].map(
+  ["pickRepo", "refresh", "refreshDisabled", "openPreferences", "gotoIssues", "gotoPulls", "gotoTools", "gotoGeneral", "statusbarVisible", "toggleStatusbar", "githubUrlMissing", "openInGithub", "copyUrl", "openAbout", "quickOpen", "searchKnowledge", "knowledgeReady"].map(
     (name) => [name, vi.fn()],
   ),
 ) as never;
@@ -44,6 +44,8 @@ describe("buildMenuDefs", () => {
     const file = menus[0].items;
     expect(file[0]).toMatchObject({ label: "选择仓库…", shortcut: "⌘O" });
     expect(menus[1].items.filter((i) => i.shortcut === "⌘3")).toHaveLength(1);
+    // 通用工作区（设置的家）在视图菜单里有 ⌘6 入口
+    expect(menus[1].items.find((i) => i.shortcut === "⌘6")?.label).toBe("通用");
     // 快速打开/搜索：视图菜单里的全局入口（VS Code 的命令面板也在 View 下）
     const view = menus[1].items;
     expect(view.find((i) => i.shortcut === "⌘P")?.label).toBe("快速打开…");

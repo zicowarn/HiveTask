@@ -47,6 +47,7 @@ export const zhCN = {
   "workspace.projects": "项目",
   "workspace.knowledge": "知识库",
   "workspace.tools": "工具",
+  "workspace.general": "通用",
 
   "menu.issues": "Issues",
   "menu.pulls": "Pull Requests",

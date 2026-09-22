@@ -56,8 +56,8 @@ describe("Markdown 命令表", () => {
     for (const key of ISSUE_TOOLBAR_KEYS) expect(commandByKey(key)).toBeTruthy();
   });
 
-  it("快捷键避开本应用已占用的键（⌘1..5 / ⌘R / ⌘O / ⌘,）", () => {
-    const taken = ["⌘1", "⌘2", "⌘3", "⌘4", "⌘5", "⌘R", "⌘O", "⌘,", "⌘⇧C", "⌘⇧O"];
+  it("快捷键避开本应用已占用的键（⌘1..6 / ⌘R / ⌘O / ⌘,）", () => {
+    const taken = ["⌘1", "⌘2", "⌘3", "⌘4", "⌘5", "⌘6", "⌘R", "⌘O", "⌘,", "⌘⇧C", "⌘⇧O"];
     for (const command of MARKDOWN_COMMANDS) {
       if (!command.shortcut) continue;
       expect(taken, `${command.key} 的 ${command.shortcut} 与应用键冲突`).not.toContain(command.shortcut);

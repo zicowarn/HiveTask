@@ -37,6 +37,8 @@ export interface MenuActions {
   gotoProjects(): void;
   gotoKnowledge(): void;
   gotoTools(): void;
+  /** 通用工作区（设置的家；⌘6）。 */
+  gotoGeneral(): void;
   /** 快速打开（⌘P）与知识库全局搜索（⌘⇧F）——跨工作区可用，未选根时禁用。 */
   quickOpen(): void;
   searchKnowledge(): void;
@@ -73,6 +75,7 @@ export function buildMenuDefs(a: MenuActions): MenuDef[] {
         { label: t("workspace.projects"), shortcut: "⌘4", action: a.gotoProjects },
         { label: t("workspace.knowledge"), shortcut: "⌘5", action: a.gotoKnowledge },
         { label: t("workspace.tools"), shortcut: "⌘3", action: a.gotoTools },
+        { label: t("workspace.general"), shortcut: "⌘6", action: a.gotoGeneral },
         { separator: true },
         // 快速打开/搜索放在「视图」：VS Code 的命令面板也在 View 下，
         // 放这儿比塞进「工具」（那是工具工作区的语义）更符合直觉

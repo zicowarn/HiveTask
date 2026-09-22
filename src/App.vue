@@ -65,12 +65,13 @@ function refreshActive() {
 }
 
 /**
- * Preferences opens the settings Editor in the active workspace — the same
- * mechanism as the panel-type dropdown (switch back there anytime). Uses
- * the workspace's first pane since there is no per-pane focus tracking.
+ * Preferences opens the settings Editor — its home is the 通用 workspace
+ * (2026-09-22: settings 有了自己的工作区，入口不再占用当前工作区的面板).
+ * Uses the workspace's first pane since there is no per-pane focus tracking.
  */
 function openPreferences() {
-  const leafId = workbench.firstLeafId(activeKey.value);
+  switchWorkspace("general");
+  const leafId = workbench.firstLeafId("general");
   if (leafId) workbench.setLeafPanel(leafId, "settings");
 }
 
@@ -173,6 +174,7 @@ const menus = computed(() =>
     gotoProjects: () => switchWorkspace("projects"),
     gotoKnowledge: () => switchWorkspace("knowledge"),
     gotoTools: () => switchWorkspace("tools"),
+    gotoGeneral: () => switchWorkspace("general"),
     // 快速打开/搜索是**全局**入口：在任何工作区按 ⌘P 都该能到知识库
     quickOpen: () => {
       switchWorkspace("knowledge");
@@ -209,6 +211,7 @@ function onKeydown(event: KeyboardEvent) {
     "4": () => switchWorkspace("projects"),
     "5": () => switchWorkspace("knowledge"),
     "3": () => switchWorkspace("tools"),
+    "6": () => switchWorkspace("general"),
     ",": openPreferences,
   };
   // Shifted layer only, so ⌘C/⌘O stay the webview's native copy/open.
@@ -330,7 +333,8 @@ onBeforeUnmount(() => {
         </template>
         <span v-else class="repo-hint">{{ t("app.knowledgeNone") }}</span>
       </div>
-      <div v-else class="repo-box">
+      <!-- 通用工作区：应用级设置，没有仓库/项目/知识库上下文可言 → 不出这一块 -->
+      <div v-else-if="activeKey !== 'general'" class="repo-box">
         <template v-if="current">
           <span class="repo-path" :title="current">{{ current }}</span>
           <span v-if="origin" class="repo-origin" :title="origin">{{ shortOrigin(origin) }}</span>
@@ -361,7 +365,11 @@ onBeforeUnmount(() => {
         >
           {{ knowledge.root ? t("kb.switchRoot") : t("kb.pickRoot") }}
         </button>
-        <button v-else class="header-btn" @click="repoManagerOpen = true">
+        <button
+          v-else-if="activeKey !== 'general'"
+          class="header-btn"
+          @click="repoManagerOpen = true"
+        >
           {{ current ? t("app.repoSwitch") : t("app.repoPick") }}
         </button>
         <button class="header-btn theme-btn" :title="t('theme.switch')" @click="cycleTheme()">

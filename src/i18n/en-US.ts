@@ -46,6 +46,7 @@ export const enUS: Record<MessageKey, string> = {
   "workspace.projects": "Projects",
   "workspace.knowledge": "Knowledge",
   "workspace.tools": "Tools",
+  "workspace.general": "General",
 
   "menu.issues": "Issues",
   "menu.pulls": "Pull Requests",

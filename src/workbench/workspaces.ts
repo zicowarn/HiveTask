@@ -24,4 +24,7 @@ export const workspaces: WorkspaceDefinition[] = [
   // 双面板模型下类型切换器会把文件树整块换掉、能拆开、能单关一半，都不该发生。
   { key: "knowledge", labelKey: "workspace.knowledge", listPanel: "knowledge.workbench", detailPanel: "knowledge.workbench" },
   { key: "tools", labelKey: "workspace.tools", listPanel: "git.history", detailPanel: "terminal" },
+  // 通用：应用级设置的家（2026-09-22 用户定案「工作区 tab 加通用，设置列在它下面」）——
+  // 单面板同「项目」；这里没有仓库/项目/知识库上下文，头部不出上下文块与「切换 X」。
+  { key: "general", labelKey: "workspace.general", listPanel: "settings", detailPanel: "settings" },
 ];
