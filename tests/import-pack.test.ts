@@ -15,39 +15,48 @@ import { createApp, nextTick, type App } from "vue";
 type Decision = Record<string, string>;
 const applied: { decisions: Decision }[] = [];
 
+/** 预览结果（用例可改字段：更旧的包 / 本机缺失仓库）。 */
+const PREVIEW = {
+  packSchemaVersion: 17,
+  localSchemaVersion: 17,
+  packIsOlder: false,
+  missingRepos: [] as { originUrl: string | null; sourceType: string | null }[],
+  projects: [
+    {
+      id: "p-local-newer",
+      name: "家庭装修",
+      localUpdatedAt: "2026-09-20T10:00:00Z",
+      packUpdatedAt: "2026-09-19T10:00:00Z",
+      suggestion: "keep",
+      items: 3,
+      fields: 2,
+    },
+    {
+      id: "p-pack-newer",
+      name: "机房改造",
+      localUpdatedAt: "2026-09-18T10:00:00Z",
+      packUpdatedAt: "2026-09-21T10:00:00Z",
+      suggestion: "overwrite",
+      items: 5,
+      fields: 4,
+    },
+    {
+      id: "p-absent",
+      name: "新项目",
+      localUpdatedAt: null,
+      packUpdatedAt: "2026-09-21T10:00:00Z",
+      suggestion: "add",
+      items: 1,
+      fields: 1,
+    },
+  ],
+};
+
 vi.mock("../src/api", () => ({
   isTauri: () => true,
   api: {
     readTextFile: async () => '{"format":"hivetask.export"}',
-    importPreview: async () => [
-      {
-        id: "p-local-newer",
-        name: "家庭装修",
-        localUpdatedAt: "2026-09-20T10:00:00Z",
-        packUpdatedAt: "2026-09-19T10:00:00Z",
-        suggestion: "keep",
-        items: 3,
-        fields: 2,
-      },
-      {
-        id: "p-pack-newer",
-        name: "机房改造",
-        localUpdatedAt: "2026-09-18T10:00:00Z",
-        packUpdatedAt: "2026-09-21T10:00:00Z",
-        suggestion: "overwrite",
-        items: 5,
-        fields: 4,
-      },
-      {
-        id: "p-absent",
-        name: "新项目",
-        localUpdatedAt: null,
-        packUpdatedAt: "2026-09-21T10:00:00Z",
-        suggestion: "add",
-        items: 1,
-        fields: 1,
-      },
-    ],
+    importPreview: async () => PREVIEW,
     importApply: async (_json: string, decisions: Decision) => {
       applied.push({ decisions });
       return [1, 1, 1];
@@ -168,6 +177,34 @@ describe("导入设备包：三选一按系统建议预选", () => {
     expect(labels.some((x) => x.includes("覆盖"))).toBe(true);
     expect(labels.some((x) => x.includes("保留本机"))).toBe(true);
     expect(labels.some((x) => x.includes("新增"))).toBe(false);
+  });
+
+  it("更旧的包如实提示版本对照（能读，但要说清）", async () => {
+    PREVIEW.packIsOlder = true;
+    PREVIEW.packSchemaVersion = 15;
+    const host = await mountDialog();
+    const rows = await pickPack(host);
+    expect(rows).toHaveLength(3);
+    expect(host.textContent).toContain("包来自更旧的 HiveTask");
+    expect(host.textContent).toContain("结构 v15");
+    PREVIEW.packIsOlder = false;
+    PREVIEW.packSchemaVersion = 17;
+  });
+
+  it("本机缺的仓库列成清单并给引导（逐个打开/clone → 登记 → 回填）", async () => {
+    PREVIEW.missingRepos = [
+      { originUrl: "https://github.com/o/r", sourceType: "github" },
+      { originUrl: "https://gitea.example.com:3000/team/x", sourceType: "gitea" },
+    ];
+    const host = await mountDialog();
+    await pickPack(host);
+    const box = host.querySelector<HTMLElement>(".pack-repos");
+    expect(box, "应有仓库清单区块").toBeTruthy();
+    expect(box!.textContent).toContain("2 个仓库本机未登记");
+    expect(box!.textContent).toContain("https://github.com/o/r");
+    expect(box!.textContent).toContain("gitea");
+    expect(box!.textContent, "引导语要说清怎么修").toContain("重新关联");
+    PREVIEW.missingRepos = [];
   });
 
   it("有覆盖项时必须两击：第一击只上膛，不改库", async () => {

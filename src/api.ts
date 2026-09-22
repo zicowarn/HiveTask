@@ -264,6 +264,17 @@ export interface BackupStatus {
   latest: string | null;
 }
 
+/** 导入预览的整体结果：版本对照 + 本机缺失仓库 + 逐项目行。 */
+export interface ImportPreviewResult {
+  packSchemaVersion: number;
+  localSchemaVersion: number;
+  /** 包来自更旧的应用版本（能读，但值得提示一句）。 */
+  packIsOlder: boolean;
+  /** 包引用了、本机登记表里没有的仓库（引导逐个打开 / clone）。 */
+  missingRepos: { originUrl: string | null; sourceType: string | null }[];
+  projects: ImportPreview[];
+}
+
 /** 每日计数快照（项目分析：燃起图的唯一数据来源；见 app_017）。 */
 export interface ProjectSnapshot {
   /** YYYY-MM-DD（本地日）。 */
@@ -718,8 +729,8 @@ export const api = {
   backupNow: () => invoke<string>("backup_now"),
   /** 导出设备包（projectIds 省略 = 全部项目）：返回 JSON 文本，交给 saveTextFile 落盘。 */
   exportPack: (projectIds?: string[]) => invoke<string>("export_pack", { projectIds: projectIds ?? null }),
-  /** 导入预览：按项目 uuid 给系统建议（新增 / 覆盖 / 保留）。 */
-  importPreview: (packJson: string) => invoke<ImportPreview[]>("import_preview", { packJson }),
+  /** 导入预览：版本闸 + 本机缺失仓库 + 按项目 uuid 给系统建议（新增 / 覆盖 / 保留）。 */
+  importPreview: (packJson: string) => invoke<ImportPreviewResult>("import_preview", { packJson }),
   /** 应用导入（覆盖前后端自动打快照）；返回 [新增, 覆盖, 保留]。 */
   importApply: (packJson: string, decisions: Record<string, ImportAction>) =>
     invoke<[number, number, number]>("import_apply", { packJson, decisions }),

@@ -9,7 +9,7 @@
  */
 import { computed, ref, watch } from "vue";
 import DropdownMenu from "./DropdownMenu.vue";
-import { api, isTauri, type ImportAction, type ImportPreview } from "../api";
+import { api, isTauri, type ImportAction, type ImportPreview, type ImportPreviewResult } from "../api";
 import { useI18n } from "../i18n";
 import { reportError } from "../gh-errors";
 import { pushToast } from "../toast";
@@ -25,6 +25,8 @@ interface Row {
 }
 
 const rows = ref<Row[]>([]);
+/** 预览的版本与缺失仓库信息（历史包/新机的引导都挂在这上面）。 */
+const meta = ref<ImportPreviewResult | null>(null);
 const packJson = ref<string | null>(null);
 const packName = ref<string | null>(null);
 const reading = ref(false);
@@ -55,6 +57,7 @@ function actionOptions(row: ImportPreview) {
 
 function reset(): void {
   rows.value = [];
+  meta.value = null;
   packJson.value = null;
   packName.value = null;
   error.value = null;
@@ -89,10 +92,11 @@ async function pickFile(): Promise<void> {
     if (!path) return;
     reading.value = true;
     const json = await api.readTextFile(path);
-    const previews = await api.importPreview(json);
+    const result = await api.importPreview(json);
     packJson.value = json;
+    meta.value = result;
     packName.value = path.split("/").pop() ?? path;
-    rows.value = previews.map((preview) => ({ preview, action: preview.suggestion }));
+    rows.value = result.projects.map((preview) => ({ preview, action: preview.suggestion }));
   } catch (e) {
     error.value = String(e);
     reportError(String(e));
@@ -147,6 +151,23 @@ async function apply(): Promise<void> {
       </div>
 
       <p v-if="rows.length === 0 && !packName" class="pack-empty">{{ t("transfer.noPreview") }}</p>
+
+      <!-- 版本对照：更旧的包能读（按本机当前结构落库），如实说一句 -->
+      <p v-if="meta?.packIsOlder" class="pack-hint">
+        {{ t("transfer.olderPack", { pack: meta.packSchemaVersion, local: meta.localSchemaVersion }) }}
+      </p>
+
+      <!-- 本机缺的仓库：引导逐个打开 / clone（打开即登记），登记后未关联条目可一键回填 -->
+      <div v-if="meta && meta.missingRepos.length" class="pack-repos">
+        <p class="pack-repos-title">{{ t("transfer.missingRepos", { n: meta.missingRepos.length }) }}</p>
+        <ul class="pack-repos-list">
+          <li v-for="r in meta.missingRepos" :key="r.originUrl ?? ''" class="pack-repos-item">
+            <code>{{ r.originUrl }}</code>
+            <span v-if="r.sourceType" class="pack-repos-type">{{ r.sourceType }}</span>
+          </li>
+        </ul>
+        <p class="pack-hint">{{ t("transfer.missingReposHint") }}</p>
+      </div>
 
       <ul v-if="rows.length" class="pack-list">
         <li v-for="row in rows" :key="row.preview.id" class="pack-item">
@@ -259,6 +280,41 @@ async function apply(): Promise<void> {
 .pack-empty {
   margin: 10px 0;
   font-size: var(--font-sm);
+  color: var(--text-dim);
+}
+.pack-repos {
+  margin: 0 0 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-app);
+}
+.pack-repos-title {
+  margin: 0 0 4px;
+  font-size: var(--font-md);
+  color: var(--text);
+}
+.pack-repos-list {
+  margin: 0;
+  padding: 0 0 0 2px;
+  list-style: none;
+}
+.pack-repos-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 0;
+  font-size: var(--font-sm);
+  color: var(--text-dim);
+}
+.pack-repos-item code {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pack-repos-type {
+  flex: none;
+  font-size: var(--font-xs);
   color: var(--text-dim);
 }
 .pack-list {

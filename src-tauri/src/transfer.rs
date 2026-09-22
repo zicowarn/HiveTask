@@ -103,6 +103,20 @@ pub enum ImportAction {
     Keep,
 }
 
+/// 预览的整体结果：版本对照 + 本机缺失的仓库清单 + 逐项目行。
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImportPreviewResult {
+    pub pack_schema_version: i64,
+    pub local_schema_version: i64,
+    /// 包来自更旧的应用版本（导入按本机当前结构落库——老包能读，值得提示一句）。
+    pub pack_is_older: bool,
+    /// 包引用了、但**本机登记表里没有**的仓库（origin_url + 来源类型）。
+    /// 用途 = 引导逐个打开 / clone（打开即登记），登记后未关联条目即可回填。
+    pub missing_repos: Vec<PackRefs>,
+    pub projects: Vec<ImportPreview>,
+}
+
 /// 单项目的导入预览（对话框据此预选）。
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -376,6 +390,40 @@ pub fn export_pack_in(conn: &Connection, project_ids: Option<&[String]>) -> Resu
 
 // ---- 导入 ----
 
+/// 版本闸：包比本机 schema 新 → 拒（本机不认识新结构，硬导会丢字段）；
+/// 包更旧 → 放行（导入按本机当前结构落库），但如实标出来供对话框提示。
+pub fn check_pack_version(pack: &Pack, local: i64) -> Result<bool, String> {
+    if pack.schema_version > local {
+        return Err(format!(
+            "设备包来自更新的 HiveTask（结构 v{} > 本机 v{}）——先升级应用再导入。",
+            pack.schema_version, local
+        ));
+    }
+    Ok(pack.schema_version < local)
+}
+
+/// 包引用了、本机没登记的仓库（归一化比对，与导入解析、回填共用同一把尺子）。
+pub fn missing_repos_in(conn: &Connection, pack: &Pack) -> Vec<PackRefs> {
+    let mut known_keys: Vec<String> = Vec::new();
+    if let Ok(mut st) = conn.prepare("SELECT remote_url FROM repos") {
+        if let Ok(rows) = st.query_map([], |r| r.get::<_, Option<String>>(0)) {
+            for url in rows.flatten() {
+                if let Some(k) = url.as_deref().and_then(crate::projects::origin_key) {
+                    known_keys.push(k);
+                }
+            }
+        }
+    }
+    pack.repo_hints
+        .iter()
+        .filter(|h| match h.origin_url.as_deref().and_then(crate::projects::origin_key) {
+            Some(k) => !known_keys.contains(&k),
+            None => false, // 没有 origin 的快照（本地库条目）无从引导
+        })
+        .cloned()
+        .collect()
+}
+
 /// 预览（对话框三选一的依据）：按 uuid 查本机，比较 updated_at 给建议。
 pub fn import_preview_in(conn: &Connection, pack: &Pack) -> Vec<ImportPreview> {
     pack.projects
@@ -421,6 +469,19 @@ fn repo_id_by_origin(conn: &Connection, refs: &Option<PackRefs>) -> Option<Strin
     rows.into_iter()
         .find(|(_, url)| url.as_deref().and_then(crate::projects::origin_key).as_deref() == Some(want.as_str()))
         .map(|(id, _)| id)
+}
+
+/// 预览的整体结果（版本 + 缺失仓库 + 逐项目行）。
+pub fn import_preview_result_in(conn: &Connection, pack: &Pack) -> Result<ImportPreviewResult, String> {
+    let local = crate::appdb::current_schema_version();
+    let pack_is_older = check_pack_version(pack, local)?;
+    Ok(ImportPreviewResult {
+        pack_schema_version: pack.schema_version,
+        local_schema_version: local,
+        pack_is_older,
+        missing_repos: missing_repos_in(conn, pack),
+        projects: import_preview_in(conn, pack),
+    })
 }
 
 /// 应用导入（单事务；覆盖前由调用方先打快照）。
@@ -760,6 +821,60 @@ mod tests {
         assert!(!after[0].ghost);
     }
 
+    /// 版本闸：包的 schema 比本机新 → 拒（不认识新结构，硬导会丢字段）；
+    /// 更旧 → 放行并标出来（老包能读，对话框提示一句）。
+    #[test]
+    fn pack_version_gate_rejects_newer_and_flags_older() {
+        let conn = mem_db();
+        let (pid, _) = seed(&conn);
+        let mut pack = export_pack_in(&conn, None).unwrap();
+        let local = crate::appdb::current_schema_version();
+        assert_eq!(pack.schema_version, local);
+        assert_eq!(check_pack_version(&pack, local).unwrap(), false, "同版本：不提示");
+
+        pack.schema_version = local - 1;
+        assert_eq!(check_pack_version(&pack, local).unwrap(), true, "更旧：放行但标记");
+        assert!(import_preview_result_in(&conn, &pack).unwrap().pack_is_older);
+
+        pack.schema_version = local + 1;
+        let err = check_pack_version(&pack, local).unwrap_err();
+        assert!(err.contains("更新的 HiveTask"), "{err}");
+        assert!(import_preview_result_in(&conn, &pack).is_err(), "预览也拦");
+        assert!(
+            import_apply_in(&conn, &pack, &std::collections::HashMap::new()).is_ok(),
+            "应用层不做版本闸（命令层已拦；这里守的是可测性）"
+        );
+        assert_eq!(pid.is_empty(), false);
+    }
+
+    /// 缺失仓库清单：包引用了、本机没登记的才列出来（归一化比对，写法不同也算已登记）。
+    #[test]
+    fn preview_lists_repos_missing_locally() {
+        let conn = mem_db();
+        // 本机登记了 o/r（写法带 .git 与大写）
+        conn.execute(
+            "INSERT INTO repos (id, path, display_name, remote_url, created_at, last_opened_at)
+             VALUES ('r1', '/tmp/r1', 'demo', 'https://github.com/o/r.git', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+            [],
+        )
+        .unwrap();
+        let (pid, _) = seed(&conn);
+        let mut pack = export_pack_in(&conn, None).unwrap();
+        // 包引用两个来源：一个本机有（写法不同）、一个没有
+        pack.repo_hints = vec![
+            PackRefs { origin_url: Some("https://GitHub.com/O/R".into()), source_type: Some("github".into()) },
+            PackRefs { origin_url: Some("https://gitea.example.com:3000/team/x".into()), source_type: Some("gitea".into()) },
+        ];
+        let missing = missing_repos_in(&conn, &pack);
+        assert_eq!(missing.len(), 1, "只列本机没有的");
+        assert_eq!(missing[0].origin_url.as_deref(), Some("https://gitea.example.com:3000/team/x"));
+        let result = import_preview_result_in(&conn, &pack).unwrap();
+        assert_eq!(result.missing_repos.len(), 1);
+        assert_eq!(result.projects.len(), 1);
+        assert_eq!(result.projects[0].id, pid);
+        assert_eq!(result.local_schema_version, crate::appdb::current_schema_version());
+    }
+
     #[test]
     fn backup_makes_file_once_per_day_and_prunes() {
         let tmp = std::env::temp_dir().join(format!("ht-backup-test-{}", std::process::id()));
@@ -843,15 +958,15 @@ pub fn export_pack(project_ids: Option<Vec<String>>) -> Result<String, String> {
     serde_json::to_string_pretty(&pack).map_err(|e| e.to_string())
 }
 
-/// 导入预览（按 uuid 逐项目给建议：新增 / 覆盖 / 保留）。
+/// 导入预览：版本闸 + 本机缺失仓库清单 + 逐项目建议（新增 / 覆盖 / 保留）。
 #[tauri::command]
-pub fn import_preview(pack_json: String) -> Result<Vec<ImportPreview>, String> {
+pub fn import_preview(pack_json: String) -> Result<ImportPreviewResult, String> {
     let conn = crate::appdb::open().map_err(|e| e.to_string())?;
     let pack: Pack = serde_json::from_str(&pack_json).map_err(|e| format!("设备包解析失败：{e}"))?;
     if pack.format != "hivetask.export" {
         return Err(format!("不是 HiveTask 设备包（format={}）", pack.format));
     }
-    Ok(import_preview_in(&conn, &pack))
+    import_preview_result_in(&conn, &pack)
 }
 
 /// 应用导入：覆盖前打操作级快照；全程单事务（失败整体回滚）。
@@ -861,6 +976,8 @@ pub fn import_apply(
     decisions: std::collections::HashMap<String, ImportAction>,
 ) -> Result<(usize, usize, usize), String> {
     let pack: Pack = serde_json::from_str(&pack_json).map_err(|e| format!("设备包解析失败：{e}"))?;
+    // 纵深：命令可被直接调用，版本闸在预览与应用两处都过
+    check_pack_version(&pack, crate::appdb::current_schema_version())?;
     let dir = crate::appdb::app_data_dir().ok_or_else(|| "找不到应用数据目录".to_string())?;
     let will_overwrite = decisions.values().any(|a| *a == ImportAction::Overwrite);
     if will_overwrite {

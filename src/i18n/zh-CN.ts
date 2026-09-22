@@ -250,6 +250,8 @@ export const zhCN = {
   "project.rename": "重命名",
   "project.delete": "删除项目",
   "project.deleteConfirm": "删除项目将同时删除其全部条目与字段值，确定？",
+  "project.export": "导出",
+  "project.exportHint": "把这个项目导出为设备包（hivetask.export）——用于备份或传到另一台设备；导入端按项目三选一。",
   "project.unlinked": "未关联",
   "project.unlinkedNote": "来源仓库尚未登记（{origin}）——在上方登记或打开该仓库后，点「重新关联」即可挂回。",
   "project.unlinkedUnknown": "来源未知",
@@ -1056,6 +1058,9 @@ export const zhCN = {
   "transfer.confirmOverwrite": "再点一次：覆盖 {n} 个项目",
   "transfer.applying": "导入中…",
   "transfer.applied": "导入完成：新增 {added} · 覆盖 {overwritten} · 保留 {kept}",
+  "transfer.olderPack": "包来自更旧的 HiveTask（结构 v{pack}，本机 v{local}）——按本机当前结构导入。",
+  "transfer.missingRepos": "此包引用的 {n} 个仓库本机未登记：",
+  "transfer.missingReposHint": "逐个打开或 clone 这些仓库即自动登记；登记后到项目面板点「重新关联」，未关联条目会挂回（条目里存了来源快照）。",
 } as const;
 
 export type MessageKey = keyof typeof zhCN;

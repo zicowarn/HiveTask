@@ -249,6 +249,8 @@ export const enUS: Record<MessageKey, string> = {
   "project.rename": "Rename",
   "project.delete": "Delete project",
   "project.deleteConfirm": "Deleting removes all items and field values. Continue?",
+  "project.export": "Export",
+  "project.exportHint": "Export this project as a device pack (hivetask.export) — for backup or moving to another device; the importer decides per project.",
   "project.unlinked": "Not linked",
   "project.unlinkedNote": "Its source repository is not registered yet ({origin}). Register or open that repo, then click \"Relink\" to attach it.",
   "project.unlinkedUnknown": "source unknown",
@@ -1055,4 +1057,7 @@ export const enUS: Record<MessageKey, string> = {
   "transfer.confirmOverwrite": "Click again to overwrite {n}",
   "transfer.applying": "Importing…",
   "transfer.applied": "Import done: added {added} · overwritten {overwritten} · kept {kept}",
+  "transfer.olderPack": "Pack comes from an older HiveTask (schema v{pack}, this device v{local}) — importing into the current structure.",
+  "transfer.missingRepos": "{n} repo(s) referenced by this pack are not registered here:",
+  "transfer.missingReposHint": "Open or clone each repo to register it; afterwards use \"Relink\" in the project panel and the unlinked items attach themselves (each item keeps its origin snapshot).",
 };

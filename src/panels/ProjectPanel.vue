@@ -19,7 +19,8 @@ import { resolvePanel } from "../workbench/registry";
 import { useProjectsStore } from "../stores/projects";
 import { useI18n } from "../i18n";
 import { api } from "../api";
-import { reportError } from "../gh-errors";
+import { reportError, translateError } from "../gh-errors";
+import { pushToast } from "../toast";
 
 defineProps<{ leafId?: string; panelType?: string }>();
 
@@ -34,6 +35,24 @@ const { projects, loading, error, publishError } = storeToRefs(store);
 
 // 视图页签（对齐平台）：页签 = 视图，布局是视图属性（View 弹层的 Layout 分段切换）。
 const activeMode = computed(() => modes.find((m) => m.key === store.layout) ?? modes[0]);
+
+/** 导出**当前项目**为设备包（单项目 = 数组长度 1 的同一个格式；《导出与导入》§设备包）。 */
+const exporting = ref(false);
+async function exportProject(): Promise<void> {
+  const project = store.selected;
+  if (!project || exporting.value) return;
+  exporting.value = true;
+  try {
+    const json = await api.exportPack([project.id]);
+    const name = `${project.displayName || "project"}.export`.replace(/[/\\]/g, "-");
+    const saved = await api.saveTextFile(name, json);
+    if (saved) pushToast({ kind: "success", message: t("transfer.exported", { path: saved }) });
+  } catch (e) {
+    pushToast({ kind: "error", message: translateError(String(e)) });
+  } finally {
+    exporting.value = false;
+  }
+}
 
 /** 新建视图：平台该按钮是 ActionMenu（已取证 haspopup=true）——先选布局再建。 */
 const newViewItems = computed(() => [
@@ -200,6 +219,12 @@ function openItemInWorkspace(item: ProjectItem) {
   <PanelShell :leaf-id="leafId" :panel-type="panelType">
     <template #actions>
       <span v-if="syncNote" class="sync-note">{{ syncNote }}</span>
+      <button
+        class="refresh-btn"
+        :disabled="!store.selected || exporting"
+        :title="t('project.exportHint')"
+        @click="exportProject"
+      >{{ exporting ? t("common.syncing") : t("project.export") }}</button>
       <button
         class="refresh-btn"
         :disabled="syncing || !store.selected"
