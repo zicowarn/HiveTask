@@ -26,6 +26,10 @@ export interface ActionItem {
   noChevron?: boolean;
   /** 二级面板条目（如「移动到列」）；点击本行进入二级面板。 */
   submenu?: ActionItem[];
+  /** 选择型二级条目的当前值标记（✓ 行首）。
+   *  仅当**显式给了**该字段（true/false 皆可）时才渲染行首勾选列——
+   *  不用的菜单（列/组动作等）版式与既有完全一致。 */
+  checked?: boolean;
   /** 本行之前画一条分组分隔线（平台菜单形态）。 */
   dividerBefore?: boolean;
   /** 禁用项（平台形态：灰字、不可点，如最左列的 Move left）。 */
@@ -226,6 +230,9 @@ onBeforeUnmount(() => {
           :class="{ danger: sub.danger }"
           @click.stop="pick(sub)"
         >
+          <span v-if="sub.checked !== undefined" class="am-lead">
+            <EditorIcon v-if="sub.checked" name="o.check" />
+          </span>
           <EditorIcon v-if="sub.icon" :name="sub.icon" />
           <span class="am-label">{{ sub.label }}</span>
           <span v-if="sub.badge" class="am-badge">{{ sub.badge }}</span>
@@ -375,6 +382,17 @@ onBeforeUnmount(() => {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+/* 选择型二级条目的勾选列（未选中留位，避免文字抖动） */
+.am-lead {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--icon-size, 14px);
+}
+.am-lead .editor-icon {
+  color: var(--accent);
 }
 .am-item .editor-icon {
   flex: none;
