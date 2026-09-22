@@ -206,6 +206,18 @@ pub trait Source: Send + Sync {
     fn remove_issue_dependency(&self, _repo: &RepoRef, _blocked: &str, _blocker: &str) -> Result<()> {
         Err(anyhow!("该来源不支持依赖编辑"))
     }
+
+    /// 平台父子写（G3-b 对称）：让 `child` 成为 `parent` 的子 Issue。
+    /// 能力（《架构设计-甘特计划面》§4.2 实证）：GitHub 有原生 sub-issues
+    /// （REST POST/DELETE，sub_issue_id 需**子条目数据库 id**）；**Gitea 无关**（只有
+    /// issue subscriptions，非父子）；Gitee 无端点 → 默认明确拒绝（诚实，不假成功）。
+    /// 容器形态走 `project_parent_*`（§3 结构扩展泳道），不经此。
+    fn add_issue_parent(&self, _repo: &RepoRef, _child: &str, _parent: &str) -> Result<()> {
+        Err(anyhow!("该来源不支持父子编辑"))
+    }
+    fn remove_issue_parent(&self, _repo: &RepoRef, _child: &str, _parent: &str) -> Result<()> {
+        Err(anyhow!("该来源不支持父子编辑"))
+    }
 }
 
 /// JSON 编号字段 → 文本口径：字符串直取（Gitee v5 issue "IKCTH7"），

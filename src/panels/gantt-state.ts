@@ -132,6 +132,20 @@ export function useGanttState() {
         }),
       );
       relationsByKey.value = merged;
+      // 平台 sub-issues → 父子里程碑镜像（§3 结构泳道；origin 行，真源行优先）
+      const parentMirror = new Map<string, { itemId: string; dependsOn: string }[]>();
+      for (const it of filteredItems.value) {
+        const parentRef = relationsByKey.value[relKey(it.repoId, it.number)]?.parent;
+        if (!it.repoId || !parentRef) continue;
+        const up = filteredItems.value.find(
+          (x) => x.repoId === it.repoId && x.number === parentRef.number,
+        );
+        if (!up) continue;
+        const origin = repoPlatform.value[it.repoId] || "gh";
+        const list = parentMirror.get(origin) ?? [];
+        list.push({ itemId: it.id, dependsOn: up.id });
+        parentMirror.set(origin, list);
+      }
       // 平台负责人 → 资源目录镜像（§5-bis R1）
       const logins = new Set<string>();
       for (const it of filteredItems.value) for (const a of it.entity?.assignees ?? []) logins.add(a);
@@ -148,6 +162,14 @@ export function useGanttState() {
           await store.syncPlatformDeps(origin, edges);
         } catch {
           /* 持久化失败静默：下次拉取再同步 */
+        }
+      }
+      // 父子镜像持久化（同规则；真源行优先——Rust 侧 INSERT OR IGNORE 保证）
+      for (const [origin, edges] of parentMirror) {
+        try {
+          await store.syncPlatformParents(origin, edges);
+        } catch {
+          /* 同上：静默，下次再同步 */
         }
       }
     } catch (e) {
@@ -263,6 +285,32 @@ export function useGanttState() {
     for (const dep of have) if (!want.has(dep)) await removeEdge(nodeId, dep);
   }
 
+  /** 父子写路由（G3-b 对称）：两端皆平台 Issue 且同仓 → 写穿透（GitHub sub-issues，
+   *  Gitea/Gitee 无端点 → 明确拒绝）；否则走容器结构泳道（我们排的计划）。 */
+  async function setParent(childId: string, parentId: string | null) {
+    const current = nodeById.value.get(childId)?.parentId ?? null;
+    if (parentId === current) return;
+    if (parentId) {
+      const ctx = platformWriteCtx(childId, parentId);
+      if (ctx) {
+        await api.issueParentSet(ctx.repoPath, ctx.aNumber, ctx.repoPath, ctx.bNumber);
+        return;
+      }
+      if (isContainerForm(childId) || isContainerForm(parentId)) {
+        await store.setItemParent(childId, parentId);
+        return;
+      }
+      throw new Error(t("gantt.parentPlatformUnsupported"));
+    }
+    if (!current) return;
+    const ctx = platformWriteCtx(childId, current);
+    if (ctx) {
+      await api.issueParentClear(ctx.repoPath, ctx.aNumber, ctx.repoPath, ctx.bNumber);
+      return;
+    }
+    await store.clearItemParent(childId);
+  }
+
   /** 合并图（平台镜像 ∪ 容器真源）：环检测在合并图上做（跨形态环才拦得住）。 */
   const graphDeps = computed<Record<string, string[]>>(() => {
     const out: Record<string, string[]> = {};
@@ -323,6 +371,7 @@ export function useGanttState() {
     addEdge,
     removeEdge,
     syncPredecessors,
+    setParent,
     graphDeps,
     reportError: (e: unknown) => pushToast({ kind: "error", message: translateError(String(e)) }),
     wouldCreateCycle,

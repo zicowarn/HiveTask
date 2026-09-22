@@ -447,6 +447,7 @@ export const enUS: Record<MessageKey, string> = {
   "gantt.newTaskName": "New task",
   "gantt.depCycle": "Would create a dependency cycle — cancelled",
   "gantt.depPlatformUnsupported": "Dependency write-back not supported for this item (Gitee has no API; cross-repo not yet)",
+  "gantt.parentPlatformUnsupported": "Parent-child write-back not supported here (Gitea/Gitee have no sub-issues; cross-repo not yet)",
   "gantt.scaleDay": "Day",
   "gantt.scaleWeek": "Week",
   "gantt.scaleMonth": "Month",

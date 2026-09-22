@@ -448,6 +448,7 @@ export const zhCN = {
   "gantt.newTaskName": "新任务",
   "gantt.depCycle": "会形成循环依赖，已取消",
   "gantt.depPlatformUnsupported": "该平台条目不支持依赖写回（Gitee 无此 API；跨仓库暂不支持）",
+  "gantt.parentPlatformUnsupported": "该平台条目不支持父子写回（Gitea/Gitee 无 sub-issues；跨仓库暂不支持）",
   "gantt.scaleDay": "日",
   "gantt.scaleWeek": "周",
   "gantt.scaleMonth": "月",

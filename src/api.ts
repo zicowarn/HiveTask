@@ -820,6 +820,12 @@ export const api = {
     invoke<void>("issue_dependency_add", { blockedRepo, blockedNumber, blockerRepo, blockerNumber }),
   issueDependencyRemove: (blockedRepo: string, blockedNumber: string, blockerRepo: string, blockerNumber: string) =>
     invoke<void>("issue_dependency_remove", { blockedRepo, blockedNumber, blockerRepo, blockerNumber }),
+  /** 平台父子写（G3-b 对称）：GitHub 原生 sub-issues；Gitea/Gitee 无（明确拒绝）。
+   *  容器形态走 projectParent*（§3 结构扩展泳道）。 */
+  issueParentSet: (childRepo: string, childNumber: string, parentRepo: string, parentNumber: string) =>
+    invoke<void>("issue_parent_set", { childRepo, childNumber, parentRepo, parentNumber }),
+  issueParentClear: (childRepo: string, childNumber: string, parentRepo: string, parentNumber: string) =>
+    invoke<void>("issue_parent_clear", { childRepo, childNumber, parentRepo, parentNumber }),
   labelList: (repoPath: string) => invoke<LabelInfo[]>("label_list", { repoPath }),
   createLabel: (repoPath: string, name: string, color: string) =>
     invoke<LabelInfo>("create_label", { repoPath, name, color }),

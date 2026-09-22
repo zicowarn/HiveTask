@@ -625,6 +625,50 @@ fn issue_relations(repo_path: String, number: String) -> Result<models::IssueRel
         .map_err(|e| e.to_string())
 }
 
+/// 平台父子写（G3-b 对称）：让 child 成为 parent 的子 Issue。两端须**同一仓库**
+/// （GitHub sub-issues 的跨仓支持未取证，不假承诺）；容器形态走 project_parent_*
+/// （§3 结构扩展泳道）不经此。
+#[tauri::command]
+fn issue_parent_set(
+    child_repo: String,
+    child_number: String,
+    parent_repo: String,
+    parent_number: String,
+) -> Result<(), String> {
+    issue_parent_write(&child_repo, &child_number, &parent_repo, &parent_number, true)
+}
+
+#[tauri::command]
+fn issue_parent_clear(
+    child_repo: String,
+    child_number: String,
+    parent_repo: String,
+    parent_number: String,
+) -> Result<(), String> {
+    issue_parent_write(&child_repo, &child_number, &parent_repo, &parent_number, false)
+}
+
+fn issue_parent_write(
+    child_repo: &str,
+    child_number: &str,
+    parent_repo: &str,
+    parent_number: &str,
+    add: bool,
+) -> Result<(), String> {
+    let child = resolve(child_repo)?;
+    let parent = resolve(parent_repo)?;
+    if child.owner != parent.owner || child.repo != parent.repo {
+        return Err("跨仓库父子关系暂不支持写回平台".to_string());
+    }
+    let source = source::source_for_ref(child.platform.as_deref(), &child.host);
+    let result = if add {
+        source.add_issue_parent(&child, child_number, parent_number)
+    } else {
+        source.remove_issue_parent(&child, child_number, parent_number)
+    };
+    result.map_err(|e| e.to_string())
+}
+
 /// 批量关系（甘特整板装载）：编号 → 关系；不可见解不出现在结果里。
 #[tauri::command]
 fn issue_relations_batch(
@@ -1358,6 +1402,8 @@ pub fn run() {
             issue_relations_batch,
             issue_dependency_add,
             issue_dependency_remove,
+            issue_parent_set,
+            issue_parent_clear,
             label_list,
             assignee_list,
             create_label,

@@ -221,6 +221,12 @@ impl Source for GhSource {
     fn remove_issue_dependency(&self, repo: &RepoRef, blocked: &str, blocker: &str) -> Result<()> {
         remove_issue_dependency(&format!("{}/{}", repo.owner, repo.repo), blocked, blocker)
     }
+    fn add_issue_parent(&self, repo: &RepoRef, child: &str, parent: &str) -> Result<()> {
+        add_issue_parent(&format!("{}/{}", repo.owner, repo.repo), child, parent)
+    }
+    fn remove_issue_parent(&self, repo: &RepoRef, child: &str, parent: &str) -> Result<()> {
+        remove_issue_parent(&format!("{}/{}", repo.owner, repo.repo), child, parent)
+    }
 }
 
 /// 过滤器的 gh 方言（恰好与前端口径一致）。
@@ -474,6 +480,48 @@ fn remove_issue_dependency(slug: &str, blocked: &str, blocker: &str) -> Result<(
         "--method",
         "DELETE",
         &format!("{}/{id}", blocked_by_path(slug, blocked)),
+    ])?;
+    Ok(())
+}
+
+// ---- 平台父子写（G3-b 对称；REST sub-issues，官方文档实证）----
+
+/// 加子 Issue：`POST /repos/{slug}/issues/{parent}/sub_issues`（body = 子条目
+/// **数据库 id**）；`replace_parent=true` 让「设新上级」= 移动（GitHub 语义：
+/// 子条目已有父时需显式替换，否则报错）。
+pub(crate) fn sub_issues_path(slug: &str, parent: &str) -> String {
+    format!("repos/{slug}/issues/{parent}/sub_issues")
+}
+
+/// 移除子 Issue：`DELETE /repos/{slug}/issues/{parent}/sub_issue`（单数，body 同上）。
+pub(crate) fn sub_issue_path(slug: &str, parent: &str) -> String {
+    format!("repos/{slug}/issues/{parent}/sub_issue")
+}
+
+fn add_issue_parent(slug: &str, child: &str, parent: &str) -> Result<()> {
+    let id = gh_issue_database_id(slug, child)?;
+    run_gh(&[
+        "api",
+        "--method",
+        "POST",
+        &sub_issues_path(slug, parent),
+        "-F",
+        &format!("sub_issue_id={id}"),
+        "-F",
+        "replace_parent=true",
+    ])?;
+    Ok(())
+}
+
+fn remove_issue_parent(slug: &str, child: &str, parent: &str) -> Result<()> {
+    let id = gh_issue_database_id(slug, child)?;
+    run_gh(&[
+        "api",
+        "--method",
+        "DELETE",
+        &sub_issue_path(slug, parent),
+        "-F",
+        &format!("sub_issue_id={id}"),
     ])?;
     Ok(())
 }
@@ -1468,6 +1516,13 @@ mod tests {
         .expect("批量关系拉取应容忍部分失败");
         assert!(out.contains_key("14479"), "存在的编号应在结果里");
         assert!(!out.contains_key("99999999"), "不存在的编号不应造假");
+    }
+
+    /// sub-issues 写端点路径形状（GitHub REST 文档实证：POST 复数、DELETE 单数）。
+    #[test]
+    fn sub_issue_paths_shape() {
+        assert_eq!(sub_issues_path("o/r", "7"), "repos/o/r/issues/7/sub_issues");
+        assert_eq!(sub_issue_path("o/r", "7"), "repos/o/r/issues/7/sub_issue");
     }
 
     /// blocked_by 写端点路径形状（GitHub REST 文档实证：POST 无后缀、DELETE 带 id）。

@@ -279,13 +279,9 @@ async function onTaskSave(payload: TaskFormPayload) {
         await api.issueUpdateAssignees(repoPath, item.number!, names);
       }
     }
-    // 上级任务（结构扩展泳道）
-    const currentParent = editorParentId.value;
-    if (payload.parentId && payload.parentId !== currentParent) {
-      await store.setItemParent(item.id, payload.parentId);
-    } else if (!payload.parentId && currentParent) {
-      await store.clearItemParent(item.id);
-    }
+    // 上级任务：写路由在共享层（两端皆平台同仓 → 写穿透 GitHub sub-issues；
+    // 否则容器结构泳道）——与依赖边同一套分流规则
+    await g.setParent(item.id, payload.parentId);
     // 项目字段（未配置映射的跳过——没有落点就不写）
     const m = editorMapping.value;
     const writeField = async (fieldId: string | null, value: string | null) => {
