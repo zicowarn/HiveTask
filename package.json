@@ -14,7 +14,10 @@
     "lint": "eslint .",
     "lint:rust": "cargo clippy --all-targets",
     "format": "prettier --write src",
-    "gate": "bash scripts/gate.sh"
+    "gate": "bash scripts/gate.sh",
+    "gate:web": "bash scripts/gate.sh --web",
+    "gate:rust": "bash scripts/gate.sh --rust",
+    "gate:fast": "bash scripts/gate.sh --fast"
   },
   "dependencies": {
     "@codemirror/autocomplete": "^6.20.3",

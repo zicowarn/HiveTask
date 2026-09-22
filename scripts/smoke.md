@@ -2,7 +2,8 @@
 
 > 目的：终结"每次验证现场发明工具"的试错循环。本文件只收录**在本项目实测可靠**的
 > 手段；新手段必须实测连续成功 3 次后才可收录。
-> 纯逻辑验证不走本手册——先跑 `pnpm gate`（i18n/ESLint/Vitest/vue-tsc/clippy/cargo test）。
+> 纯逻辑验证不走本手册——先跑门禁（分层见 AGENTS.md「质量门禁」：小步用
+> `pnpm gate:fast`，提交前 `pnpm gate` 全量六步）。
 
 ## 背景：dev 与生产的端口模型
 
