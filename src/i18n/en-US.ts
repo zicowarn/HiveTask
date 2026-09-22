@@ -9,6 +9,7 @@ export const enUS: Record<MessageKey, string> = {
   "app.repoNone": "No repository",
   "app.repoPick": "Choose repository",
   "app.repoSwitch": "Switch repository",
+  "app.moreActions": "More actions",
   "app.ghMissing": "gh CLI not found. Install and sign in first:",
   "repoTab.github": "GitHub",
   "repoTab.gitee": "Gitee",

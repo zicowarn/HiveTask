@@ -4,6 +4,7 @@ import { storeToRefs } from "pinia";
 import WorkbenchNode from "./workbench/WorkbenchNode.vue";
 import StatusBar from "./workbench/StatusBar.vue";
 import AppMenu from "./components/AppMenu.vue";
+import ActionMenu, { type ActionItem } from "./components/ActionMenu.vue";
 import ProjectManager from "./components/ProjectManager.vue";
 import AboutDialog from "./components/AboutDialog.vue";
 import RepoManager from "./components/RepoManager.vue";
@@ -12,10 +13,10 @@ import ToastHost from "./components/ToastHost.vue";
 import SwitchKnowledgeDialog from "./knowledge/SwitchKnowledgeDialog.vue";
 import { workspaces } from "./workbench/registry";
 import { buildMenuDefs } from "./menu-defs";
-import { startReminderScheduler } from "./reminder-scheduler";
 import { syncApplicationMenu } from "./native-menu";
 import { openExternalUrl } from "./open-url";
 import { api, isTauri } from "./api";
+import { startReminderScheduler } from "./reminder-scheduler";
 import { keepsNativeContextMenu } from "./context-menu";
 import { useRepoStore } from "./stores/repo";
 import { useIssuesStore } from "./stores/issues";
@@ -96,6 +97,55 @@ async function copyGithubUrl() {
 const aboutOpen = ref(false);
 const repoManagerOpen = ref(false);
 const projectPickerOpen = ref(false);
+
+// ---- 头部窄窗折叠（两级）----
+// 头部各元素自然宽度合计约 1060px，窗口（Tauri 最小 900）窄于此就会挤压文字。
+// 一级：收起仓库/项目/知识库的路径文字（名称与路径在状态栏仍在）；
+// 二级：整块（含「切换 X」）折进「⋯」溢出菜单。断点由实测自然宽度定，
+// 见 CSS 的 .header-overflow / @media 段。
+function openCurrentSwitch() {
+  if (activeKey.value === "projects") projectPickerOpen.value = true;
+  else if (activeKey.value === "knowledge") knowledge.openSwitch();
+  else repoManagerOpen.value = true;
+}
+
+/** 当前上下文名（溢出菜单组标题）：与头部 repo-box 里显示的那一项一致。 */
+const headerContextName = computed(() => {
+  if (activeKey.value === "projects")
+    return projectsStore.selected?.displayName ?? t("app.projectNone");
+  if (activeKey.value === "knowledge") return knowledge.rootName || t("app.knowledgeNone");
+  return current.value || t("app.repoNone");
+});
+
+/** 溢出菜单：「切换 X」是唯一入口（二级折叠时可见）——文案与头部按钮同一条件，
+ *  未选择时是「选择 X」而不是「切换 X」。通用工作区没有可切换的上下文 → 空。 */
+const headerOverflowItems = computed<ActionItem[]>(() => {
+  if (activeKey.value === "general") return [];
+  const group = headerContextName.value;
+  if (activeKey.value === "projects")
+    return [{ value: "switch", label: t("app.projectSwitch"), group, icon: "o.stack" }];
+  if (activeKey.value === "knowledge")
+    return [
+      {
+        value: "switch",
+        label: knowledge.root ? t("kb.switchRoot") : t("kb.pickRoot"),
+        group,
+        icon: "o.book",
+      },
+    ];
+  return [
+    {
+      value: "switch",
+      label: current.value ? t("app.repoSwitch") : t("app.repoPick"),
+      group,
+      icon: "o.repo",
+    },
+  ];
+});
+
+function onHeaderOverflowPick(value: string) {
+  if (value === "switch") openCurrentSwitch();
+}
 
 // RepoManager 的 select：本地路径 / 仅远端 URL 都在此切换当前仓库。
 function onRepoManagerSelect(target: string) {
@@ -353,23 +403,44 @@ onBeforeUnmount(() => {
       </div>
 
       <div class="header-actions">
+        <!-- 二级折叠（窄窗）：仓库/项目/知识库整块 + 「切换 X」折进这里；
+             通用工作区没有上下文可折 → 整个「⋯」不出现 -->
+        <div v-if="headerOverflowItems.length" class="header-overflow">
+          <ActionMenu
+            :items="headerOverflowItems"
+            size="ui"
+            :title="t('app.moreActions')"
+            @pick="onHeaderOverflowPick"
+          >
+            <template #trigger="{ open, toggle }">
+              <button
+                class="header-btn overflow-btn"
+                :title="t('app.moreActions')"
+                :aria-expanded="open"
+                @click.stop="toggle"
+              >
+                <EditorIcon name="ellipsis" />
+              </button>
+            </template>
+          </ActionMenu>
+        </div>
         <button
           v-if="activeKey === 'projects'"
-          class="header-btn"
+          class="header-btn header-switch-btn"
           @click="projectPickerOpen = true"
         >
           {{ t("app.projectSwitch") }}
         </button>
         <button
           v-else-if="activeKey === 'knowledge'"
-          class="header-btn"
+          class="header-btn header-switch-btn"
           @click="knowledge.openSwitch()"
         >
           {{ knowledge.root ? t("kb.switchRoot") : t("kb.pickRoot") }}
         </button>
         <button
           v-else-if="activeKey !== 'general'"
-          class="header-btn"
+          class="header-btn header-switch-btn"
           @click="repoManagerOpen = true"
         >
           {{ current ? t("app.repoSwitch") : t("app.repoPick") }}
@@ -502,6 +573,8 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: baseline;
   gap: 7px;
+  flex: none;
+  white-space: nowrap;
 }
 .brand-mark {
   color: var(--accent);
@@ -519,6 +592,7 @@ onBeforeUnmount(() => {
   border: 1px solid var(--border);
   border-radius: 7px;
   padding: 2px;
+  flex: none;
 }
 .workspace-tab {
   border: none;
@@ -528,6 +602,8 @@ onBeforeUnmount(() => {
   padding: 3px 12px;
   border-radius: 5px;
   cursor: pointer;
+  flex: none;
+  white-space: nowrap;
 }
 .workspace-tab:hover {
   color: var(--text);
@@ -557,6 +633,7 @@ onBeforeUnmount(() => {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  min-width: 0;
 }
 .repo-origin {
   font-size: var(--font-sm);
@@ -565,10 +642,17 @@ onBeforeUnmount(() => {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  min-width: 0;
+  /* 头部余量不足时，路径框与 owner 前缀按 1:4 收缩（各自截断出省略号）——
+     让位次序：owner 前缀 > 仓库名 > 徽标/按钮（后者 flex:none 永不让位）。
+     这是断点之外的兜底：内容比断点假设的更长（超长路径、德文等宽语言）时，
+     压缩落在设计好要截断的路径框上，而不是把中文按钮挤成竖排。 */
+  flex-shrink: 4;
 }
 .repo-hint {
   font-size: var(--font-md);
   color: var(--text-dim);
+  white-space: nowrap;
 }
 /* 头部可见性徽标：锁/开锁 + 短文字（状态栏与列表保持纯图标） */
 .vis-badge {
@@ -592,6 +676,12 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   gap: 8px;
+  flex: none;
+}
+/* 窄窗二级折叠：仓库/项目/知识库整块 + 「切换 X」按钮收起后，入口在这里
+   （默认隐藏，只在二级断点下显示——见文件末尾 @media 段） */
+.header-overflow {
+  display: none;
 }
 .header-btn {
   border: 1px solid var(--border);
@@ -601,6 +691,13 @@ onBeforeUnmount(() => {
   padding: 4px 14px;
   border-radius: 6px;
   cursor: pointer;
+  flex: none;
+  white-space: nowrap;
+}
+.overflow-btn {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 9px;
 }
 .theme-btn {
   padding: 4px 10px;
@@ -624,6 +721,34 @@ onBeforeUnmount(() => {
   color: var(--danger);
   background: var(--danger-banner);
   border-bottom: 1px solid var(--danger-banner-border);
+}
+
+/* 头部窄窗两级折叠。断点来自逐宽度实测（元素自然宽度合计，取最长形态：
+   路径顶到 max-width 280 + owner 前缀）：
+   L0 全展开 ≈ 1060–1100px；L1 收起路径文字 ≈ 710–750px；L2 整块折进「⋯」后 ≈ 570px。
+   窗口窄于自然宽度时若不折叠，被压缩的是文字——中文挤成一字一行、按钮变竖排。 */
+
+/* 一级：先收路径文字（名称与路径在状态栏仍在），保留可见性徽标与「切换 X」。
+   Tauri 窗口最小 900，故 900–1120 这一段是 L1 的常用区间。 */
+@media (max-width: 1120px) {
+  .repo-path,
+  .repo-origin {
+    display: none;
+  }
+}
+
+/* 二级：整块（含「切换 X」）折进「⋯」溢出菜单。
+   本断点低于 Tauri 的 minWidth 900，实机窗口拉不到这一档——它是浏览器预览/Web
+   构建的实况，也是将来放宽 minWidth 时的地板。 */
+@media (max-width: 760px) {
+  .repo-box,
+  .header-switch-btn {
+    display: none;
+  }
+  .header-overflow {
+    display: flex;
+    flex: none;
+  }
 }
 .gh-warning code {
   background: var(--danger-soft);

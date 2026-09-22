@@ -10,6 +10,7 @@ export const zhCN = {
   "app.repoNone": "未选择仓库",
   "app.repoPick": "选择仓库",
   "app.repoSwitch": "切换仓库",
+  "app.moreActions": "更多操作",
   "app.ghMissing": "未检测到 gh CLI。请先安装并完成登录：",
   "repoTab.github": "GitHub",
   "repoTab.gitee": "Gitee",
