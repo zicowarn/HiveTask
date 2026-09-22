@@ -248,7 +248,14 @@ export const useProjectsStore = defineStore("projects", () => {
     return tokens;
   }
 
-  /** 过滤 + 排序后的条目（切片过滤之前；左导航的计数与 Team items 值列表用它）。 */
+  /** 未归档条目（"照常可见"的那批）——视图取数与各处的计数都从它出发；
+   *  与 archivedItems 互补，合起来是当前项目的全部条目。 */
+  const activeItems = computed(() => items.value.filter((i) => !i.archivedAt));
+
+  /** 过滤 + 排序后的条目（切片过滤之前；左导航的计数与 Team items 值列表用它）。
+   *  **归档项在这里统一排除**：平台口径（2026-09-22 取证）是归档 = 移出所有视图
+   *  ——看板/表格/线路图/甘特/导出/计数全走这一个口子，归档只可能在
+   *  「已归档条目」Editor（archivedItems）里再出现。 */
   const preSliceItems = computed(() => {
     const statusF = fields.value.find((f) => f.kind === "builtin_status") ?? null;
     const prioF = fields.value.find((f) => f.name === "优先级") ?? null;
@@ -285,7 +292,7 @@ export const useProjectsStore = defineStore("projects", () => {
       }
       return true;
     };
-    const sorted = [...items.value].filter(matches);
+    const sorted = [...activeItems.value].filter(matches);
     const fs = view.value.fieldSort;
     if (fs) {
       const field = fields.value.find((f) => f.id === fs.fieldId) ?? null;
@@ -338,6 +345,15 @@ export const useProjectsStore = defineStore("projects", () => {
     if (!key || val === null) return preSliceItems.value;
     return preSliceItems.value.filter((i) => sliceValuesOf(i, key).includes(val));
   });
+
+  /** 已归档条目（「已归档条目」Editor 的取数口）——与 filteredItems 互补：
+   *  两者不相交，合起来是当前项目的全部条目。按归档时间倒序（最近归档在前；
+   *  平台归档页未定义排序，这是桌面适配）。 */
+  const archivedItems = computed(() =>
+    items.value
+      .filter((i) => i.archivedAt)
+      .sort((a, b) => (b.archivedAt ?? "").localeCompare(a.archivedAt ?? "")),
+  );
 
   const selected = computed(() => projects.value.find((p) => p.id === selectedId.value) ?? null);
   /** 抽屉当前条目（按 id 取，字段写入重载后自动更新）。 */
@@ -1209,6 +1225,15 @@ export const useProjectsStore = defineStore("projects", () => {
     items.value = items.value.filter((i) => i.id !== itemId);
   }
 
+  /** 归档 / 还原条目（对齐平台：条目 ⋯ → Archive、归档页 → Restore）。
+   *  归档不删行，就地改这一个条目即可（同 removeItem 的粒度，不整表重载）；
+   *  时间戳按后端格式（秒级 UTC）本地盖章——视图侧只看"有没有"，展示到日。 */
+  async function archiveItem(itemId: string, archived: boolean) {
+    await api.projectItemArchive(itemId, archived);
+    const stamp = archived ? new Date().toISOString().replace(/\.\d+Z$/, "Z") : null;
+    items.value = items.value.map((i) => (i.id === itemId ? { ...i, archivedAt: stamp } : i));
+  }
+
   async function updateDraft(itemId: string, title: string, body?: string) {
     const updated = await api.projectItemUpdateDraft(itemId, title, body);
     items.value = items.value.map((i) => (i.id === updated.id ? updated : i));
@@ -1283,6 +1308,8 @@ export const useProjectsStore = defineStore("projects", () => {
     duplicateView,
     deleteView,
     filteredItems,
+    archivedItems,
+    activeItems,
     sliceActive,
     sliceFieldName,
     sliceRows,
@@ -1334,6 +1361,7 @@ export const useProjectsStore = defineStore("projects", () => {
     addItem,
     moveItem,
     removeItem,
+    archiveItem,
     updateDraft,
     setPriority,
     convertToIssue,

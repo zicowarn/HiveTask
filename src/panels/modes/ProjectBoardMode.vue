@@ -429,9 +429,9 @@ async function copyText(text: string) {
   }
 }
 
-/** 卡片 ⋯ 菜单。平台另有 Copy link in project / Archive——前者需项目线上地址、
- * 后者需归档字段，均无数据面，按「不摆空控件」挂账。
- * 「在新标签页中打开」是浏览器语境动作，桌面端不落（用户定案 2026-09-16）。 */
+/** 卡片 ⋯ 菜单（顺序照平台：Copy link → Move to column → Archive → Remove）。
+ *  平台另有 Copy link in project（需项目线上地址）与「在新标签页中打开」
+ *  （浏览器语境动作，桌面端不落，用户定案 2026-09-16）——仍挂账。 */
 function cardMenuItems(item: ProjectItem): ActionItem[] {
   const out: ActionItem[] = [];
   if (issueUrlOf(item)) {
@@ -450,12 +450,19 @@ function cardMenuItems(item: ProjectItem): ActionItem[] {
     });
   }
   out.push({
+    value: "archive",
+    label: t("project.actArchive"),
+    icon: "o.archive",
+    badge: "E",
+    dividerBefore: out.length > 0,
+  });
+  out.push({
     value: "remove",
     label: t("project.actRemoveFromProject"),
     icon: "o.trash",
     danger: true,
     badge: "Del",
-    dividerBefore: out.length > 0,
+    dividerBefore: true,
   });
   return out;
 }
@@ -468,6 +475,10 @@ async function onCardMenuPick(item: ProjectItem, value: string) {
   }
   if (value.startsWith("move:")) {
     await store.moveItem(item.id, value.slice(5));
+    return;
+  }
+  if (value === "archive") {
+    await store.archiveItem(item.id, true);
     return;
   }
   if (value === "remove") await store.removeItem(item.id);

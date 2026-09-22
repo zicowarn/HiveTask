@@ -21,7 +21,6 @@ import ActionMenu, { type ActionItem } from "../../components/ActionMenu.vue";
 import ProjectOmnibar from "../ProjectOmnibar.vue";
 import IssueCreateDialog from "../IssueCreateDialog.vue";
 import ProjectAddItemsDrawer from "../ProjectAddItemsDrawer.vue";
-import { pushToast } from "../../toast";
 
 const store = useProjectsStore();
 const { filteredItems, fields, selectedId } = storeToRefs(store);
@@ -360,8 +359,7 @@ const addToTodayTip = computed(
 );
 
 // ---- 行号 ▾ 菜单（平台：悬停展开；Archive [E] / Remove from project [Del] /
-// Move item）。Archive 需归档字段数据面，点击暂以提示挂账（同 Markers 口径）；
-// Move item 的落点子菜单为桌面适配（平台是拖拽编排） ----
+// Move item）。Move item 的落点子菜单为桌面适配（平台是拖拽编排） ----
 function rowMenuItems(item: ProjectItem): ActionItem[] {
   const status = store.columnField;
   const cur = status ? (item.fieldValues[status.id] ?? "") : "";
@@ -392,7 +390,7 @@ function rowMenuItems(item: ProjectItem): ActionItem[] {
 async function onRowMenuPick(item: ProjectItem, value: string) {
   if (value.startsWith("move:")) await store.moveItem(item.id, value.slice(5));
   else if (value === "remove") await store.removeItem(item.id);
-  else if (value === "archive") pushToast({ kind: "info", message: t("project.archiveTodo") });
+  else if (value === "archive") await store.archiveItem(item.id, true);
 }
 
 // ---- Add item 行（共享 omnibar + Create dialog + 抽屉）----

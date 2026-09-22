@@ -354,7 +354,8 @@ async function toggleAssignee(item: ProjectItem, login: string) {
   }
 }
 
-// ---- 行号 ▾ 菜单（③适配：平台菜单内容未取证，先接与看板卡片同源的条目动作）----
+// ---- 行号 ▾ 菜单（③适配：平台菜单内容未取证，先接与看板卡片同源的条目动作；
+// 顺序照平台条目菜单：Move to column → Archive → Remove from project）----
 function rowMenuItems(item: ProjectItem): ActionItem[] {
   const status = store.columnField;
   const cur = status ? (item.fieldValues[status.id] ?? "") : "";
@@ -370,16 +371,25 @@ function rowMenuItems(item: ProjectItem): ActionItem[] {
     });
   }
   out.push({
+    value: "archive",
+    label: t("project.actArchive"),
+    icon: "o.archive",
+    badge: "E",
+    dividerBefore: out.length > 0,
+  });
+  out.push({
     value: "remove",
     label: t("project.actRemoveFromProject"),
     icon: "o.trash",
     danger: true,
-    dividerBefore: out.length > 0,
+    badge: "Del",
+    dividerBefore: true,
   });
   return out;
 }
 async function onRowMenuPick(item: ProjectItem, value: string) {
   if (value.startsWith("move:")) await store.moveItem(item.id, value.slice(5));
+  else if (value === "archive") await store.archiveItem(item.id, true);
   else if (value === "remove") await store.removeItem(item.id);
 }
 

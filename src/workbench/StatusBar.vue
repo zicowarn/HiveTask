@@ -118,7 +118,8 @@ const repoName = computed(() => {
 const platformLabel = computed(() => platformName(repo.platform) ?? t("statusbar.local"));
 
 /** 项目分布格：选中项目的按列计数（堆叠条 + 总数），点击跳项目工作区。
- * 应用级数据（projects store 启动时已加载）；无选中项目则隐藏。 */
+ * 应用级数据（projects store 启动时已加载）；无选中项目则隐藏。
+ * 口径与看板一致：**已归档条目不计**（归档 = 移出所有视图，2026-09-22 取证）。 */
 const projBoard = computed(() => projectsStore.selected);
 const projDist = computed(() => {
   const field = projectsStore.statusField;
@@ -127,7 +128,7 @@ const projDist = computed(() => {
     id: o.id,
     name: o.name,
     color: o.color,
-    count: projectsStore.items.filter((i) => i.fieldValues[field.id] === o.id).length,
+    count: projectsStore.activeItems.filter((i) => i.fieldValues[field.id] === o.id).length,
   }));
 });
 const projTotal = computed(() => projDist.value.reduce((sum, d) => sum + d.count, 0));

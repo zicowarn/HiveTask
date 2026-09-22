@@ -31,6 +31,7 @@ import ProjectTableMode from "../panels/modes/ProjectTableMode.vue";
 import ProjectRoadmapMode from "../panels/modes/ProjectRoadmapMode.vue";
 import ProjectResourcesPanel from "../panels/ProjectResourcesPanel.vue";
 import ProjectAnalyticsPanel from "../panels/ProjectAnalyticsPanel.vue";
+import ProjectArchivePanel from "../panels/ProjectArchivePanel.vue";
 import SettingsBasicMode from "../panels/modes/SettingsBasicMode.vue";
 import { workspaces } from "./workspaces";
 import type { MessageKey } from "../i18n";
@@ -84,6 +85,7 @@ registerPanel("project.gantt", GanttPanel, [
 ]);
 registerPanel("project.resources", ProjectResourcesPanel);
 registerPanel("project.analytics", ProjectAnalyticsPanel);
+registerPanel("project.archive", ProjectArchivePanel);
 registerPanel("git.history", GitHistoryPanel);
 registerPanel("terminal", TerminalPanel);
 registerPanel("calendar", CalendarPanel);

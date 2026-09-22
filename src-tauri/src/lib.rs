@@ -1443,6 +1443,7 @@ pub fn run() {
             projects::project_item_list,
             projects::project_item_move,
             projects::project_item_remove,
+            projects::project_item_archive,
             projects::project_item_update_draft,
             projects::project_field_value_set,
             projects::project_relink_origin,

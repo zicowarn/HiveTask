@@ -67,6 +67,9 @@ pub struct ProjectItem {
     pub draft_body: Option<String>,
     pub rank: String,
     pub added_at: String,
+    /// 归档时间戳（NULL = 未归档）。归档 = 移出所有视图但保留条目上下文
+    /// （既不是删除，也不是「从项目中移除」）；视图侧统一按它排除。
+    pub archived_at: Option<String>,
     /// JOIN 派生：仓库显示名（未关联时 None）。
     pub repo_label: Option<String>,
     /// JOIN 派生：是否「没落到仓库」——非草稿且 repo_id 缺失或指向已删登记行。
@@ -469,6 +472,7 @@ fn item_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ProjectItem> {
         draft_body: row.get("draft_body")?,
         rank: row.get("rank")?,
         added_at: row.get("added_at")?,
+        archived_at: row.get("archived_at")?,
         repo_label: row.get("repo_label")?,
         ghost,
         field_values: std::collections::BTreeMap::new(),
@@ -765,6 +769,26 @@ pub fn item_remove_in(conn: &Connection, item_id: &str) -> Result<(), String> {
     // 资源分配（§5-bis）：条目被移除 → 其分配一并清理
     crate::resources::item_resources_cascade_in(conn, item_id)?;
     conn.execute("DELETE FROM project_items WHERE id = ?1", (item_id,)).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// 条目归档 / 还原（对齐 GitHub Projects：Archive 把条目移出所有视图、保留上下文）。
+/// 归档写时间戳、还原置 NULL，幂等；不删行、不碰 Issue/仓库实体、不写 journal
+/// ——那是「从项目中移除」的语义（item_remove_in）。
+pub fn item_archive_in(conn: &Connection, item_id: &str, archived: bool) -> Result<(), String> {
+    let exists: Option<String> = conn
+        .query_row("SELECT id FROM project_items WHERE id = ?1", (item_id,), |row| row.get(0))
+        .ok();
+    if exists.is_none() {
+        return Err("条目不存在".to_string());
+    }
+    let stamp = if archived { Some(now()) } else { None };
+    conn.execute(
+        "UPDATE project_items SET archived_at = ?2 WHERE id = ?1",
+        rusqlite::params![item_id, stamp],
+    )
+    .map_err(|e| e.to_string())?;
+    mark_item_changed_in(conn, item_id);
     Ok(())
 }
 
@@ -1234,6 +1258,14 @@ pub fn project_item_move(
 pub fn project_item_remove(item_id: String) -> Result<(), String> {
     let conn = crate::appdb::open().map_err(|e| e.to_string())?;
     item_remove_in(&conn, &item_id)
+}
+
+/// 条目归档 / 还原（archived=true 归档，false 还原）。视图侧默认排除归档项，
+/// 回收走「已归档条目」Editor。
+#[tauri::command]
+pub fn project_item_archive(item_id: String, archived: bool) -> Result<(), String> {
+    let conn = crate::appdb::open().map_err(|e| e.to_string())?;
+    item_archive_in(&conn, &item_id, archived)
 }
 
 #[tauri::command]
@@ -1857,6 +1889,49 @@ mod tests {
         dep_add_in(&conn, &p.id, &ids[2], &ids[0]).unwrap(); // 入边
         item_remove_in(&conn, &ids[0]).unwrap();
         assert_eq!(deps_in(&conn, &p.id).unwrap().len(), 0, "两端级联清空");
+    }
+
+    /// 条目归档：**移出视图但保留上下文**——行、字段值、依赖全在，可还原且幂等。
+    /// 与「从项目中移除」（删行 + 级联清依赖）的边界在这里钉死，两者不许混。
+    #[test]
+    fn item_archive_keeps_context_and_is_reversible() {
+        let conn = mem_db();
+        let p = project_create_in(&conn, "看板", None, None).unwrap();
+        let ids = seed_items(&conn, &p.id, 2);
+        dep_add_in(&conn, &p.id, &ids[0], &ids[1]).unwrap();
+        let status = status_field_in(&conn, &p.id).unwrap().unwrap();
+        let opt = status.options[1].id.clone();
+        set_field_value_in(&conn, &ids[0], &status.id, Some(&opt)).unwrap();
+
+        let item_of = |id: &str| -> ProjectItem {
+            item_list_in(&conn, &p.id)
+                .unwrap()
+                .into_iter()
+                .find(|i| i.id == id)
+                .expect("归档不删行")
+        };
+
+        item_archive_in(&conn, &ids[0], true).unwrap();
+        let a = item_of(&ids[0]);
+        assert!(a.archived_at.is_some(), "归档写时间戳（归档页要显示归档于…）");
+        assert_eq!(item_list_in(&conn, &p.id).unwrap().len(), 2, "行仍在");
+        assert_eq!(deps_in(&conn, &p.id).unwrap().len(), 1, "依赖边不动");
+        assert_eq!(
+            a.field_values.get(&status.id).map(String::as_str),
+            Some(opt.as_str()),
+            "字段值不动"
+        );
+
+        // 幂等：重复归档不报错、仍带时间戳；还原清空
+        item_archive_in(&conn, &ids[0], true).unwrap();
+        assert!(item_of(&ids[0]).archived_at.is_some());
+        item_archive_in(&conn, &ids[0], false).unwrap();
+        assert!(item_of(&ids[0]).archived_at.is_none());
+        // 重复还原同样幂等
+        item_archive_in(&conn, &ids[0], false).unwrap();
+        assert!(item_of(&ids[0]).archived_at.is_none());
+
+        assert!(item_archive_in(&conn, "no-such-item", true).is_err(), "坏 id 报错");
     }
 
     // ---- 父子结构泳道（§3；上级任务）----

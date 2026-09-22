@@ -18,7 +18,9 @@ import { pushToast } from "../toast";
 const { t } = useI18n();
 const store = useProjectsStore();
 
-const unlinked = computed(() => store.items.filter((i) => i.ghost));
+/** 未关联条目提示：归档项不计（归档 = 移出所有视图，2026-09-22 取证）——
+ *  已经收起来的条目不该继续占着提示条。 */
+const unlinked = computed(() => store.activeItems.filter((i) => i.ghost));
 /** 来源清单（去重；没有快照的老条目诚实说"来源未知"）。 */
 const origins = computed(() => {
   const seen = new Set<string>();

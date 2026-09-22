@@ -159,6 +159,9 @@ export interface ProjectItem {
   draftBody: string | null;
   rank: string;
   addedAt: string;
+  /** 归档时间戳（null = 未归档）。归档 = 移出所有视图但保留条目上下文
+   *  （对齐 GitHub Projects 的 Archive）；视图侧统一按它排除。 */
+  archivedAt: string | null;
   repoLabel: string | null;
   ghost: boolean;
   fieldValues: Record<string, string>;
@@ -775,6 +778,9 @@ export const api = {
       nextId: nextId ?? null,
     }),
   projectItemRemove: (itemId: string) => invoke<void>("project_item_remove", { itemId }),
+  /** 条目归档 / 还原（archived=true 归档，false 还原）；视图侧默认排除归档项。 */
+  projectItemArchive: (itemId: string, archived: boolean) =>
+    invoke<void>("project_item_archive", { itemId, archived }),
   /** 采集/刷新当天快照（同日覆盖，幂等）。 */
   projectSnapshotTake: (projectId: string) => invoke<ProjectSnapshot>("project_snapshot_take", { projectId }),
   /** 最近 N 天的快照（升序，直接铺图）。 */

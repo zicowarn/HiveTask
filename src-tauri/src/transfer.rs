@@ -47,6 +47,10 @@ pub struct PackItem {
     pub draft_body: Option<String>,
     pub rank: String,
     pub added_at: String,
+    /// 归档时间戳（缺省 = 未归档）。归档是"移出视图但保留条目"的一部分状态，
+    /// 必须随包走——丢了它，导入后归档项会静默回到视图里。
+    #[serde(default)]
+    pub archived_at: Option<String>,
     /// field_id → 值
     #[serde(default)]
     pub values: std::collections::BTreeMap<String, String>,
@@ -276,7 +280,7 @@ pub fn export_pack_in(conn: &Connection, project_ids: Option<&[String]>) -> Resu
         // 条目 + 字段值
         let mut istmt = conn
             .prepare(
-                "SELECT id, kind, repo_id, number, draft_title, draft_body, rank, added_at, origin_url, origin_type
+                "SELECT id, kind, repo_id, number, draft_title, draft_body, rank, added_at, origin_url, origin_type, archived_at
                  FROM project_items WHERE project_id = ?1 ORDER BY CAST(rank AS INTEGER)",
             )
             .map_err(|e| e.to_string())?;
@@ -293,11 +297,12 @@ pub fn export_pack_in(conn: &Connection, project_ids: Option<&[String]>) -> Resu
                     r.get::<_, String>(7)?,
                     r.get::<_, Option<String>>(8)?,
                     r.get::<_, Option<String>>(9)?,
+                    r.get::<_, Option<String>>(10)?,
                 ))
             })
             .map_err(|e| e.to_string())?
             .filter_map(|x| x.ok())
-            .map(|(iid, kind, repo_id, number, dt, db, rank, added_at, origin_url, origin_type)| PackItem {
+            .map(|(iid, kind, repo_id, number, dt, db, rank, added_at, origin_url, origin_type, archived_at)| PackItem {
                 // 条目自带的引用快照优先（未关联条目也能带着 origin 走完一个来回），
                 // 老数据没有快照时退回登记的 remote_url。
                 repo: match origin_url {
@@ -311,6 +316,7 @@ pub fn export_pack_in(conn: &Connection, project_ids: Option<&[String]>) -> Resu
                 draft_body: db,
                 rank,
                 added_at,
+                archived_at,
                 values: Default::default(),
             })
             .collect();
@@ -553,11 +559,11 @@ pub fn import_apply_in(
                 let origin_url = it.repo.as_ref().and_then(|r| r.origin_url.clone());
                 let origin_type = it.repo.as_ref().and_then(|r| r.source_type.clone());
                 conn.execute(
-                    "INSERT INTO project_items (id, project_id, kind, repo_id, number, draft_title, draft_body, rank, added_at, origin_url, origin_type)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+                    "INSERT INTO project_items (id, project_id, kind, repo_id, number, draft_title, draft_body, rank, added_at, origin_url, origin_type, archived_at)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
                     rusqlite::params![
                         it.id, p.id, it.kind, repo_id, it.number, it.draft_title, it.draft_body, it.rank, it.added_at,
-                        origin_url, origin_type
+                        origin_url, origin_type, it.archived_at
                     ],
                 )
                 .map_err(|e| e.to_string())?;
@@ -655,6 +661,42 @@ mod tests {
         assert_eq!(proj.parents.len(), 1);
         assert_eq!(proj.item_resources.len(), 1);
         assert_eq!(pack.resources.len(), 1, "资源目录随包");
+    }
+
+    /// 归档状态随包走：归档是"移出视图但保留条目"的一部分状态，丢了它，
+    /// 导入后归档项会静默回到视图里（用户看到凭空多出来的卡片）。
+    /// 同时守老包兼容：没有 archivedAt 字段的包按未归档读入，不报错。
+    #[test]
+    fn pack_carries_item_archived_state() {
+        let src = mem_db();
+        let (pid, aid) = seed(&src);
+        src.execute("UPDATE project_items SET archived_at = '2026-09-20T10:00:00Z' WHERE id = ?1", (&aid,))
+            .unwrap();
+        let pack = export_pack_in(&src, None).unwrap();
+        assert_eq!(
+            pack.projects[0].items.iter().find(|i| i.id == aid).unwrap().archived_at.as_deref(),
+            Some("2026-09-20T10:00:00Z"),
+            "导出的包带归档时间戳"
+        );
+
+        let dst = mem_db();
+        let mut decisions = std::collections::HashMap::new();
+        decisions.insert(pid.clone(), ImportAction::Add);
+        import_apply_in(&dst, &pack, &decisions).unwrap();
+        let got: Option<String> = dst
+            .query_row("SELECT archived_at FROM project_items WHERE id = ?1", (&aid,), |r| r.get(0))
+            .unwrap();
+        assert_eq!(got.as_deref(), Some("2026-09-20T10:00:00Z"), "导入后归档态还在");
+
+        // 老包（无该字段）：serde default 兜住
+        let mut json = serde_json::to_value(&pack).unwrap();
+        for proj in json["projects"].as_array_mut().unwrap() {
+            for item in proj["items"].as_array_mut().unwrap() {
+                item.as_object_mut().unwrap().remove("archivedAt");
+            }
+        }
+        let old: Pack = serde_json::from_value(json).unwrap();
+        assert!(old.projects[0].items.iter().all(|i| i.archived_at.is_none()));
     }
 
     #[test]
