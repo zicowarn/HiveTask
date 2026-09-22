@@ -1,5 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { arrowPath, buildGanttTree, defaultEndField, foldToolbarDecision, ganttRange, wouldCreateCycle, type GanttTask } from "../src/panels/gantt-model";
+import {
+  arrowPath,
+  buildGanttTree,
+  computeRipple,
+  defaultEndField,
+  foldToolbarDecision,
+  ganttRange,
+  wouldCreateCycle,
+  type GanttTask,
+} from "../src/panels/gantt-model";
 import type { IssueRelations } from "../src/api";
 
 const rel = (partial: Partial<IssueRelations>): IssueRelations => ({
@@ -296,5 +305,56 @@ describe("父子（结构扩展泳道 §3）", () => {
       task({ id: "c", number: "2" }),
     ]);
     expect(nodes.find((n) => n.id === "c")!.depth).toBe(1);
+  });
+});
+
+describe("涟漪顺延（G4-b 调度语义第二步）", () => {
+  it("前驱延后 → 后继按工期顺延（链条传导）", () => {
+    const nodes = buildGanttTree([
+      task({ id: "a", number: "1", start: "2026-05-01", end: "2026-05-05" }),
+      task({ id: "b", number: "2", start: "2026-05-05", end: "2026-05-08",
+             relations: rel({ blockedBy: [{ number: "1", title: "", state: "OPEN" }] }) }),
+      task({ id: "c", number: "3", start: "2026-05-08", end: "2026-05-10",
+             relations: rel({ blockedBy: [{ number: "2", title: "", state: "OPEN" }] }) }),
+    ]);
+    // a 延到 05-10 → b 需从 05-10 起（工期 3 天），c 随之推到 b 之后
+    const moves = computeRipple(nodes, { id: "a", start: "2026-05-01", end: "2026-05-10" });
+    expect(moves.map((m) => m.id)).toEqual(["b", "c"]);
+    expect(moves[0]).toMatchObject({ start: "2026-05-10", end: "2026-05-13", days: 5 });
+    expect(moves[1]).toMatchObject({ start: "2026-05-13", end: "2026-05-15" });
+  });
+
+  it("多前驱取最晚结束日", () => {
+    const nodes = buildGanttTree([
+      task({ id: "a", number: "1", start: "2026-05-01", end: "2026-05-05" }),
+      task({ id: "b", number: "2", start: "2026-05-01", end: "2026-05-20" }),
+      task({ id: "c", number: "3", start: "2026-05-06", end: "2026-05-09",
+             relations: rel({ blockedBy: [
+               { number: "1", title: "", state: "OPEN" },
+               { number: "2", title: "", state: "OPEN" },
+             ] }) }),
+    ]);
+    const moves = computeRipple(nodes, { id: "a", start: "2026-05-01", end: "2026-05-05" });
+    // b 更晚（05-20）→ c 顺延到 05-20
+    expect(moves).toHaveLength(1);
+    expect(moves[0]).toMatchObject({ id: "c", start: "2026-05-20", days: 14 });
+  });
+
+  it("无违规 → 空（不乱动）", () => {
+    const nodes = buildGanttTree([
+      task({ id: "a", number: "1", start: "2026-05-01", end: "2026-05-05" }),
+      task({ id: "b", number: "2", start: "2026-05-10", end: "2026-05-12",
+             relations: rel({ blockedBy: [{ number: "1", title: "", state: "OPEN" }] }) }),
+    ]);
+    expect(computeRipple(nodes, { id: "a", start: "2026-05-01", end: "2026-05-05" })).toEqual([]);
+  });
+
+  it("无日期的后继诚实跳过（不造假工期）", () => {
+    const nodes = buildGanttTree([
+      task({ id: "a", number: "1", start: "2026-05-01", end: "2026-05-05" }),
+      task({ id: "b", number: "2",
+             relations: rel({ blockedBy: [{ number: "1", title: "", state: "OPEN" }] }) }),
+    ]);
+    expect(computeRipple(nodes, { id: "a", start: "2026-05-01", end: "2026-05-20" })).toEqual([]);
   });
 });

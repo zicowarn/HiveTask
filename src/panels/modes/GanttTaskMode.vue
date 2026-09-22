@@ -9,7 +9,8 @@ import { useGanttState } from "../gantt-state";
 import { useI18n } from "../../i18n";
 import { useTheme } from "../../theme";
 import EditorIcon from "../../components/EditorIcon.vue";
-import type { GanttNode } from "../gantt-model";
+import { computeRipple, type GanttNode } from "../gantt-model";
+import { pushToast } from "../../toast";
 
 const props = defineProps<{
   /** 刻度与违规行样式等由宿主面板下传（工具条在宿主）。 */
@@ -116,7 +117,8 @@ function unwrapTask(payload: { task?: JTask } | JTask): JTask | null {
   return t0 && typeof (t0 as JTask).id === "number" ? (t0 as JTask) : null;
 }
 
-/** 拖拽/改宽 → 计划起止写字段（与编辑面板同通道）。 */
+/** 拖拽/改宽 → 计划起止写字段（与编辑面板同通道）；写完后按依赖算**涟漪**，
+ *  影响面 > 0 时弹带动作的提示（一键顺延，G4-b 调度语义第二步）。 */
 async function onBarDatesChanged(task: JTask) {
   const nodeId = g.nodeIdOf.value.get(task.id);
   const node = nodeId ? g.nodeById.value.get(nodeId) : undefined;
@@ -130,6 +132,30 @@ async function onBarDatesChanged(task: JTask) {
     }
     if (g.endField.value && newEnd && newEnd !== node.end) {
       await g.setFieldValue(nodeId, g.endField.value.id, newEnd);
+    }
+    // 涟漪提示：后继里有多少条现在「开工早于前驱完工」
+    const ripple = computeRipple(g.nodes.value, {
+      id: nodeId,
+      start: newStart ?? node.start,
+      end: newEnd ?? node.end,
+    });
+    if (ripple.length) {
+      pushToast(
+        {
+          kind: "info",
+          message: t("gantt.rippleHint", { n: String(ripple.length) }),
+          action: {
+            label: t("gantt.rippleApply"),
+            run: () => {
+              void g
+                .applyRipple(ripple)
+                .then(() => pushToast({ kind: "success", message: t("gantt.rippleApplied", { n: String(ripple.length) }) }))
+                .catch((e) => g.reportError(e));
+            },
+          },
+        },
+        15000,
+      );
     }
   } catch (e) {
     g.reportError(e);

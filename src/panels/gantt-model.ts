@@ -311,3 +311,104 @@ export interface TaskFormPayload {
   /** 资源分配（§5-bis）：资源 id + 占用比例（20–100）。 */
   resources: { resourceId: string; allocation: number }[];
 }
+
+/** 涟漪顺延：受影响后继的新起止。 */
+export interface RippleMove {
+  id: string;
+  start: string;
+  end: string | null;
+  /** 相对原计划的平移天数（>0 表示往后）。 */
+  days: number;
+}
+
+const DAY_MS = 86_400_000;
+/** 日期平移。**不要**用 toISOString() 输出：本地午夜构造 + UTC 输出在 UTC+8 等
+ *  时区会回退一天（本函数的测试抓到过这个 bug）——按本地日期分量格式化。 */
+function shiftIso(iso: string, days: number): string {
+  const d = new Date(iso + "T00:00:00");
+  d.setDate(d.getDate() + days);
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  return `${d.getFullYear()}-${mm}-${dd}`;
+}
+function diffDays(fromIso: string, toIso: string): number {
+  return Math.round(
+    (new Date(toIso + "T00:00:00").getTime() - new Date(fromIso + "T00:00:00").getTime()) / DAY_MS,
+  );
+}
+
+/**
+ * 计算「拖某条之后需要顺延的后继」（调度语义第二步，G4-b）。
+ *
+ * 规则（FS：前驱未完不得开工）：后继的开始必须 ≥ 其全部前驱的结束；不足则平移
+ * 该后继（保持工期不变），并沿依赖链继续传导。多前驱取**最大**的结束日。
+ *
+ * @param nodes 投影行（含 dependsOn / start / end）
+ * @param moved 被拖动条目的**新**起止（尚未反映到 nodes 时由调用方覆盖传入）
+ * @returns 需要移动的后继（不含被拖条目本身）；无影响时为空数组
+ */
+export function computeRipple(
+  nodes: GanttNode[],
+  moved: { id: string; start: string | null; end: string | null },
+): RippleMove[] {
+  const byId = new Map(nodes.map((n) => [n.id, n]));
+  if (!byId.has(moved.id)) return [];
+  // 有效起止（被拖条目用新值覆盖）
+  const effStart = new Map<string, string | null>();
+  const effEnd = new Map<string, string | null>();
+  for (const n of nodes) {
+    effStart.set(n.id, n.start);
+    effEnd.set(n.id, n.end);
+  }
+  effStart.set(moved.id, moved.start);
+  effEnd.set(moved.id, moved.end);
+
+  // 后继表：X 的后继 = dependsOn 含 X 的条目
+  const successors = new Map<string, string[]>();
+  for (const n of nodes) {
+    for (const dep of n.dependsOn) {
+      const list = successors.get(dep) ?? [];
+      list.push(n.id);
+      successors.set(dep, list);
+    }
+  }
+  // 受影响集（从被拖条目 BFS 后继，传递闭包）
+  const affected = new Set<string>();
+  const queue = [...(successors.get(moved.id) ?? [])];
+  while (queue.length) {
+    const cur = queue.pop()!;
+    if (affected.has(cur)) continue;
+    affected.add(cur);
+    queue.push(...(successors.get(cur) ?? []));
+  }
+  if (!affected.size) return [];
+
+  const moves = new Map<string, RippleMove>();
+  // 多轮传播（每轮把违规上推一级；上界 = 受影响规模 + 1，环已被建边时拦住）
+  for (let pass = 0; pass <= affected.size + 1; pass += 1) {
+    let changed = false;
+    for (const id of affected) {
+      const node = byId.get(id);
+      if (!node) continue;
+      const myStart = effStart.get(id);
+      if (!myStart) continue; // 无日期的条目诚实跳过（不造假工期）
+      // 要求：≥ 全部前驱的结束
+      let required: string | null = null;
+      for (const dep of node.dependsOn) {
+        const depEnd = effEnd.get(dep);
+        if (depEnd && (!required || depEnd > required)) required = depEnd;
+      }
+      if (!required || myStart >= required) continue;
+      const days = diffDays(myStart, required);
+      const newStart = required;
+      const myEnd = effEnd.get(id);
+      const newEnd = myEnd ? shiftIso(myEnd, days) : null;
+      effStart.set(id, newStart);
+      effEnd.set(id, newEnd);
+      moves.set(id, { id, start: newStart, end: newEnd, days });
+      changed = true;
+    }
+    if (!changed) break;
+  }
+  return [...moves.values()].sort((a, b) => a.start.localeCompare(b.start));
+}

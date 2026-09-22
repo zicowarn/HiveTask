@@ -311,6 +311,17 @@ export function useGanttState() {
     await store.clearItemParent(childId);
   }
 
+  /** 涟漪顺延落地（G4-b）：把 computeRipple 的结果写进计划/结束日期字段。
+   *  与拖拽同通道（字段值写穿透），逐条写；未配置字段的跳过（没有落点就不写）。 */
+  async function applyRipple(moves: { id: string; start: string; end: string | null }[]) {
+    const sf = startField.value;
+    const ef = endField.value;
+    for (const m of moves) {
+      if (sf) await store.setFieldValue(m.id, sf.id, m.start);
+      if (ef && m.end) await store.setFieldValue(m.id, ef.id, m.end);
+    }
+  }
+
   /** 合并图（平台镜像 ∪ 容器真源）：环检测在合并图上做（跨形态环才拦得住）。 */
   const graphDeps = computed<Record<string, string[]>>(() => {
     const out: Record<string, string[]> = {};
@@ -372,6 +383,7 @@ export function useGanttState() {
     removeEdge,
     syncPredecessors,
     setParent,
+    applyRipple,
     graphDeps,
     reportError: (e: unknown) => pushToast({ kind: "error", message: translateError(String(e)) }),
     wouldCreateCycle,
