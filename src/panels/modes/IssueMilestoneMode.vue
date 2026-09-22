@@ -18,6 +18,7 @@ import { useRepoStore } from "../../stores/repo";
 import { useIssuesStore } from "../../stores/issues";
 import { translateError } from "../../gh-errors";
 import { useI18n } from "../../i18n";
+import LoadStateHint from "../../components/LoadStateHint.vue";
 import type { Issue } from "../../types";
 
 const props = defineProps<{ tab: "open" | "closed" | "all" }>();
@@ -178,11 +179,8 @@ watch(
 <template>
   <div class="milestone-scroll">
     <p v-if="error" class="unassigned-note err">{{ error }}</p>
-    <p v-if="loading && allIssues.length === 0" class="ms-none">{{ t("list.loading") }}</p>
-
-    <template v-else-if="groups.length === 0">
-      <p class="ms-none">{{ t("milestone.noneInUse") }}</p>
-    </template>
+    <LoadStateHint v-if="loading && allIssues.length === 0" state="loading" />
+    <LoadStateHint v-else-if="groups.length === 0" state="empty" :text="t('milestone.noneInUse')" />
 
     <template v-else>
       <section v-for="group in groups" :key="group.name ?? '__none'" class="milestone-group">

@@ -14,6 +14,7 @@ import { useI18n } from "../i18n";
 import SideDrawer from "../components/SideDrawer.vue";
 import DropdownMenu from "../components/DropdownMenu.vue";
 import EditorIcon from "../components/EditorIcon.vue";
+import LoadStateHint from "../components/LoadStateHint.vue";
 
 const props = defineProps<{
   open: boolean;
@@ -203,7 +204,7 @@ async function addSelected() {
       <span>{{ t("project.selectAllItems") }}</span>
     </label>
 
-    <p v-if="loading" class="ai-empty">{{ t("list.loading") }}</p>
+    <LoadStateHint v-if="loading" state="loading" />
     <ul v-else class="ai-list">
       <li v-for="row in filtered" :key="row.key" class="ai-row" @click="toggleRow(row.key)">
         <input
@@ -216,7 +217,7 @@ async function addSelected() {
         <span class="ai-num">#{{ row.number }}</span>
       </li>
     </ul>
-    <p v-if="!loading && filtered.length === 0" class="ai-empty">{{ t("project.omniNoIssues") }}</p>
+    <LoadStateHint v-if="!loading && filtered.length === 0" state="empty" :text="t('project.omniNoIssues')" />
     <p v-else-if="!loading" class="ai-hint">{{ t("project.notAddedHint", { n: String(filtered.length) }) }}</p>
 
     <template #footer>

@@ -13,6 +13,7 @@
 import { computed, onMounted, ref } from "vue";
 import PanelShell from "../workbench/PanelShell.vue";
 import DropdownMenu from "../components/DropdownMenu.vue";
+import LoadStateHint from "../components/LoadStateHint.vue";
 import { api, isTauri } from "../api";
 import { useI18n } from "../i18n";
 import { useProjectsStore } from "../stores/projects";
@@ -245,7 +246,7 @@ const xLabels = computed(() => {
     </template>
 
     <div class="an-wrap">
-      <p v-if="!store.selected" class="an-empty">{{ t("analytics.noProject") }}</p>
+      <LoadStateHint v-if="!store.selected" state="empty" :text="t('analytics.noProject')" />
       <template v-else>
         <!-- 概览（当前状态；不依赖历史） -->
         <div class="an-cards">
@@ -270,9 +271,12 @@ const xLabels = computed(() => {
         <!-- 燃起图（按天 × 状态堆叠 + 总量折线） -->
         <h3 class="an-title">{{ t("analytics.burnUp") }}</h3>
         <p class="an-note">{{ t("analytics.burnUpHint") }}</p>
-        <div v-if="stack.recorded.length === 0" class="an-empty">
-          {{ loading ? t("common.loading") : t("analytics.noHistory") }}
-        </div>
+        <LoadStateHint v-if="loading && stack.recorded.length === 0" state="loading" />
+        <LoadStateHint
+          v-else-if="stack.recorded.length === 0"
+          state="empty"
+          :text="t('analytics.noHistory')"
+        />
         <div v-else class="an-chart">
           <svg :viewBox="`0 0 ${CHART.width} ${CHART.height}`" preserveAspectRatio="none" role="img"
                :aria-label="t('analytics.burnUp')">

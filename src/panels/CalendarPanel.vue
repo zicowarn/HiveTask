@@ -19,6 +19,7 @@ import interactionPlugin from "@fullcalendar/interaction";
 import zhCnLocale from "@fullcalendar/core/locales/zh-cn";
 import type { CalendarOptions, DatesSetArg, DayCellMountArg, EventClickArg } from "@fullcalendar/core";
 import PanelShell from "../workbench/PanelShell.vue";
+import LoadStateHint from "../components/LoadStateHint.vue";
 import DropdownMenu from "../components/DropdownMenu.vue";
 import EditorIcon from "../components/EditorIcon.vue";
 import { useRepoStore } from "../stores/repo";
@@ -552,7 +553,7 @@ onMounted(() => {
     </template>
     <div class="calendar-wrap" :class="{ 'cal-loading': calLoading }">
       <div v-if="calLoading" class="cal-progress" aria-hidden="true" />
-      <p v-if="!current" class="cal-hint">{{ t("calendar.noRepo") }}</p>
+      <LoadStateHint v-if="!current" state="empty" :text="t('calendar.noRepo')" />
       <FullCalendar v-else :key="calKey" :options="options" />
     </div>
     <CalendarEventDialog

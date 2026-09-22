@@ -12,6 +12,7 @@
 import { onMounted, ref } from "vue";
 import PanelShell from "../workbench/PanelShell.vue";
 import DropdownMenu from "../components/DropdownMenu.vue";
+import LoadStateHint from "../components/LoadStateHint.vue";
 import { isTauri, type Resource } from "../api";
 import { useI18n } from "../i18n";
 import { useProjectsStore } from "../stores/projects";
@@ -113,9 +114,12 @@ function originLabel(r: Resource): string {
         <span class="rc-act"></span>
       </div>
 
-      <p v-if="projects.resourceCatalog.length === 0 && !draft" class="rc-empty">
-        {{ loading ? t("common.loading") : t("resource.empty") }}
-      </p>
+      <LoadStateHint v-if="loading && projects.resourceCatalog.length === 0" state="loading" />
+      <LoadStateHint
+        v-else-if="projects.resourceCatalog.length === 0 && !draft"
+        state="empty"
+        :text="t('resource.empty')"
+      />
 
       <div v-for="r in projects.resourceCatalog" :key="r.id" class="rc-row">
         <input
