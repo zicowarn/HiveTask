@@ -16,6 +16,7 @@ mod openwith_apps;
 mod local;
 mod models;
 mod projects;
+mod resources;
 mod pty;
 mod source;
 mod storage;
@@ -362,6 +363,12 @@ fn calendar_event_list() -> Result<Vec<calendar::EventRow>, String> {
     calendar::event_list().map_err(|e| e.to_string())
 }
 
+/// 导出全部手建日程为 .ics（系统日历「导出出」半边）；返回条数。
+#[tauri::command]
+fn calendar_export_ics(path: String) -> Result<usize, String> {
+    calendar::export_ics(&path).map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 fn calendar_event_create(
     title: String,
@@ -628,6 +635,50 @@ fn issue_relations_batch(
     source::source_for_ref(repo.platform.as_deref(), &repo.host)
         .fetch_issue_relations_batch(&repo, &numbers)
         .map_err(|e| e.to_string())
+}
+
+/// 平台依赖写（G3-b）：让 blocked 依赖 blocker（FS）。两端必须是**同一仓库**的
+/// 平台条目——跨仓库 v1 诚实拒绝（GitHub blocked_by 的跨仓支持未取证，不假承诺）；
+/// 容器形态（草稿/本地）走 project_dep_*（G3-a）不经此。
+#[tauri::command]
+fn issue_dependency_add(
+    blocked_repo: String,
+    blocked_number: String,
+    blocker_repo: String,
+    blocker_number: String,
+) -> Result<(), String> {
+    issue_dependency_write(&blocked_repo, &blocked_number, &blocker_repo, &blocker_number, true)
+}
+
+#[tauri::command]
+fn issue_dependency_remove(
+    blocked_repo: String,
+    blocked_number: String,
+    blocker_repo: String,
+    blocker_number: String,
+) -> Result<(), String> {
+    issue_dependency_write(&blocked_repo, &blocked_number, &blocker_repo, &blocker_number, false)
+}
+
+fn issue_dependency_write(
+    blocked_repo: &str,
+    blocked_number: &str,
+    blocker_repo: &str,
+    blocker_number: &str,
+    add: bool,
+) -> Result<(), String> {
+    let blocked = resolve(blocked_repo)?;
+    let blocker = resolve(blocker_repo)?;
+    if blocked.owner != blocker.owner || blocked.repo != blocker.repo {
+        return Err("跨仓库依赖暂不支持写回平台".to_string());
+    }
+    let source = source::source_for_ref(blocked.platform.as_deref(), &blocked.host);
+    let result = if add {
+        source.add_issue_dependency(&blocked, blocked_number, blocker_number)
+    } else {
+        source.remove_issue_dependency(&blocked, blocked_number, blocker_number)
+    };
+    result.map_err(|e| e.to_string())
 }
 
 /// 远端分支名清单（PR 创建表单 head/base 候选；本地 = 本地分支）。
@@ -1248,6 +1299,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_clipboard_manager::init())
+        .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_store::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
             health_check,
@@ -1304,6 +1356,8 @@ pub fn run() {
             milestone_list,
             issue_relations,
             issue_relations_batch,
+            issue_dependency_add,
+            issue_dependency_remove,
             label_list,
             assignee_list,
             create_label,
@@ -1338,6 +1392,21 @@ pub fn run() {
             projects::project_dep_list,
             projects::project_dep_add,
             projects::project_dep_remove,
+            projects::project_dep_sync_platform,
+            projects::project_parent_list,
+            projects::project_parent_set,
+            projects::project_parent_clear,
+            projects::project_parent_sync_platform,
+            resources::resource_list,
+            resources::resource_upsert,
+            resources::resource_remove,
+            resources::resource_sync_assignees,
+            resources::item_resource_list,
+            resources::item_resource_set,
+            resources::item_resource_remove,
+            resources::resource_exception_list,
+            resources::resource_exception_upsert,
+            resources::resource_exception_remove,
             remote_repo_list,
             convert_draft_to_issue,
             set_pull_state,
@@ -1364,6 +1433,7 @@ pub fn run() {
             calendar_event_update,
             calendar_event_remove,
             calendar_event_set_reminded,
+            calendar_export_ics,
             branch_review_list,
             branch_review_diff,
             pr_commits_between,

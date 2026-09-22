@@ -632,6 +632,39 @@ impl Source for GiteaSource {
         out.blocking = value.as_array().map(|arr| arr.iter().filter_map(parse_issue_ref).collect()).unwrap_or_default();
         Ok(out)
     }
+    /// 平台依赖写（G3-b）：Gitea blocks 端点——**方向与 GitHub 相反**：
+    /// 路径里的 issue 是阻塞方，body 传被阻塞方（swagger：IssueMeta{index,owner,repo}）。
+    /// 语义映射：我们的 add(blocked, blocker) → POST /issues/{blocker}/blocks + body{blocked}。
+    fn add_issue_dependency(&self, repo: &RepoRef, blocked: &str, blocker: &str) -> Result<()> {
+        let slug = self.slug_ref(repo);
+        let url = self.api(&format!(
+            "/repos/{}/{}/issues/{blocker}/blocks",
+            slug.owner, slug.repo
+        ));
+        let body = blocks_body(&slug.owner, &slug.repo, blocked)?;
+        self.send_json(reqwest::Method::POST, &url, body)?;
+        Ok(())
+    }
+    fn remove_issue_dependency(&self, repo: &RepoRef, blocked: &str, blocker: &str) -> Result<()> {
+        let slug = self.slug_ref(repo);
+        let url = self.api(&format!(
+            "/repos/{}/{}/issues/{blocker}/blocks",
+            slug.owner, slug.repo
+        ));
+        let body = blocks_body(&slug.owner, &slug.repo, blocked)?;
+        self.send_json(reqwest::Method::DELETE, &url, body)?;
+        Ok(())
+    }
+}
+
+/// blocks 端点的请求体（Gitea swagger IssueMeta 实证：{index, owner, repo}）。
+/// index 必须是仓库内编号（整数）；Gitee 编号非数字——但 Gitee 无此端点，
+/// 到这里前已被平台形态分流拦住，报错是诚实兜底。
+pub(crate) fn blocks_body(owner: &str, repo: &str, blocked: &str) -> Result<Value> {
+    let index: i64 = blocked
+        .parse()
+        .map_err(|_| anyhow!("编号非数字，无法用于 Gitea blocks 端点: {blocked}"))?;
+    Ok(serde_json::json!({ "index": index, "owner": owner, "repo": repo }))
 }
 
 /// Gitea issue JSON → 关系轻引用（number/title/state 归一 OPEN|CLOSED）。
@@ -692,6 +725,17 @@ mod tests {
         assert_eq!(refs[0].number, "5");
         assert_eq!(refs[0].title, "");
         assert_eq!(refs[0].state, "OPEN");
+    }
+
+    /// blocks 写请求体（Gitea swagger IssueMeta 实证）：index 整数 + 仓库坐标。
+    #[test]
+    fn blocks_body_shape_and_non_numeric_rejection() {
+        let body = blocks_body("alice", "demo", "42").unwrap();
+        assert_eq!(body["index"], 42);
+        assert_eq!(body["owner"], "alice");
+        assert_eq!(body["repo"], "demo");
+        // Gitee 风格非数字编号：明确报错（不静默发错请求）
+        assert!(blocks_body("alice", "demo", "IKCTH7").is_err());
     }
 
     /// 真 Gitea API 的 issue 样本（v1 字段形态）。

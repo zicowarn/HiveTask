@@ -215,6 +215,12 @@ impl Source for GhSource {
     ) -> Result<std::collections::HashMap<String, crate::models::IssueRelations>> {
         fetch_issue_relations_batch(&format!("{}/{}", repo.owner, repo.repo), numbers)
     }
+    fn add_issue_dependency(&self, repo: &RepoRef, blocked: &str, blocker: &str) -> Result<()> {
+        add_issue_dependency(&format!("{}/{}", repo.owner, repo.repo), blocked, blocker)
+    }
+    fn remove_issue_dependency(&self, repo: &RepoRef, blocked: &str, blocker: &str) -> Result<()> {
+        remove_issue_dependency(&format!("{}/{}", repo.owner, repo.repo), blocked, blocker)
+    }
 }
 
 /// 过滤器的 gh 方言（恰好与前端口径一致）。
@@ -430,6 +436,46 @@ fn parse_issue_ref(v: &Value) -> Option<crate::models::IssueRef> {
         title: v["title"].as_str().unwrap_or_default().to_string(),
         state: v["state"].as_str().unwrap_or("OPEN").to_string(),
     })
+}
+
+// ---- 平台依赖写（G3-b；端点形状见《架构设计-甘特计划面》§4）----
+
+/// blocked_by 写端点路径（POST 加、DELETE 加 /{issue_id}）。
+pub(crate) fn blocked_by_path(slug: &str, blocked: &str) -> String {
+    format!("repos/{slug}/issues/{blocked}/dependencies/blocked_by")
+}
+
+/// blocker 的**数据库 id**：REST 写端点要的是 id 而非编号（官方文档实证）。
+fn gh_issue_database_id(slug: &str, number: &str) -> Result<i64> {
+    let stdout = run_gh(&["api", &format!("repos/{slug}/issues/{number}"), "--jq", ".id"])?;
+    stdout
+        .trim()
+        .parse()
+        .map_err(|_| anyhow!("解析 issue 数据库 id 失败: {stdout}"))
+}
+
+fn add_issue_dependency(slug: &str, blocked: &str, blocker: &str) -> Result<()> {
+    let id = gh_issue_database_id(slug, blocker)?;
+    run_gh(&[
+        "api",
+        "--method",
+        "POST",
+        &blocked_by_path(slug, blocked),
+        "-F",
+        &format!("issue_id={id}"),
+    ])?;
+    Ok(())
+}
+
+fn remove_issue_dependency(slug: &str, blocked: &str, blocker: &str) -> Result<()> {
+    let id = gh_issue_database_id(slug, blocker)?;
+    run_gh(&[
+        "api",
+        "--method",
+        "DELETE",
+        &format!("{}/{id}", blocked_by_path(slug, blocked)),
+    ])?;
+    Ok(())
 }
 
 
@@ -1422,6 +1468,15 @@ mod tests {
         .expect("批量关系拉取应容忍部分失败");
         assert!(out.contains_key("14479"), "存在的编号应在结果里");
         assert!(!out.contains_key("99999999"), "不存在的编号不应造假");
+    }
+
+    /// blocked_by 写端点路径形状（GitHub REST 文档实证：POST 无后缀、DELETE 带 id）。
+    #[test]
+    fn blocked_by_path_shape() {
+        assert_eq!(
+            blocked_by_path("o/r", "42"),
+            "repos/o/r/issues/42/dependencies/blocked_by"
+        );
     }
 
     /// 关系解析（GraphQL 输出形状）：四类齐全 → 全量映射，state 取原样。

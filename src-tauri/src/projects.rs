@@ -6,7 +6,7 @@
 //! 时 LEFT JOIN 判定，删除时不级联）；「关闭→Done」是唯一的 v1 自动化。
 
 use rusqlite::Connection;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::appdb::{chrono_like_now, uuid};
 
@@ -638,9 +638,13 @@ fn next_rank_in(conn: &Connection, project_id: &str) -> Result<String, String> {
 pub fn item_remove_in(conn: &Connection, item_id: &str) -> Result<(), String> {
     conn.execute("DELETE FROM project_field_values WHERE item_id = ?1", (item_id,))
         .map_err(|e| e.to_string())?;
-    // 依赖边双向级联（甘特计划面 §3：条目删除，两端都清）
+    // 依赖与父子边双向级联（甘特计划面 §3：条目删除，两端都清）
     conn.execute("DELETE FROM project_item_deps WHERE item_id = ?1 OR depends_on = ?1", (item_id,))
         .map_err(|e| e.to_string())?;
+    conn.execute("DELETE FROM project_item_parents WHERE item_id = ?1 OR parent_id = ?1", (item_id,))
+        .map_err(|e| e.to_string())?;
+    // 资源分配（§5-bis）：条目被移除 → 其分配一并清理
+    crate::resources::item_resources_cascade_in(conn, item_id)?;
     conn.execute("DELETE FROM project_items WHERE id = ?1", (item_id,)).map_err(|e| e.to_string())?;
     Ok(())
 }
@@ -655,6 +659,14 @@ pub struct ItemDep {
     pub item_id: String,
     pub depends_on: String,
     pub origin: Option<String>,
+}
+
+/// 镜像同步的输入边（前端 → Rust）。
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ItemDepInput {
+    pub item_id: String,
+    pub depends_on: String,
 }
 
 pub fn deps_in(conn: &Connection, project_id: &str) -> Result<Vec<ItemDep>, String> {
@@ -1148,6 +1160,154 @@ pub fn project_repo_list(project_id: String) -> Result<Vec<BoundRepo>, String> {
     bound_repos_in(&conn, &project_id)
 }
 
+/// 父子里程碑边（结构扩展泳道，§3）：item_id 的上级 = parent_id。
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ItemParent {
+    pub item_id: String,
+    pub parent_id: String,
+    pub origin: Option<String>,
+}
+
+pub fn parents_in(conn: &Connection, project_id: &str) -> Result<Vec<ItemParent>, String> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT p.item_id, p.parent_id, p.origin
+             FROM project_item_parents p
+             JOIN project_items i ON i.id = p.item_id
+             WHERE i.project_id = ?1
+             ORDER BY p.item_id",
+        )
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map((project_id,), |row| {
+            Ok(ItemParent {
+                item_id: row.get(0)?,
+                parent_id: row.get(1)?,
+                origin: row.get(2)?,
+            })
+        })
+        .map_err(|e| e.to_string())?;
+    rows.collect::<std::result::Result<Vec<_>, _>>().map_err(|e| e.to_string())
+}
+
+/// 设置上级（容器真源）。校验：同项目、非自指、**不成环**（沿父链上溯）。
+/// 一个条目至多一个上级（PRIMARY KEY 覆盖）。
+pub fn parent_set_in(conn: &Connection, project_id: &str, item_id: &str, parent_id: &str) -> Result<(), String> {
+    if item_id == parent_id {
+        return Err("不能把自己设为上级".to_string());
+    }
+    for id in [item_id, parent_id] {
+        let n: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM project_items WHERE id = ?1 AND project_id = ?2",
+                (id, project_id),
+                |r| r.get(0),
+            )
+            .map_err(|e| e.to_string())?;
+        if n == 0 {
+            return Err("条目不在该项目内".to_string());
+        }
+    }
+    // 环检测：从 parent_id 沿父链上溯，遇到 item_id 即成环
+    let all = parents_in(conn, project_id)?;
+    let mut cursor = Some(parent_id.to_string());
+    let mut seen = std::collections::HashSet::new();
+    while let Some(cur) = cursor {
+        if cur == item_id {
+            return Err("会形成循环的层级".to_string());
+        }
+        if !seen.insert(cur.clone()) {
+            break; // 既有链本身有环（脏数据）：停手，不放大
+        }
+        cursor = all.iter().find(|p| p.item_id == cur).map(|p| p.parent_id.clone());
+    }
+    conn.execute(
+        "INSERT INTO project_item_parents (item_id, parent_id, origin) VALUES (?1, ?2, NULL)
+         ON CONFLICT(item_id) DO UPDATE SET parent_id = excluded.parent_id, origin = NULL",
+        (item_id, parent_id),
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// 清除上级；只动容器真源行（平台镜像由同步管理）。
+pub fn parent_clear_in(conn: &Connection, project_id: &str, item_id: &str) -> Result<(), String> {
+    conn.execute(
+        "DELETE FROM project_item_parents
+         WHERE item_id = ?1 AND origin IS NULL
+           AND item_id IN (SELECT id FROM project_items WHERE project_id = ?2)",
+        (item_id, project_id),
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// 平台镜像整组同步（平台 sub-issues → 本地镜像行；真源行不触碰）。
+pub fn parents_sync_platform_in(
+    conn: &Connection,
+    project_id: &str,
+    origin: &str,
+    edges: &[(String, String)],
+) -> Result<(), String> {
+    conn.execute("BEGIN", ()).map_err(|e| e.to_string())?;
+    let result = (|| {
+        conn.execute(
+            "DELETE FROM project_item_parents
+             WHERE origin = ?1
+               AND item_id IN (SELECT id FROM project_items WHERE project_id = ?2)",
+            (origin, project_id),
+        )
+        .map_err(|e| e.to_string())?;
+        for (item_id, parent_id) in edges {
+            // 真源行优先：已有 origin NULL 的条目不插镜像
+            conn.execute(
+                "INSERT OR IGNORE INTO project_item_parents (item_id, parent_id, origin)
+                 VALUES (?1, ?2, ?3)",
+                (item_id, parent_id, origin),
+            )
+            .map_err(|e| e.to_string())?;
+        }
+        Ok(())
+    })();
+    match result {
+        Ok(()) => conn.execute("COMMIT", ()).map(|_| ()).map_err(|e| e.to_string()),
+        Err(e) => {
+            let _ = conn.execute("ROLLBACK", ());
+            Err(e)
+        }
+    }
+}
+
+#[tauri::command]
+pub fn project_parent_list(project_id: String) -> Result<Vec<ItemParent>, String> {
+    let conn = crate::appdb::open().map_err(|e| e.to_string())?;
+    parents_in(&conn, &project_id)
+}
+
+#[tauri::command]
+pub fn project_parent_set(project_id: String, item_id: String, parent_id: String) -> Result<(), String> {
+    let conn = crate::appdb::open().map_err(|e| e.to_string())?;
+    parent_set_in(&conn, &project_id, &item_id, &parent_id)
+}
+
+#[tauri::command]
+pub fn project_parent_clear(project_id: String, item_id: String) -> Result<(), String> {
+    let conn = crate::appdb::open().map_err(|e| e.to_string())?;
+    parent_clear_in(&conn, &project_id, &item_id)
+}
+
+#[tauri::command]
+pub fn project_parent_sync_platform(
+    project_id: String,
+    origin: String,
+    edges: Vec<ItemDepInput>,
+) -> Result<(), String> {
+    let conn = crate::appdb::open().map_err(|e| e.to_string())?;
+    let pairs: Vec<(String, String)> = edges.into_iter().map(|e| (e.item_id, e.depends_on)).collect();
+    parents_sync_platform_in(&conn, &project_id, &origin, &pairs)
+}
+
 #[tauri::command]
 pub fn project_dep_list(project_id: String) -> Result<Vec<ItemDep>, String> {
     let conn = crate::appdb::open().map_err(|e| e.to_string())?;
@@ -1164,6 +1324,54 @@ pub fn project_dep_add(project_id: String, item_id: String, depends_on: String) 
 pub fn project_dep_remove(project_id: String, item_id: String, depends_on: String) -> Result<(), String> {
     let conn = crate::appdb::open().map_err(|e| e.to_string())?;
     dep_remove_in(&conn, &project_id, &item_id, &depends_on)
+}
+
+/// 平台镜像行整组同步（甘特计划面 §4：镜像持久化，G3-b）。
+/// 事务内：先清本项目 + 该 origin 的旧镜像行，再插入新边（INSERT OR IGNORE
+/// —— 同键若已有容器真源行则保留真源行）。容器真源行（origin NULL）永不触碰。
+pub fn deps_sync_platform_in(
+    conn: &Connection,
+    project_id: &str,
+    origin: &str,
+    edges: &[(String, String)],
+) -> Result<(), String> {
+    conn.execute("BEGIN", ()).map_err(|e| e.to_string())?;
+    let result = (|| {
+        conn.execute(
+            "DELETE FROM project_item_deps
+             WHERE origin = ?1
+               AND item_id IN (SELECT id FROM project_items WHERE project_id = ?2)",
+            (origin, project_id),
+        )
+        .map_err(|e| e.to_string())?;
+        for (item_id, depends_on) in edges {
+            conn.execute(
+                "INSERT OR IGNORE INTO project_item_deps (item_id, depends_on, origin)
+                 VALUES (?1, ?2, ?3)",
+                (item_id, depends_on, origin),
+            )
+            .map_err(|e| e.to_string())?;
+        }
+        Ok(())
+    })();
+    match result {
+        Ok(()) => conn.execute("COMMIT", ()).map(|_| ()).map_err(|e| e.to_string()),
+        Err(e) => {
+            let _ = conn.execute("ROLLBACK", ());
+            Err(e)
+        }
+    }
+}
+
+#[tauri::command]
+pub fn project_dep_sync_platform(
+    project_id: String,
+    origin: String,
+    edges: Vec<ItemDepInput>,
+) -> Result<(), String> {
+    let conn = crate::appdb::open().map_err(|e| e.to_string())?;
+    let pairs: Vec<(String, String)> = edges.into_iter().map(|e| (e.item_id, e.depends_on)).collect();
+    deps_sync_platform_in(&conn, &project_id, &origin, &pairs)
 }
 
 #[cfg(test)]
@@ -1270,6 +1478,98 @@ mod tests {
         dep_add_in(&conn, &p.id, &ids[2], &ids[0]).unwrap(); // 入边
         item_remove_in(&conn, &ids[0]).unwrap();
         assert_eq!(deps_in(&conn, &p.id).unwrap().len(), 0, "两端级联清空");
+    }
+
+    // ---- 父子结构泳道（§3；上级任务）----
+
+    #[test]
+    fn parent_set_clear_and_single_valued() {
+        let conn = mem_db();
+        let p = project_create_in(&conn, "看板", None, None).unwrap();
+        let ids = seed_items(&conn, &p.id, 3);
+        parent_set_in(&conn, &p.id, &ids[0], &ids[1]).unwrap();
+        assert_eq!(parents_in(&conn, &p.id).unwrap().len(), 1);
+        // 单值：再设一次 = 改上级（覆盖）
+        parent_set_in(&conn, &p.id, &ids[0], &ids[2]).unwrap();
+        let all = parents_in(&conn, &p.id).unwrap();
+        assert_eq!(all.len(), 1);
+        assert_eq!(all[0].parent_id, ids[2]);
+        // 清除
+        parent_clear_in(&conn, &p.id, &ids[0]).unwrap();
+        assert!(parents_in(&conn, &p.id).unwrap().is_empty());
+    }
+
+    #[test]
+    fn parent_rejects_self_cycle_and_cross_project() {
+        let conn = mem_db();
+        let p1 = project_create_in(&conn, "甲", None, None).unwrap();
+        let p2 = project_create_in(&conn, "乙", None, None).unwrap();
+        let a = seed_items(&conn, &p1.id, 3);
+        let b = seed_items(&conn, &p2.id, 1);
+        assert!(parent_set_in(&conn, &p1.id, &a[0], &a[0]).is_err(), "自指拒绝");
+        assert!(parent_set_in(&conn, &p1.id, &a[0], &b[0]).is_err(), "跨项目拒绝");
+        parent_set_in(&conn, &p1.id, &a[0], &a[1]).unwrap(); // a1 ← a0
+        parent_set_in(&conn, &p1.id, &a[1], &a[2]).unwrap(); // a2 ← a1
+        assert!(parent_set_in(&conn, &p1.id, &a[2], &a[0]).is_err(), "三节点环拒绝");
+        assert!(parent_set_in(&conn, &p1.id, &a[2], &a[1]).is_err(), "两节点环拒绝");
+        assert_eq!(parents_in(&conn, &p1.id).unwrap().len(), 2);
+    }
+
+    #[test]
+    fn parent_remove_cascades_both_directions() {
+        let conn = mem_db();
+        let p = project_create_in(&conn, "看板", None, None).unwrap();
+        let ids = seed_items(&conn, &p.id, 3);
+        parent_set_in(&conn, &p.id, &ids[0], &ids[1]).unwrap(); // ids0 的上级 = ids1
+        parent_set_in(&conn, &p.id, &ids[2], &ids[0]).unwrap(); // ids0 也是别人的上级
+        item_remove_in(&conn, &ids[0]).unwrap();
+        assert!(parents_in(&conn, &p.id).unwrap().is_empty(), "作为子与作为父都被清");
+    }
+
+    #[test]
+    fn parent_clear_only_touches_container_truth() {
+        let conn = mem_db();
+        let p = project_create_in(&conn, "看板", None, None).unwrap();
+        let ids = seed_items(&conn, &p.id, 2);
+        conn.execute(
+            "INSERT INTO project_item_parents (item_id, parent_id, origin) VALUES (?1, ?2, 'gh')",
+            (&ids[0], &ids[1]),
+        )
+        .unwrap();
+        parent_clear_in(&conn, &p.id, &ids[0]).unwrap();
+        let all = parents_in(&conn, &p.id).unwrap();
+        assert_eq!(all.len(), 1, "镜像行保留（归同步管理）");
+        assert_eq!(all[0].origin.as_deref(), Some("gh"));
+    }
+
+    /// 镜像整组同步：清旧插新、不碰容器真源行、跨项目不串。
+    #[test]
+    fn deps_sync_platform_replaces_only_its_origin() {
+        let conn = mem_db();
+        let p = project_create_in(&conn, "看板", None, None).unwrap();
+        let ids = seed_items(&conn, &p.id, 4);
+        // 容器真源边（应永不被动）
+        dep_add_in(&conn, &p.id, &ids[0], &ids[1]).unwrap();
+        // 旧镜像边（gh）：同步后应被新边组替换
+        conn.execute(
+            "INSERT INTO project_item_deps (item_id, depends_on, origin) VALUES (?1, ?2, 'gh')",
+            (&ids[0], &ids[2]),
+        )
+        .unwrap();
+        let edges = vec![
+            (ids[1].clone(), ids[2].clone()),
+            (ids[3].clone(), ids[0].clone()),
+        ];
+        deps_sync_platform_in(&conn, &p.id, "gh", &edges).unwrap();
+        let deps = deps_in(&conn, &p.id).unwrap();
+        // 真源 1 条 + 新镜像 2 条；旧镜像 (ids0→ids2) 已清
+        assert_eq!(deps.len(), 3);
+        assert!(deps.iter().any(|d| d.origin.is_none()
+            && d.item_id == ids[0] && d.depends_on == ids[1]), "真源行保留");
+        assert!(!deps.iter().any(|d| d.origin.is_some()
+            && d.item_id == ids[0] && d.depends_on == ids[2]), "旧镜像已清");
+        assert!(deps.iter().any(|d| d.origin.as_deref() == Some("gh")
+            && d.item_id == ids[1] && d.depends_on == ids[2]), "新镜像已插");
     }
 
     #[test]

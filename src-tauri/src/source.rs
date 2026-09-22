@@ -194,6 +194,18 @@ pub trait Source: Send + Sync {
         }
         Ok(out)
     }
+
+    /// 平台依赖写（G3-b）：让 `blocked` 依赖 `blocker`（FS 语义）。
+    /// 能力（《架构设计-甘特计划面》§4）：GitHub = blocked_by REST（需 blocker 的
+    /// **数据库 id**，两步）；Gitea = blocks 端点（body 传被阻塞方，单步）；
+    /// Gitee 无端点（swagger 实证）→ 明确拒绝；本地走容器泳道（G3-a）不经此。
+    /// 默认实现 = 明确拒绝（诚实：不假成功）。
+    fn add_issue_dependency(&self, _repo: &RepoRef, _blocked: &str, _blocker: &str) -> Result<()> {
+        Err(anyhow!("该来源不支持依赖编辑"))
+    }
+    fn remove_issue_dependency(&self, _repo: &RepoRef, _blocked: &str, _blocker: &str) -> Result<()> {
+        Err(anyhow!("该来源不支持依赖编辑"))
+    }
 }
 
 /// JSON 编号字段 → 文本口径：字符串直取（Gitee v5 issue "IKCTH7"），
