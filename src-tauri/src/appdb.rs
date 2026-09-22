@@ -29,6 +29,11 @@ const APP_MIGRATION_013: &str = include_str!("migrations/app_013_project_item_de
 const APP_MIGRATION_014: &str = include_str!("migrations/app_014_project_item_parents.sql");
 const APP_MIGRATION_015: &str = include_str!("migrations/app_015_resources.sql");
 
+/// 当前 app.db schema 版本（设备包导出带它；导入端据此判断是否需升级）。
+pub fn current_schema_version() -> i64 {
+    CURRENT_APP_SCHEMA_VERSION
+}
+
 pub fn app_data_dir() -> Option<PathBuf> {
     #[cfg(target_os = "macos")]
     {

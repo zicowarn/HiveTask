@@ -273,6 +273,34 @@ pub fn project_touch_in(conn: &Connection, id: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// 项目**内容水位**：导入三选一按 `updated_at` 比较「本机 vs 包」谁更新
+/// （《架构设计-导出与导入》§导入），因此**包会带走的本地内容**发生变更时都要过这里。
+/// 与 `project_touch_in` 区分：那个记的是「最近打开」，不参与比较。
+/// 特意不接的三处：平台镜像行同步（deps/parents_sync_platform_in，包不含镜像）、
+/// 平台「关闭→Done」钩子（对端同样从平台得到）、仓库绑定（不进包）。
+pub fn project_mark_changed_in(conn: &Connection, project_id: &str) {
+    // 水位写失败不该连累用户正在做的编辑：内容已改，水位只是导入建议的依据。
+    let _ = conn.execute("UPDATE projects SET updated_at = ?2 WHERE id = ?1", rusqlite::params![project_id, now()]);
+}
+
+/// 条目级函数没有 project_id 参数时的水位入口（条目须先存在）。
+fn mark_item_changed_in(conn: &Connection, item_id: &str) {
+    if let Ok(pid) = conn.query_row("SELECT project_id FROM project_items WHERE id = ?1", (item_id,), |r| {
+        r.get::<_, String>(0)
+    }) {
+        project_mark_changed_in(conn, &pid);
+    }
+}
+
+/// 字段级函数的水位入口。
+fn mark_field_changed_in(conn: &Connection, field_id: &str) {
+    if let Ok(pid) = conn.query_row("SELECT project_id FROM project_fields WHERE id = ?1", (field_id,), |r| {
+        r.get::<_, String>(0)
+    }) {
+        project_mark_changed_in(conn, &pid);
+    }
+}
+
 // ---- 字段 ----
 
 pub fn fields_in(conn: &Connection, project_id: &str) -> Result<Vec<ProjectField>, String> {
@@ -370,6 +398,7 @@ pub fn field_create_in(
         rusqlite::params![id, project_id, kind, name, json, position],
     )
     .map_err(|e| e.to_string())?;
+    project_mark_changed_in(conn, project_id);
     field_get_in(conn, &id)?.ok_or_else(|| "字段创建失败".to_string())
 }
 
@@ -412,6 +441,7 @@ pub fn field_set_options_in(conn: &Connection, field_id: &str, options: &[FieldO
     if n == 0 {
         return Err("字段不存在".to_string());
     }
+    mark_field_changed_in(conn, field_id);
     Ok(())
 }
 
@@ -621,6 +651,7 @@ pub fn item_add_in(
         }
     }
     project_touch_in(conn, project_id)?;
+    project_mark_changed_in(conn, project_id);
     item_get_in(conn, &id)
 }
 
@@ -636,6 +667,7 @@ fn next_rank_in(conn: &Connection, project_id: &str) -> Result<String, String> {
 }
 
 pub fn item_remove_in(conn: &Connection, item_id: &str) -> Result<(), String> {
+    mark_item_changed_in(conn, item_id); // 须在删行前查归属项目
     conn.execute("DELETE FROM project_field_values WHERE item_id = ?1", (item_id,))
         .map_err(|e| e.to_string())?;
     // 依赖与父子边双向级联（甘特计划面 §3：条目删除，两端都清）
@@ -736,19 +768,24 @@ pub fn dep_add_in(conn: &Connection, project_id: &str, item_id: &str, depends_on
         (item_id, depends_on),
     )
     .map_err(|e| e.to_string())?;
+    project_mark_changed_in(conn, project_id);
     Ok(())
 }
 
 /// 删除依赖边；只删容器真源（origin IS NULL）——平台镜像行的删除属 G3-b
 /// 写穿透，此口子不得误删镜像（镜像由 G1 刷新整组重写管理）。
 pub fn dep_remove_in(conn: &Connection, project_id: &str, item_id: &str, depends_on: &str) -> Result<(), String> {
-    conn.execute(
-        "DELETE FROM project_item_deps
-         WHERE item_id = ?1 AND depends_on = ?2 AND origin IS NULL
-           AND item_id IN (SELECT id FROM project_items WHERE project_id = ?3)",
-        (item_id, depends_on, project_id),
-    )
-    .map_err(|e| e.to_string())?;
+    let n = conn
+        .execute(
+            "DELETE FROM project_item_deps
+             WHERE item_id = ?1 AND depends_on = ?2 AND origin IS NULL
+               AND item_id IN (SELECT id FROM project_items WHERE project_id = ?3)",
+            (item_id, depends_on, project_id),
+        )
+        .map_err(|e| e.to_string())?;
+    if n > 0 {
+        project_mark_changed_in(conn, project_id);
+    }
     Ok(())
 }
 
@@ -766,6 +803,7 @@ pub fn item_update_draft_in(conn: &Connection, item_id: &str, title: &str, body:
     if n == 0 {
         return Err("草稿不存在".to_string());
     }
+    mark_item_changed_in(conn, item_id);
     item_get_in(conn, item_id)
 }
 
@@ -817,6 +855,7 @@ pub fn item_move_in(
         }
         set_field_value_in(conn, item_id, &field.id, Some(opt_id))?;
     }
+    project_mark_changed_in(conn, &project_id);
     item_get_in(conn, item_id)
 }
 
@@ -867,6 +906,7 @@ pub fn set_field_value_in(conn: &Connection, item_id: &str, field_id: &str, valu
             .execute("DELETE FROM project_field_values WHERE item_id = ?1 AND field_id = ?2", rusqlite::params![item_id, field_id])
             .map_err(|e| e.to_string())?,
     };
+    mark_item_changed_in(conn, item_id);
     Ok(())
 }
 
@@ -1228,18 +1268,23 @@ pub fn parent_set_in(conn: &Connection, project_id: &str, item_id: &str, parent_
         (item_id, parent_id),
     )
     .map_err(|e| e.to_string())?;
+    project_mark_changed_in(conn, project_id);
     Ok(())
 }
 
 /// 清除上级；只动容器真源行（平台镜像由同步管理）。
 pub fn parent_clear_in(conn: &Connection, project_id: &str, item_id: &str) -> Result<(), String> {
-    conn.execute(
-        "DELETE FROM project_item_parents
-         WHERE item_id = ?1 AND origin IS NULL
-           AND item_id IN (SELECT id FROM project_items WHERE project_id = ?2)",
-        (item_id, project_id),
-    )
-    .map_err(|e| e.to_string())?;
+    let n = conn
+        .execute(
+            "DELETE FROM project_item_parents
+             WHERE item_id = ?1 AND origin IS NULL
+               AND item_id IN (SELECT id FROM project_items WHERE project_id = ?2)",
+            (item_id, project_id),
+        )
+        .map_err(|e| e.to_string())?;
+    if n > 0 {
+        project_mark_changed_in(conn, project_id);
+    }
     Ok(())
 }
 

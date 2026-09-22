@@ -12,11 +12,14 @@ import { useTheme, type ThemeChoice } from "../../theme";
 import { useSettingsStore } from "../../stores/settings";
 import SourceConnectionsDialog from "../../components/SourceConnectionsDialog.vue";
 import GitHubAuthDialog from "../../components/GitHubAuthDialog.vue";
+import ImportPackDialog from "../../components/ImportPackDialog.vue";
 import DropdownMenu, { type DropdownSection } from "../../components/DropdownMenu.vue";
-import { api, isTauri, type CalendarFeed, type ExtApps, type Resource } from "../../api";
+import { api, isTauri, type BackupStatus, type CalendarFeed, type ExtApps, type Resource } from "../../api";
 import { useKnowledgeStore } from "../../stores/knowledge";
 import { useProjectsStore } from "../../stores/projects";
 import EditorIcon from "../../components/EditorIcon.vue";
+import { pushToast } from "../../toast";
+import { reportError } from "../../gh-errors";
 
 const { t, localeChoice, setLocale } = useI18n();
 const { theme, setTheme } = useTheme();
@@ -321,6 +324,63 @@ async function browseRowApp(index: number): Promise<void> {
   if (picked) await pickRowApp(index, picked);
 }
 
+// ---- 数据：每日备份 + 设备包（《架构设计-导出与导入》v1 最小集）----
+// 主库 app.db 没有 git 真源（删了不可重建），备份与设备包是它唯一的保险；
+// 自动备份在应用启动时由 Rust 侧完成，这里只展示状态并提供手动入口。
+const backupStatus = ref<BackupStatus | null>(null);
+const backupWorking = ref(false);
+const transferError = ref<string | null>(null);
+const importOpen = ref(false);
+
+const backupState = computed(() => {
+  const s = backupStatus.value;
+  if (!s) return t("transfer.backupUnknown");
+  if (!s.latest) return t("transfer.backupNone");
+  return t("transfer.backupLatest", { file: s.latest, count: s.count });
+});
+
+async function loadBackupStatus(): Promise<void> {
+  if (!isTauri()) return;
+  try {
+    backupStatus.value = await api.backupStatus();
+  } catch (e) {
+    transferError.value = String(e);
+  }
+}
+
+async function backupNow(): Promise<void> {
+  if (backupWorking.value) return;
+  backupWorking.value = true;
+  transferError.value = null;
+  try {
+    await api.backupNow();
+    await loadBackupStatus();
+    pushToast({ kind: "success", message: t("transfer.backupDone") });
+  } catch (e) {
+    transferError.value = String(e);
+    reportError(String(e));
+  } finally {
+    backupWorking.value = false;
+  }
+}
+
+async function exportPack(): Promise<void> {
+  transferError.value = null;
+  try {
+    const json = await api.exportPack();
+    const saved = await api.saveTextFile(`hivetask-${new Date().toISOString().slice(0, 10)}.export`, json);
+    if (saved) pushToast({ kind: "success", message: t("transfer.exported", { path: saved }) });
+  } catch (e) {
+    transferError.value = String(e);
+    reportError(String(e));
+  }
+}
+
+/** 导入完成后刷新项目列表（看板数据随面板重载拿新库内容）。 */
+function onImported(): void {
+  void projects.loadProjects();
+}
+
 // ---- GitHub 账户（Device Flow 登录；凭据归 gh 托管）----
 const ghLogin = ref<string | null>(null);
 const ghAuthOpen = ref(false);
@@ -346,8 +406,8 @@ function onAuthSuccess(login: string) {
 onMounted(() => {
   void refreshGhLogin();
   void loadFeeds();
+  void loadBackupStatus();
 });
-
 const themeChoices: { value: ThemeChoice; labelKey: "settings.themeDark" | "settings.themeLight" | "settings.themeSystem" }[] = [
   { value: "dark", labelKey: "settings.themeDark" },
   { value: "light", labelKey: "settings.themeLight" },
@@ -624,6 +684,26 @@ function onThemeChange(value: string | string[]) {
       <p v-if="!byExtRows.length" class="byext-empty">{{ t("settings.byExtEmpty") }}</p>
     </div>
 
+    <!-- 数据：每日备份 + 设备包（《架构设计-导出与导入》v1 最小集）——
+         主库没有 git 真源，这里是它唯一的保险出口。
+         顶层区块（没有上一级行可挂）→ 用 top-level 去掉子区块的缩进，
+         左缘与「终端 Shell」「显示状态栏」这些 setting-row 对齐 -->
+    <div class="setting-byext top-level">
+      <div class="byext-head">
+        <span class="setting-name">{{ t("transfer.dataTitle") }}</span>
+        <button class="text-btn" :disabled="backupWorking" @click="backupNow">
+          {{ backupWorking ? t("common.syncing") : t("transfer.backupNow") }}
+        </button>
+      </div>
+      <p class="byext-desc">{{ t("transfer.backupHint") }}</p>
+      <p class="byext-desc">{{ backupState }}</p>
+      <div class="data-actions">
+        <button class="text-btn" @click="exportPack">{{ t("transfer.export") }}</button>
+        <button class="text-btn" @click="importOpen = true">{{ t("transfer.import") }}</button>
+      </div>
+      <p v-if="transferError" class="byext-error">{{ transferError }}</p>
+    </div>
+
     <div class="setting-row">
       <div class="setting-text">
         <span class="setting-name">{{ t("settings.statusbar") }}</span>
@@ -640,6 +720,8 @@ function onThemeChange(value: string | string[]) {
       :open="connectionsOpen"
       @close="connectionsOpen = false"
     />
+
+    <ImportPackDialog :open="importOpen" @close="importOpen = false" @applied="onImported" />
 
     <GitHubAuthDialog :open="ghAuthOpen" @close="((ghAuthOpen = false), refreshGhLogin())" @success="onAuthSuccess" />
   </div>
@@ -709,6 +791,11 @@ function onThemeChange(value: string | string[]) {
 .setting-byext {
   padding: 10px 0 14px 16px;
   border-bottom: 1px solid var(--border);
+}
+/* 顶层区块（如「数据备份」）：缩进去掉——它不是任何一行的子项，
+   内容左缘要与 setting-row 的一致（用户实测指出的对齐问题） */
+.setting-byext.top-level {
+  padding-left: 0;
 }
 .byext-head {
   display: flex;
@@ -834,6 +921,14 @@ function onThemeChange(value: string | string[]) {
 }
 .byext-feedname-input {
   width: 150px;
+}
+/* 数据区块的动作行（刻意不复用 .byext-row：那是可编辑规则行的类，
+   设置面板的测试按该类取"最后一条规则"） */
+.data-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 0;
 }
 .text-btn.danger {
   color: var(--danger);

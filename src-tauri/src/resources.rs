@@ -42,6 +42,17 @@ pub struct ItemResource {
     pub origin: Option<String>,
 }
 
+/// ISO 时间戳（UTC，秒级）——与各表 created_at 的既有格式一致。
+pub fn now_iso() -> String {
+    let secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0) as i64;
+    let (y, m, d) = crate::source_time::civil_from_days(secs / 86_400);
+    let rem = secs % 86_400;
+    format!("{y:04}-{m:02}-{d:02}T{:02}:{:02}:{:02}Z", rem / 3600, (rem % 3600) / 60, rem % 60)
+}
+
 // ---- 资源目录 ----
 
 pub fn resources_list_in(conn: &Connection) -> Result<Vec<Resource>, String> {
@@ -187,6 +198,8 @@ pub fn item_resource_set_in(
         (item_id, resource_id, alloc),
     )
     .map_err(|e| e.to_string())?;
+    // 分配随设备包走：动了就抬项目内容水位（导入三选一的比较依据）
+    crate::projects::project_mark_changed_in(conn, project_id);
     Ok(())
 }
 
@@ -197,13 +210,17 @@ pub fn item_resource_remove_in(
     item_id: &str,
     resource_id: &str,
 ) -> Result<(), String> {
-    conn.execute(
-        "DELETE FROM item_resources
-         WHERE item_id = ?1 AND resource_id = ?2 AND origin IS NULL
-           AND item_id IN (SELECT id FROM project_items WHERE project_id = ?3)",
-        (item_id, resource_id, project_id),
-    )
-    .map_err(|e| e.to_string())?;
+    let n = conn
+        .execute(
+            "DELETE FROM item_resources
+             WHERE item_id = ?1 AND resource_id = ?2 AND origin IS NULL
+               AND item_id IN (SELECT id FROM project_items WHERE project_id = ?3)",
+            (item_id, resource_id, project_id),
+        )
+        .map_err(|e| e.to_string())?;
+    if n > 0 {
+        crate::projects::project_mark_changed_in(conn, project_id);
+    }
     Ok(())
 }
 

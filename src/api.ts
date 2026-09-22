@@ -253,6 +253,28 @@ export interface ItemDepInput {
   dependsOn: string;
 }
 
+/** 每日滚动备份状态（《架构设计-导出与导入》推论：主库没有 git 真源）。 */
+export interface BackupStatus {
+  dir: string;
+  count: number;
+  /** 最近一份备份文件名（还没备份过 = null）。 */
+  latest: string | null;
+}
+
+/** 导入三选一：新增 / 覆盖（包较新）/ 保留（本机较新）。Rust 侧按小写序列化。 */
+export type ImportAction = "add" | "overwrite" | "keep";
+
+/** 导入预览的一行（每项目一行；suggestion = 系统预选项）。 */
+export interface ImportPreview {
+  id: string;
+  name: string;
+  localUpdatedAt: string | null;
+  packUpdatedAt: string;
+  suggestion: ImportAction;
+  items: number;
+  fields: number;
+}
+
 export interface BoundRepo {
   repoId: string;
   label: string;
@@ -674,6 +696,19 @@ export const api = {
   /** 另存文本（视图数据 CSV 导出）：取消返回 null。 */
   saveTextFile: (defaultName: string, contents: string) =>
     invoke<string | null>("save_text_file", { defaultName, contents }),
+  /** 读文本文件（设备包导入）：路径来自系统文件选择器。 */
+  readTextFile: (path: string) => invoke<string>("read_text_file", { path }),
+  /** 每日备份状态（设置面板展示）。 */
+  backupStatus: () => invoke<BackupStatus>("backup_status"),
+  /** 立即打一份备份（同日已有则返回既有路径）。 */
+  backupNow: () => invoke<string>("backup_now"),
+  /** 导出设备包（projectIds 省略 = 全部项目）：返回 JSON 文本，交给 saveTextFile 落盘。 */
+  exportPack: (projectIds?: string[]) => invoke<string>("export_pack", { projectIds: projectIds ?? null }),
+  /** 导入预览：按项目 uuid 给系统建议（新增 / 覆盖 / 保留）。 */
+  importPreview: (packJson: string) => invoke<ImportPreview[]>("import_preview", { packJson }),
+  /** 应用导入（覆盖前后端自动打快照）；返回 [新增, 覆盖, 保留]。 */
+  importApply: (packJson: string, decisions: Record<string, ImportAction>) =>
+    invoke<[number, number, number]>("import_apply", { packJson, decisions }),
   projectFieldCreate: (projectId: string, name: string, kind: string, optionNames: string[]) =>
     invoke<ProjectField>("project_field_create", { projectId, name, kind, optionNames }),
   projectItemAdd: (args: {

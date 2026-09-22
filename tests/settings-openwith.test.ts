@@ -41,6 +41,8 @@ vi.mock("../src/api", () => ({
     kbPickApp: async () => "/Applications/Custom.app",
     connectionList: async () => [],
     calendarFeedList: async () => [],
+    // 数据区块（每日备份 + 设备包）在 onMounted 里读它；缺了会走错误分支
+    backupStatus: async () => ({ dir: "/tmp/backups", count: 2, latest: "app-20260922.db" }),
     calendarFeedAdd: async () => {},
     calendarFeedSync: async () => {},
     calendarFeedSetEnabled: async () => {},

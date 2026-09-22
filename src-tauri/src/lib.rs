@@ -17,6 +17,8 @@ mod local;
 mod models;
 mod projects;
 mod resources;
+mod source_time;
+mod transfer;
 mod pty;
 mod source;
 mod storage;
@@ -1328,6 +1330,16 @@ fn set_pull_state(repo_path: String, number: i64, closed: bool) -> Result<Pull, 
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // 启动时每日备份 app.db（主库删了不可重建；《导出与导入》推论）——best-effort，
+    // 失败只记日志，不挡启动。
+    if let Some(dir) = appdb::app_data_dir() {
+        match transfer::ensure_daily_backup(&dir) {
+            Ok(Some(p)) => log::info!("每日备份已生成: {}", p.display()),
+            Ok(None) => {}
+            Err(e) => log::warn!("每日备份失败: {e}"),
+        }
+    }
+
     tauri::Builder::default()
         .plugin(
             tauri_plugin_log::Builder::new()
@@ -1443,6 +1455,12 @@ pub fn run() {
             projects::project_parent_set,
             projects::project_parent_clear,
             projects::project_parent_sync_platform,
+            transfer::backup_now,
+            transfer::backup_status,
+            transfer::export_pack,
+            transfer::import_preview,
+            transfer::import_apply,
+            transfer::read_text_file,
             resources::resource_list,
             resources::resource_upsert,
             resources::resource_remove,
