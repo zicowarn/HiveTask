@@ -333,7 +333,7 @@ watch(
 .ms-none {
   text-align: center;
   color: var(--text-dim);
-  font-size: 12px;
+  font-size: var(--font-md);
   padding: 20px 0;
 }
 </style>

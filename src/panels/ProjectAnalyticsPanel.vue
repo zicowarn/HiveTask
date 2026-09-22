@@ -411,7 +411,8 @@ const xLabels = computed(() => {
   vector-effect: non-scaling-stroke;
 }
 .an-bar-total {
-  font-size: 10px;
+  /* 燃起图的数据标签：角标档（--font-xs = 10px，与原值等值） */
+  font-size: var(--font-xs);
   fill: var(--text);
 }
 .an-total {
