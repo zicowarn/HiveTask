@@ -1044,6 +1044,22 @@ export const useProjectsStore = defineStore("projects", () => {
     await loadDeps();
   }
 
+  /** 本会话已采集过快照的项目（同日后端本就覆盖；这里只为省 IPC）。 */
+  const snapshotTaken = new Set<string>();
+
+  /** 采集当天计数快照（项目分析用）。默认每项目每会话一次；分析面用 force 拿"到此刻"。 */
+  async function takeSnapshot(force = false): Promise<void> {
+    const id = selectedId.value;
+    if (!id || !isTauri()) return;
+    if (!force && snapshotTaken.has(id)) return;
+    try {
+      await api.projectSnapshotTake(id);
+      snapshotTaken.add(id);
+    } catch {
+      // 分析面的数据：采集失败不打扰用户（趋势少一天，不影响主流程）
+    }
+  }
+
   /** 回填「未关联」条目（按 origin 快照挂回本机登记表）；返回挂接条数。
    *  设备包导入未命中时留下的坑：登记/打开来源仓库后调它即可挂回（幂等）。 */
   async function relinkOrigin(): Promise<number> {
@@ -1079,6 +1095,7 @@ export const useProjectsStore = defineStore("projects", () => {
       void loadDeps();
       void loadParents();
       void loadResources();
+      void takeSnapshot(); // 每日快照：只要打开过项目就会积累（"从开始追踪那天起"）
     } catch (e) {
       error.value = translateError(String(e));
     }
@@ -1299,6 +1316,7 @@ export const useProjectsStore = defineStore("projects", () => {
     syncPlatformDeps,
     removeItemAndDeps,
     relinkOrigin,
+    takeSnapshot,
     setFieldSort,
     addFieldFilter,
     toggleField,

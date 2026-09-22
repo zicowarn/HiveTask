@@ -1269,6 +1269,20 @@ pub fn project_field_value_set(item_id: String, field_id: String, value: Option<
     set_field_value_in(&conn, &item_id, &field_id, value.as_deref())
 }
 
+/// 采集/刷新当天快照（同日覆盖）；项目数据装载后调用（幂等）。
+#[tauri::command]
+pub fn project_snapshot_take(project_id: String) -> Result<ProjectSnapshot, String> {
+    let conn = crate::appdb::open().map_err(|e| e.to_string())?;
+    snapshot_take_in(&conn, &project_id)
+}
+
+/// 最近 `days` 天的快照（升序）。
+#[tauri::command]
+pub fn project_snapshot_list(project_id: String, days: i64) -> Result<Vec<ProjectSnapshot>, String> {
+    let conn = crate::appdb::open().map_err(|e| e.to_string())?;
+    snapshot_list_in(&conn, &project_id, days)
+}
+
 /// 回填「未关联」条目（按 origin_url 挂回登记表）；返回挂接条数。
 /// 用户把设备包引用的仓库登记/打开之后调用（幂等，找不到匹配就原样留着）。
 #[tauri::command]
@@ -1381,6 +1395,113 @@ pub fn parent_clear_in(conn: &Connection, project_id: &str, item_id: &str) -> Re
         project_mark_changed_in(conn, project_id);
     }
     Ok(())
+}
+
+// ---- 项目分析：每日计数快照（《架构设计-Projects本地看板》Q9）----
+
+/// 一天的计数快照（渲染所需最小面）。
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectSnapshot {
+    /// YYYY-MM-DD（本地日）。
+    pub day: String,
+    pub total: i64,
+    /// 状态选项 id → 计数（渲染键）。
+    pub status: std::collections::BTreeMap<String, i64>,
+    /// 状态选项 id → 当时的名字（选项后来被改名/删除时历史仍可读）。
+    pub labels: std::collections::BTreeMap<String, String>,
+}
+
+/// `#`（无状态值）与草稿同列在图表里的兜底标签键。
+const SNAPSHOT_NO_STATUS: &str = "__none__";
+
+/// 采集/刷新**当天**快照（幂等：同日覆盖——一天内多开几次记的是当天最后状态）。
+pub fn snapshot_take_in(conn: &Connection, project_id: &str) -> Result<ProjectSnapshot, String> {
+    let mut status: std::collections::BTreeMap<String, i64> = Default::default();
+    let mut labels: std::collections::BTreeMap<String, String> = Default::default();
+    let status_field = status_field_in(conn, project_id)?;
+    if let Some(field) = &status_field {
+        for o in &field.options {
+            labels.insert(o.id.clone(), o.name.clone());
+        }
+    }
+    // 直接按状态字段值分组计数（不 enrich 条目——分析只要计数，省掉跨库读缓存）
+    let mut stmt = conn
+        .prepare(
+            "SELECT COALESCE(v.value, ?2), COUNT(*) FROM project_items i
+             LEFT JOIN project_field_values v ON v.item_id = i.id AND v.field_id = ?3
+             WHERE i.project_id = ?1 GROUP BY 1",
+        )
+        .map_err(|e| e.to_string())?;
+    let rows: Vec<(String, i64)> = stmt
+        .query_map(
+            rusqlite::params![project_id, SNAPSHOT_NO_STATUS, status_field.as_ref().map(|f| f.id.clone())],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .map_err(|e| e.to_string())?
+        .filter_map(|x| x.ok())
+        .collect();
+    let mut total = 0i64;
+    for (key, n) in rows {
+        total += n;
+        status.insert(key, n);
+    }
+    let today = crate::resources::now_iso();
+    let day = today.get(..10).unwrap_or(&today).to_string();
+    let snap = ProjectSnapshot { day: day.clone(), total, status, labels };
+    let counts = serde_json::to_string(&serde_json::json!({
+        "total": snap.total, "status": snap.status, "labels": snap.labels
+    }))
+    .map_err(|e| e.to_string())?;
+    conn.execute(
+        "INSERT INTO project_snapshots (project_id, day, counts, taken_at) VALUES (?1, ?2, ?3, ?4)
+         ON CONFLICT(project_id, day) DO UPDATE SET counts = excluded.counts, taken_at = excluded.taken_at",
+        rusqlite::params![project_id, day, counts, today],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(snap)
+}
+
+/// 读取最近 `days` 天快照（升序，供燃起图直接铺）。
+pub fn snapshot_list_in(conn: &Connection, project_id: &str, days: i64) -> Result<Vec<ProjectSnapshot>, String> {
+    let days = days.clamp(1, 3650);
+    let mut stmt = conn
+        .prepare(
+            "SELECT day, counts FROM project_snapshots WHERE project_id = ?1
+             ORDER BY day DESC LIMIT ?2",
+        )
+        .map_err(|e| e.to_string())?;
+    let rows: Vec<(String, String)> = stmt
+        .query_map((project_id, days), |r| Ok((r.get(0)?, r.get(1)?)))
+        .map_err(|e| e.to_string())?
+        .filter_map(|x| x.ok())
+        .collect();
+    let mut out: Vec<ProjectSnapshot> = Vec::with_capacity(rows.len());
+    for (day, counts) in rows {
+        let v: serde_json::Value = serde_json::from_str(&counts).unwrap_or(serde_json::Value::Null);
+        let map_of = |key: &str| -> std::collections::BTreeMap<String, i64> {
+            v.get(key)
+                .and_then(|x| x.as_object())
+                .map(|o| o.iter().map(|(k, val)| (k.clone(), val.as_i64().unwrap_or(0))).collect())
+                .unwrap_or_default()
+        };
+        out.push(ProjectSnapshot {
+            day,
+            total: v.get("total").and_then(|x| x.as_i64()).unwrap_or(0),
+            status: map_of("status"),
+            labels: v
+                .get("labels")
+                .and_then(|x| x.as_object())
+                .map(|o| {
+                    o.iter()
+                        .map(|(k, val)| (k.clone(), val.as_str().unwrap_or_default().to_string()))
+                        .collect()
+                })
+                .unwrap_or_default(),
+        });
+    }
+    out.reverse(); // 升序（图表左→右 = 早→近）
+    Ok(out)
 }
 
 /// 平台镜像整组同步（平台 sub-issues → 本地镜像行；真源行不触碰）。
@@ -1531,6 +1652,65 @@ mod tests {
             rusqlite::params![id, format!("/tmp/{id}")],
         )
         .unwrap();
+    }
+
+    /// 每日快照：按状态字段分组计数、同日覆盖（一天内多次采集记最后状态）、
+    /// 草稿/无状态值归并到 `__none__`、读取按天升序。
+    #[test]
+    fn snapshot_counts_by_status_and_is_idempotent_per_day() {
+        let conn = mem_db();
+        let p = project_create_in(&conn, "看板", None, None).unwrap();
+        let status = status_field_in(&conn, &p.id).unwrap().unwrap();
+        let (opt0, opt1) = (status.options[0].id.clone(), status.options[1].id.clone());
+
+        let a = item_add_in(&conn, &p.id, "draft", None, None, Some("卡一"), None).unwrap();
+        let b = item_add_in(&conn, &p.id, "draft", None, None, Some("卡二"), None).unwrap();
+        item_add_in(&conn, &p.id, "draft", None, None, Some("卡三"), None).unwrap();
+        // a 保持首列（item_add_in 落的），b 移到第二列
+        set_field_value_in(&conn, &b.id, &status.id, Some(&opt1)).unwrap();
+
+        let snap = snapshot_take_in(&conn, &p.id).unwrap();
+        assert_eq!(snap.total, 3);
+        assert_eq!(snap.status.get(&opt0).copied().unwrap_or(0), 2);
+        assert_eq!(snap.status.get(&opt1).copied().unwrap_or(0), 1);
+        assert!(snap.labels.contains_key(&opt0), "名字快照留下（选项改名后历史仍可读）");
+
+        // 同日再采：记的是当天最后状态（覆盖而非追加）
+        set_field_value_in(&conn, &a.id, &status.id, Some(&opt1)).unwrap();
+        let again = snapshot_take_in(&conn, &p.id).unwrap();
+        assert_eq!(again.status.get(&opt1).copied().unwrap_or(0), 2);
+        let rows = snapshot_list_in(&conn, &p.id, 30).unwrap();
+        assert_eq!(rows.len(), 1, "同日只留一行");
+        assert_eq!(rows[0].status.get(&opt1).copied().unwrap_or(0), 2);
+
+        // 草稿/无状态值 → __none__（图表里有自己的一档，不丢总量）
+        assert_eq!(SNAPSHOT_NO_STATUS, "__none__");
+        assert_eq!(
+            snap.status.values().sum::<i64>(),
+            snap.total,
+            "各档之和 = 总数（不重不漏）"
+        );
+    }
+
+    /// 读取按天升序（图表左→右 = 早→近），days 参数截断最近 N 天。
+    #[test]
+    fn snapshot_list_is_ascending_and_limited() {
+        let conn = mem_db();
+        let p = project_create_in(&conn, "看板", None, None).unwrap();
+        for (day, n) in [("2026-09-01", 1), ("2026-09-03", 2), ("2026-09-02", 3)] {
+            conn.execute(
+                "INSERT INTO project_snapshots (project_id, day, counts, taken_at) VALUES (?1, ?2, ?3, ?2)",
+                rusqlite::params![p.id, day, format!(r#"{{"total":{n},"status":{{}},"labels":{{}}}}"#)],
+            )
+            .unwrap();
+        }
+        let rows = snapshot_list_in(&conn, &p.id, 30).unwrap();
+        assert_eq!(rows.iter().map(|s| s.day.as_str()).collect::<Vec<_>>(),
+                   vec!["2026-09-01", "2026-09-02", "2026-09-03"]);
+        assert_eq!(rows.iter().map(|s| s.total).collect::<Vec<_>>(), vec![1, 3, 2]);
+        let last2 = snapshot_list_in(&conn, &p.id, 2).unwrap();
+        assert_eq!(last2.iter().map(|s| s.day.as_str()).collect::<Vec<_>>(),
+                   vec!["2026-09-02", "2026-09-03"], "只取最近 2 天，仍升序");
     }
 
     /// 回填链路：导入未命中的条目（repo_id NULL + origin 快照）→ 登记仓库后挂回。

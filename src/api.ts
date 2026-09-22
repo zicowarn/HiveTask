@@ -264,6 +264,17 @@ export interface BackupStatus {
   latest: string | null;
 }
 
+/** 每日计数快照（项目分析：燃起图的唯一数据来源；见 app_017）。 */
+export interface ProjectSnapshot {
+  /** YYYY-MM-DD（本地日）。 */
+  day: string;
+  total: number;
+  /** 状态选项 id → 计数。 */
+  status: Record<string, number>;
+  /** 状态选项 id → 当时的名字（选项后来改名/删除，历史仍可读）。 */
+  labels: Record<string, string>;
+}
+
 /** 导入三选一：新增 / 覆盖（包较新）/ 保留（本机较新）。Rust 侧按小写序列化。 */
 export type ImportAction = "add" | "overwrite" | "keep";
 
@@ -747,6 +758,11 @@ export const api = {
       nextId: nextId ?? null,
     }),
   projectItemRemove: (itemId: string) => invoke<void>("project_item_remove", { itemId }),
+  /** 采集/刷新当天快照（同日覆盖，幂等）。 */
+  projectSnapshotTake: (projectId: string) => invoke<ProjectSnapshot>("project_snapshot_take", { projectId }),
+  /** 最近 N 天的快照（升序，直接铺图）。 */
+  projectSnapshotList: (projectId: string, days: number) =>
+    invoke<ProjectSnapshot[]>("project_snapshot_list", { projectId, days }),
   /** 回填未关联条目（按 origin 快照挂回登记表）；返回挂接条数。 */
   projectRelinkOrigin: (projectId: string) => invoke<number>("project_relink_origin", { projectId }),
   projectItemUpdateDraft: (itemId: string, title: string, body?: string) =>

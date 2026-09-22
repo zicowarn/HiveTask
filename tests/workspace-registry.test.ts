@@ -38,6 +38,14 @@ describe("工作区注册表", () => {
     expect(editorCategories).toContain("editorCat.general");
   });
 
+  it("项目分析是「项目」分类下的独立 Editor（元数据与分类）", () => {
+    const analytics = panelTypes.find((p) => p.type === "project.analytics");
+    expect(analytics, "面板类型应登记").toBeTruthy();
+    expect(analytics!.category).toBe("editorCat.projects");
+    expect(analytics!.titleKey).toBe("panelTitle.project.analytics");
+    expect(analytics!.icon).toBe("o.graph");
+  });
+
   it("资源目录是「项目」分类下的独立 Editor（元数据与分类）", async () => {
     const resources = panelTypes.find((p) => p.type === "project.resources");
     expect(resources, "面板类型应登记").toBeTruthy();
@@ -45,6 +53,7 @@ describe("工作区注册表", () => {
     expect(resources!.titleKey).toBe("panelTitle.project.resources");
     expect(resources!.icon).toBe("o.people");
     // 组件表是否真的注册，由 tests/resource-catalog.test.ts 在 jsdom 下挂载验证
+    // （项目分析同理，见 tests/analytics-panel.test.ts）
     // （本文件是纯数据测试：导入 registry 会把整个组件图拉进来，需要 window）
   });
 });

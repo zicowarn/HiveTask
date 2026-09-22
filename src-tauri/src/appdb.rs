@@ -11,7 +11,7 @@ use serde::Serialize;
 use std::path::PathBuf;
 
 const APP_IDENTIFIER: &str = "dev.zicowarn.hivetask";
-const CURRENT_APP_SCHEMA_VERSION: i64 = 16;
+const CURRENT_APP_SCHEMA_VERSION: i64 = 17;
 
 const APP_MIGRATION_001: &str = include_str!("migrations/app_001_registry.sql");
 const APP_MIGRATION_002: &str = include_str!("migrations/app_002_projects.sql");
@@ -29,6 +29,7 @@ const APP_MIGRATION_013: &str = include_str!("migrations/app_013_project_item_de
 const APP_MIGRATION_014: &str = include_str!("migrations/app_014_project_item_parents.sql");
 const APP_MIGRATION_015: &str = include_str!("migrations/app_015_resources.sql");
 const APP_MIGRATION_016: &str = include_str!("migrations/app_016_project_item_origin.sql");
+const APP_MIGRATION_017: &str = include_str!("migrations/app_017_project_snapshots.sql");
 
 /// 当前 app.db schema 版本（设备包导出带它；导入端据此判断是否需升级）。
 pub fn current_schema_version() -> i64 {
@@ -134,6 +135,9 @@ pub(crate) fn app_migrate(conn: &Connection) -> anyhow::Result<()> {
     }
     if version < 16 {
         conn.execute_batch(APP_MIGRATION_016).context("app 迁移 016 失败")?;
+    }
+    if version < 17 {
+        conn.execute_batch(APP_MIGRATION_017).context("app 迁移 017 失败")?;
     }
     conn.pragma_update(None, "user_version", CURRENT_APP_SCHEMA_VERSION)?;
     Ok(())
