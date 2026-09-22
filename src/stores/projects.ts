@@ -958,6 +958,12 @@ export const useProjectsStore = defineStore("projects", () => {
     await loadResources();
   }
 
+  /** 删除资源（连同其分配与例外，Rust 侧级联）。 */
+  async function removeResource(resourceId: string) {
+    await api.resourceRemove(resourceId);
+    await loadResources();
+  }
+
   /** 平台负责人 → 资源目录镜像（幂等）。 */
   async function syncResourceAssignees(origin: string, logins: string[]) {
     if (!logins.length) return;
@@ -1274,6 +1280,7 @@ export const useProjectsStore = defineStore("projects", () => {
     setItemResource,
     removeItemResource,
     upsertResource,
+    removeResource,
     syncResourceAssignees,
     setItemParent,
     clearItemParent,

@@ -266,6 +266,10 @@ defineExpose({
         <button v-else class="te-add-res" @click="addingResource = true">
           ＋{{ t("gantt.addResource") }}
         </button>
+        <!-- 目录为空时给引导（资源在设置里维护；无平台负责人的项目目录会是空的） -->
+        <p v-if="!addingResource && resourceCatalog.length === 0" class="te-hint">
+          {{ t("gantt.resourceEmptyHint") }}
+        </p>
       </div>
 
       <!-- 上级任务 = 结构扩展泳道（§3）：本地库真源（我们排的计划），

@@ -13,15 +13,78 @@ import { useSettingsStore } from "../../stores/settings";
 import SourceConnectionsDialog from "../../components/SourceConnectionsDialog.vue";
 import GitHubAuthDialog from "../../components/GitHubAuthDialog.vue";
 import DropdownMenu, { type DropdownSection } from "../../components/DropdownMenu.vue";
-import { api, isTauri, type CalendarFeed, type ExtApps } from "../../api";
+import { api, isTauri, type CalendarFeed, type ExtApps, type Resource } from "../../api";
 import { useKnowledgeStore } from "../../stores/knowledge";
+import { useProjectsStore } from "../../stores/projects";
 import EditorIcon from "../../components/EditorIcon.vue";
 
 const { t, localeChoice, setLocale } = useI18n();
 const { theme, setTheme } = useTheme();
 const settings = useSettingsStore();
+const projects = useProjectsStore();
 
 const connectionsOpen = ref(false);
+
+// ---- 资源目录：内联子区块（《甘特计划面》§5-bis R2；形态照日历订阅）----
+/** 资源类别（照 jordium 预设；允许自定义，这里给三档常用）。 */
+const RESOURCE_TYPES = ["Human", "Device", "Others"];
+const resourceDraft = ref<{ name: string; type: string } | null>(null);
+const resourceArmedId = ref<string | null>(null);
+const resourceError = ref<string | null>(null);
+
+onMounted(() => void projects.loadResources());
+
+function addResourceDraft() {
+  resourceError.value = null;
+  resourceDraft.value = { name: "", type: "Human" };
+}
+
+async function commitResourceDraft() {
+  const d = resourceDraft.value;
+  if (!d) return;
+  const name = d.name.trim();
+  if (!name) {
+    resourceDraft.value = null;
+    return;
+  }
+  try {
+    await projects.upsertResource({
+      id: `local-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`,
+      name,
+      type: d.type,
+      origin: null,
+    } as Resource);
+    resourceDraft.value = null;
+  } catch (e) {
+    resourceError.value = String(e);
+  }
+}
+
+/** 行内改字段（名称/职务/日容量）：失焦或回车即保存。 */
+async function patchResource(r: Resource, patch: Partial<Resource>) {
+  try {
+    await projects.upsertResource({ ...r, ...patch });
+  } catch (e) {
+    resourceError.value = String(e);
+  }
+}
+
+async function removeResource(r: Resource) {
+  if (resourceArmedId.value !== r.id) {
+    resourceArmedId.value = r.id;
+    return;
+  }
+  resourceArmedId.value = null;
+  try {
+    await projects.removeResource(r.id);
+  } catch (e) {
+    resourceError.value = String(e);
+  }
+}
+
+function resourceOriginLabel(r: Resource): string {
+  return r.origin ? t("settings.resourceFromPlatform", { origin: r.origin }) : t("settings.resourceFromLocal");
+}
 
 // ---- 日历订阅：内联子区块（「按扩展名指定」同款形态，无对话框）----
 const feeds = ref<CalendarFeed[]>([]);
@@ -434,6 +497,73 @@ function onThemeChange(value: string | string[]) {
       <p v-if="feedError" class="byext-error">{{ feedError }}</p>
     </div>
 
+    <!-- 资源目录：内联子区块（形态照日历订阅；§5-bis R2） -->
+    <div class="setting-byext">
+      <div class="byext-head">
+        <span class="setting-name">{{ t("settings.resources") }}</span>
+        <button class="text-btn" @click="addResourceDraft">{{ t("settings.resourceAdd") }}</button>
+      </div>
+      <p class="byext-desc">{{ t("settings.resourceHint") }}</p>
+      <p v-if="projects.resourceCatalog.length === 0 && !resourceDraft" class="byext-desc">
+        {{ t("settings.resourceEmpty") }}
+      </p>
+      <div v-for="r in projects.resourceCatalog" :key="r.id" class="byext-row">
+        <input
+          class="setting-input byext-feedname"
+          :value="r.name"
+          spellcheck="false"
+          @keydown.enter="($event.target as HTMLInputElement).blur()"
+          @blur="patchResource(r, { name: ($event.target as HTMLInputElement).value.trim() || r.name })"
+        />
+        <DropdownMenu
+          class="byext-cell"
+          :options="RESOURCE_TYPES.map((x) => ({ value: x, label: x }))"
+          :model-value="r.type"
+          @update:model-value="patchResource(r, { type: $event as string })"
+        />
+        <input
+          class="setting-input byext-cell"
+          :value="r.title ?? ''"
+          :placeholder="t('settings.resourceTitlePh')"
+          spellcheck="false"
+          @keydown.enter="($event.target as HTMLInputElement).blur()"
+          @blur="patchResource(r, { title: ($event.target as HTMLInputElement).value.trim() || null })"
+        />
+        <input
+          class="setting-input byext-cell-num"
+          type="number"
+          min="0"
+          step="0.5"
+          :value="r.capacity ?? ''"
+          :placeholder="t('settings.resourceCapacityPh')"
+          @keydown.enter="($event.target as HTMLInputElement).blur()"
+          @blur="patchResource(r, { capacity: ($event.target as HTMLInputElement).value === '' ? null : Number(($event.target as HTMLInputElement).value) })"
+        />
+        <span class="byext-meta">{{ resourceOriginLabel(r) }}</span>
+        <button class="text-btn danger" :class="{ armed: resourceArmedId === r.id }" @click="removeResource(r)">
+          {{ resourceArmedId === r.id ? t("calendar.feedDeleteArm") : t("calendar.feedDelete") }}
+        </button>
+      </div>
+      <div v-if="resourceDraft" class="byext-row">
+        <input
+          v-model="resourceDraft.name"
+          class="setting-input byext-feedname"
+          :placeholder="t('settings.resourceNamePh')"
+          spellcheck="false"
+          @keydown.enter="commitResourceDraft"
+          @blur="commitResourceDraft"
+        />
+        <DropdownMenu
+          class="byext-cell"
+          :options="RESOURCE_TYPES.map((x) => ({ value: x, label: x }))"
+          :model-value="resourceDraft.type"
+          @update:model-value="resourceDraft!.type = $event as string"
+        />
+        <button class="byext-remove" :title="t('common.cancel')" @click="resourceDraft = null">✕</button>
+      </div>
+      <p v-if="resourceError" class="byext-error">{{ resourceError }}</p>
+    </div>
+
     <div class="setting-row">
       <div class="setting-text">
         <span class="setting-name">{{ t("settings.lunarLine") }}</span>
@@ -629,6 +759,19 @@ function onThemeChange(value: string | string[]) {
   color: var(--danger, #e5534b);
 }
 /* 日历订阅行小件 */
+/* 资源目录行：类别下拉与职务/日容量输入的统一列宽（行内编辑，失焦即存） */
+.byext-cell {
+  flex: 0 0 96px;
+  min-width: 0;
+}
+.byext-cell-num {
+  flex: 0 0 64px;
+  min-width: 0;
+}
+.byext-cell :deep(.dd-trigger) {
+  width: 100%;
+  justify-content: space-between;
+}
 .byext-row.off .byext-feedname,
 .byext-row.off .byext-meta {
   opacity: 0.55;
